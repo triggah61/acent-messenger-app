@@ -1,35 +1,43 @@
 class Profile {
   final String id;
-  final String phoneNumber;
-  final String? name;
-  final String? email;
-  final String? avatar;
+  final String phone;
+  final String? dialCode;
+  final String? firstName;
+  final String? lastName;
+  final String? status;
+  final String? photo;
 
   Profile({
     required this.id,
-    required this.phoneNumber,
-    this.name,
-    this.email,
-    this.avatar,
+    required this.phone,
+    this.dialCode,
+    this.firstName,
+    this.lastName,
+    this.status,
+    this.photo,
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) {
     return Profile(
       id: json['id'],
-      phoneNumber: json['phone_number'],
-      name: json['name'],
-      email: json['email'],
-      avatar: json['avatar'],
+      phone: json['phone'],
+      dialCode: json['dialCode'],
+      firstName: json['firstName'],
+      lastName: json['lastName'],
+      status: json['status'],
+      photo: json['photo'],
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'id': id,
-      'phone_number': phoneNumber,
-      'name': name,
-      'email': email,
-      'avatar': avatar,
+      'phone': phone,
+      'dialCode': dialCode,
+      'firstName': firstName,
+      'lastName': lastName,
+      'status': status,
+      'photo': photo,
     };
   }
 } 

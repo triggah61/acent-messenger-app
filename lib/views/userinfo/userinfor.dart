@@ -1,6 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter_switch/flutter_switch.dart';
+import 'package:provider/provider.dart';
+import '../../providers/auth_provider.dart';
+import '../../models/profile.dart';
 
 class UserInformationScreen extends StatefulWidget {
   const UserInformationScreen({super.key});
@@ -18,15 +22,21 @@ class _UserInformationScreenState extends State<UserInformationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFFF5F6FA),
-      appBar: _buildAppBar(context),
-      body: ListView(
-        children: [
-          _buildProfileSection(),
-          _buildSettingsList(context),
-        ],
-      ),
+    return Consumer<AuthProvider>(
+      builder: (context, authProvider, child) {
+        final profile = authProvider.profile;
+        
+        return Scaffold(
+          backgroundColor: const Color(0xFFF5F6FA),
+          appBar: _buildAppBar(context),
+          body: ListView(
+            children: [
+              _buildProfileSection(profile),
+              _buildSettingsList(context),
+            ],
+          ),
+        );
+      },
     );
   }
 
@@ -55,7 +65,14 @@ class _UserInformationScreenState extends State<UserInformationScreen> {
     );
   }
 
-  Widget _buildProfileSection() {
+  Widget _buildProfileSection(Profile? profile) {
+    final fullName = profile != null 
+        ? '${profile.firstName ?? ''} ${profile.lastName ?? ''}'.trim()
+        : 'Loading...';
+
+    final fullPhone = profile != null ? '(${profile.dialCode}) ${profile.phone}' : 'Loading...';
+    
+    
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: const BoxDecoration(
@@ -67,7 +84,7 @@ class _UserInformationScreenState extends State<UserInformationScreen> {
         children: [
           ClipOval(
             child: Image.network(
-              placeholderImageUrl,
+              profile?.photo ?? placeholderImageUrl,
               width: 120,
               height: 120,
               fit: BoxFit.cover,
@@ -77,25 +94,36 @@ class _UserInformationScreenState extends State<UserInformationScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          const Text(
-            'David Wayne',
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: Color(0xFF343A40)),
+          Text(
+            fullName,
+            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: Color(0xFF343A40)),
           ),
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Text(
-                '(+44) 20 1234 5689',
-                style: TextStyle(fontSize: 16, color: Colors.grey),
+              Text(
+                fullPhone ?? 'Loading...',
+                style: const TextStyle(fontSize: 16, color: Colors.grey),
               ),
               IconButton(
                 icon: const Icon(Icons.copy, size: 20, color: Colors.grey),
-                onPressed: () {},
+                onPressed: () {
+                  if (fullPhone != null) {
+                    Clipboard.setData(ClipboardData(text: fullPhone));
+                  }
+                },
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          // if (profile?.status != null) ...[
+          //   const SizedBox(height: 8),
+          //   Text(
+          //     profile!.status!,
+          //     style: const TextStyle(fontSize: 14, color: Colors.grey),
+          //   ),
+          // ],
+          // const SizedBox(height: 16),
         ],
       ),
     );

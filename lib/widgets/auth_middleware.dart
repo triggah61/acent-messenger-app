@@ -3,7 +3,7 @@ import 'package:provider/provider.dart';
 import '../providers/auth_provider.dart';
 import '../views/authentication/login_screen.dart';
 
-class AuthMiddleware extends StatelessWidget {
+class AuthMiddleware extends StatefulWidget {
   final Widget child;
 
   const AuthMiddleware({
@@ -12,22 +12,36 @@ class AuthMiddleware extends StatelessWidget {
   }) : super(key: key);
 
   @override
+  State<AuthMiddleware> createState() => _AuthMiddlewareState();
+}
+
+class _AuthMiddlewareState extends State<AuthMiddleware> {
+  @override
+  void initState() {
+    super.initState();
+    // Check auth status when the middleware is initialized
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<AuthProvider>(context, listen: false).checkAuthStatus();
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Consumer<AuthProvider>(
       builder: (context, authProvider, _) {
-        if (authProvider.isLoading) {
+        print("AuthMiddleware: ${authProvider.isAuthenticated}, ${authProvider.isInitialized}, ${authProvider.isLoading}");
+        if (!authProvider.isInitialized || authProvider.isLoading) {
           return const Scaffold(
             body: Center(
               child: CircularProgressIndicator(),
             ),
           );
+        }else if (!authProvider.isAuthenticated) {
+          // return const LoginScreen();
         }
 
-        if (!authProvider.isAuthenticated) {
-          return const LoginScreen();
-        }
 
-        return child;
+        return widget.child;
       },
     );
   }

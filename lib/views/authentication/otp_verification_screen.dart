@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:provider/provider.dart';
 import '../../Constants/colors.dart';
 import '../../commonwidgets/botttommnavigationbar.dart';
 import '../../widgets/custombtn.dart';
 import '../../widgets/detailstext1.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/api_request.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
@@ -27,6 +28,7 @@ class OtpVerificationScreen extends StatefulWidget {
 class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     with SingleTickerProviderStateMixin {
   bool _isLoading = false;
+  bool _isResending = false;
   final List<TextEditingController> _otpControllers = List.generate(
     6,
     (index) => TextEditingController(),
@@ -35,7 +37,6 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     6,
     (index) => FocusNode(),
   );
-  final storage = const FlutterSecureStorage();
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
@@ -79,6 +80,39 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     }
   }
 
+  Future<void> _handleResendOtp() async {
+    if (_isResending) return;
+    setState(() {
+      _isResending = true;
+    });
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiRequest.baseApiUrl}/auth/resendOTP'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'traceId': widget.traceId,
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['data']['token'] != null) {
+          // Implement resend OTP functionality
+          print("Resending OTP");
+        }
+      }
+    } catch (e) {
+      print("Error resending OTP: $e");
+    } finally {
+      setState(() {
+        _isResending = false;
+      });
+    }
+  }
+
   Future<void> _verifyOtp() async {
     final otp = _otpControllers.map((controller) => controller.text).join();
     if (otp.length != 6) {
@@ -109,7 +143,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['data']['token'] != null) {
-          await storage.write(key: 'jwt_token', value: data['data']['token']);
+          // Use AuthProvider to handle login success
+          await Provider.of<AuthProvider>(context, listen: false)
+              .handleLoginSuccess(data['data']['token']);
+
           if (mounted) {
             Navigator.pushReplacement(
               context,
@@ -213,7 +250,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
                                     enabledBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(8),
                                       borderSide: const BorderSide(
-                                        color: AppColors.textFormFieldBorderColor,
+                                        color:
+                                            AppColors.textFormFieldBorderColor,
                                       ),
                                     ),
                                     focusedBorder: OutlineInputBorder(
@@ -223,7 +261,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
                                       ),
                                     ),
                                   ),
-                                  onChanged: (value) => _onOtpChanged(value, index),
+                                  onChanged: (value) =>
+                                      _onOtpChanged(value, index),
                                 ),
                               ),
                             ),
@@ -245,14 +284,23 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
                               GestureDetector(
                                 onTap: () {
                                   // Implement resend OTP functionality
+                                  _handleResendOtp();
                                 },
-                                child: const Text(
-                                  'Resend',
-                                  style: TextStyle(
-                                    color: AppColors.buttonColor,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
+                                child: _isResending
+                                    ? const Text(
+                                        'Resending...', 
+                                        style: TextStyle(
+                                          color: AppColors.buttonColor,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      )
+                                    : const Text(
+                                        'Resend',
+                                        style: TextStyle(
+                                          color: AppColors.buttonColor,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
                               ),
                             ],
                           ),
@@ -278,7 +326,8 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
         const end = Offset.zero;
         const curve = Curves.easeInOut;
 
-        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        var tween =
+            Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
 
         return SlideTransition(
           position: animation.drive(tween),
@@ -287,4 +336,4 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
       },
     );
   }
-} 
+}

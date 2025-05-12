@@ -1,4 +1,5 @@
 import 'package:chattingapp/views/status/status.dart';
+import 'package:chattingapp/widgets/auth_middleware.dart';
 import 'package:flutter/material.dart';
 
 import '../addfriend/addfriend.dart';
@@ -18,7 +19,8 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+
+    return AuthMiddleware(child: Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFF121829),
       body: SafeArea(
@@ -59,10 +61,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                   MenuAnchor(
                     builder: (
-                      BuildContext context,
-                      MenuController controller,
-                      Widget? child,
-                    ) {
+                        BuildContext context,
+                        MenuController controller,
+                        Widget? child,
+                        ) {
                       return IconButton(
                         onPressed: () {
                           if (controller.isOpen) {
@@ -130,7 +132,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatusItem(
                       name: 'My status',
                       imageUrl:
-                          'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTB8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTB8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
                   GestureDetector(
@@ -149,7 +151,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatusItem(
                       name: 'Adil',
                       imageUrl:
-                          'https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8cGVyc29ufGVufDB8fDB8fHww&auto=format&fit=crop&w=500&q=60',
+                      'https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8cGVyc29ufGVufDB8fDB8fHww&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
                   GestureDetector(
@@ -168,7 +170,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatusItem(
                       name: 'Marina',
                       imageUrl:
-                          'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTB8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTB8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
                   GestureDetector(
@@ -187,7 +189,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatusItem(
                       name: 'Dean',
                       imageUrl:
-                          'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
                   GestureDetector(
@@ -206,7 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatusItem(
                       name: 'Max',
                       imageUrl:
-                          'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTZ8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      'https://images.unsplash.com/photo-1539571696357-5a69c17a67c6?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTZ8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
                   GestureDetector(
@@ -225,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatusItem(
                       name: 'Alice',
                       imageUrl:
-                          'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
                   GestureDetector(
@@ -244,7 +246,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatusItem(
                       name: 'Bob',
                       imageUrl:
-                          'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
                   GestureDetector(
@@ -263,7 +265,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: _buildStatusItem(
                       name: 'Charlie',
                       imageUrl:
-                          'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
                 ],
@@ -287,7 +289,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         message: 'How are you today?',
                         time: '2 min ago',
                         imageUrl:
-                            'https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8cGVyc29ufGVufDB8fDB8fHww&auto=format&fit=crop&w=500&q=60',
+                        'https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8cGVyc29ufGVufDB8fDB8fHww&auto=format&fit=crop&w=500&q=60',
                         notificationCount: 3,
                         onTap: () {
                           Navigator.push(
@@ -407,7 +409,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         message: 'Can we fix it? Yes, we can! 🛠️',
                         time: '5 min ago',
                         imageUrl:
-                            'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MjN8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                        'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MjN8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                         onTap: () {
                           Navigator.push(
                             context,
@@ -426,7 +428,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         message: 'Laughter is the best medicine 😂',
                         time: '10 min ago',
                         imageUrl:
-                            'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                        'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                         onTap: () {
                           Navigator.push(
                             context,
@@ -448,7 +450,9 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
+    )
     );
+
   }
 
   Widget _buildStatusItem({required String name, required String imageUrl}) {
