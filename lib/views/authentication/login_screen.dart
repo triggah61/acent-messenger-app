@@ -12,6 +12,7 @@ import '../../widgets/customtextfield.dart';
 import '../../widgets/detailstext1.dart';
 import 'AuthWidgets/auth_tab.dart';
 import 'forgot_password.dart';
+import 'otp_verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -64,73 +65,57 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleLogin() async {
-    if (_phoneController.text.isEmpty || _passwordController.text.isEmpty) {
+    if (_phoneController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill in all fields')),
+        const SnackBar(content: Text('Please enter your phone number')),
       );
       return;
     }
-    
-
-    // // Validate phone number format
-    // if (!RegExp(r'^\d{10}$').hasMatch(_phoneController.text)) {
-    //   ScaffoldMessenger.of(context).showSnackBar(
-    //     const SnackBar(content: Text('Please enter a valid 10-digit phone number')),
-    //   );
-    //   return;
-    // }
 
     setState(() {
       _isLoading = true;
     });
-    bool authenticated = false;
 
     try {
       final response = await http.post(
-        Uri.parse('${ApiRequest.baseApiUrl}/auth/login'),
+        Uri.parse('${ApiRequest.baseApiUrl}/auth/loginRequest'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'dialCode': _selectedCountryCode,
           'phone': _phoneController.text,
-          'password': _passwordController.text,
         }),
       );
+
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        if(data['data']['token'] != null){
-          // Store the token
-          authenticated = true;
-          await storage.write(key: 'jwt_token', value: data['token']);
-        }else{
-          authenticated = false;
-          final data = jsonDecode(response.body);
+        if (data['data']['traceId'] != null) {
+          if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => OtpVerificationScreen(
+                  phone: _phoneController.text,
+                  dialCode: _selectedCountryCode,
+                  traceId: data['data']['traceId'],
+                ),
+              ),
+            );
+          }
+        } else {
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(content: Text(data['message'].toString())),
           );
         }
-        
-        // return data;
-      }else{
-        authenticated = false;
-        print("Failed to login: ${response.body}");
+      } else {
         final data = jsonDecode(response.body);
-         ScaffoldMessenger.of(context).showSnackBar(
+        ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text(data['message'].toString())),
         );
       }
-      
-      if (authenticated) {
-        Navigator.pushReplacement(
-          context,
-          _createRoute(const BottomNavBarScreen()),
-        );
-      }
     } catch (e) {
-      if (authenticated) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString())),
-        );
-      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString())),
+      );
     } finally {
       if (mounted) {
         setState(() {
@@ -228,46 +213,6 @@ class _LoginScreenState extends State<LoginScreen>
                               ],
                             ),
                           ),
-                          CustomTextField(
-                            label: 'Password',
-                            icon: Icons.lock,
-                            icon2: Icons.visibility,
-                            controller: _passwordController,
-                            obscureText: true,
-                          ),
-                          const SizedBox(height: 10),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Row(
-                                children: [
-                                  Checkbox(
-                                    value: _rememberMe,
-                                    onChanged: (value) {
-                                      setState(() {
-                                        _rememberMe = value!;
-                                      });
-                                    },
-                                    activeColor: AppColors.buttonColor,
-                                  ),
-                                  const Text('Remember me'),
-                                ],
-                              ),
-                              TextButton(
-                                onPressed: () {
-                                  Navigator.push(
-                                    context,
-                                    _createRoute(const ForgotPasswordScreen()),
-                                  );
-                                },
-                                child: const Text1(
-                                  text1: 'Forgot password?',
-                                  color: AppColors.buttonColor,
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 20),
                           CustomButton(
                             text: _isLoading ? 'Logging in...' : 'Login',
                             onTap: () {
@@ -275,47 +220,6 @@ class _LoginScreenState extends State<LoginScreen>
                                 _handleLogin();
                               }
                             },
-                          ),
-                          const SizedBox(height: 20),
-                          const Text('or continue with'),
-                          const SizedBox(height: 20),
-                          FadeTransition(
-                            opacity: _fadeAnimation,
-                            child: const Row(
-                              children: [
-                                AuthTab(
-                                  image: 'images/icons8-facebook-48.png',
-                                  text: 'Facebook',
-                                ),
-                                SizedBox(width: 12),
-                                AuthTab(
-                                  image: 'images/icons8-google-48.png',
-                                  text: 'Google',
-                                ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 20),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              const Text("Don't have an account? "),
-                              GestureDetector(
-                                onTap: () {
-                                  Navigator.push(
-                                    context,
-                                    _createRoute(const SignUpScreen()),
-                                  );
-                                },
-                                child: const Text(
-                                  'Sign Up',
-                                  style: TextStyle(
-                                    color: Color(0xFF1A73E8),
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ),
-                            ],
                           ),
                           const SizedBox(height: 20),
                         ],

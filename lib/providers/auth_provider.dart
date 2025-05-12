@@ -20,7 +20,7 @@ class AuthProvider with ChangeNotifier {
     final token = await _authService.getToken();
     if (token != null) {
       final response = await http.post(
-        Uri.parse('${ApiRequest.baseApiUrl}/profile/info'),
+        Uri.parse('${ApiRequest.baseApiUrl}/user/profile/info'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token'
@@ -28,7 +28,7 @@ class AuthProvider with ChangeNotifier {
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        _profile = Profile.fromJson(data);
+        _profile = Profile.fromJson(data['data']);
       } else {
         _profile = null;
         print("No token found");
