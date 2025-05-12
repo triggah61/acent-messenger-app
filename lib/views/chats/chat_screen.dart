@@ -302,106 +302,106 @@ class _HomeScreenState extends State<HomeScreen> {
                           });
                         },
                       ),
-                      _buildMessageItem(
-                        name: 'Team Align',
-                        message: 'Don\'t miss to attend the meeting.',
-                        time: '2 min ago',
-                        imageUrl:
-                            'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                        notificationCount: 4,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const Conversations(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
-                        },
-                      ),
-                      _buildMessageItem(
-                        name: 'John Abraham',
-                        message: 'Hey! Can you join the meeting?',
-                        time: '2 min ago',
-                        notificationCount: 5,
-                        imageUrl:
-                            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTQzfHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const Conversations(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
-                        },
-                      ),
-                      _buildMessageItem(
-                        name: 'Sabilah Sayma',
-                        message: 'How are you today?',
-                        notificationCount: 9,
-                        time: '2 min ago',
-                        imageUrl:
-                            'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const Conversations(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
-                        },
-                      ),
-                      _buildMessageItem(
-                        name: 'John Borino',
-                        message: 'Have a good day 🌸',
-                        notificationCount: 3,
-                        time: '2 min ago',
-                        imageUrl:
-                            'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTQzfHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const Conversations(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
-                        },
-                      ),
-                      _buildMessageItem(
-                        name: 'Alice Wonderland',
-                        message: 'Enjoying the day ☀️',
-                        time: '3 min ago',
-                        imageUrl:
-                            'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                        notificationCount: 1,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const Conversations(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
-                        },
-                      ),
+                      // _buildMessageItem(
+                      //   name: 'Team Align',
+                      //   message: 'Don\'t miss to attend the meeting.',
+                      //   time: '2 min ago',
+                      //   imageUrl:
+                      //       'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      //   notificationCount: 4,
+                      //   onTap: () {
+                      //     Navigator.push(
+                      //       context,
+                      //       MaterialPageRoute(
+                      //         builder: (_) => const Conversations(),
+                      //       ),
+                      //     ).then((_) {
+                      //       if (mounted) {
+                      //         setState(() {});
+                      //       }
+                      //     });
+                      //   },
+                      // ),
+                      // _buildMessageItem(
+                      //   name: 'John Abraham',
+                      //   message: 'Hey! Can you join the meeting?',
+                      //   time: '2 min ago',
+                      //   notificationCount: 5,
+                      //   imageUrl:
+                      //       'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTQzfHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      //   onTap: () {
+                      //     Navigator.push(
+                      //       context,
+                      //       MaterialPageRoute(
+                      //         builder: (_) => const Conversations(),
+                      //       ),
+                      //     ).then((_) {
+                      //       if (mounted) {
+                      //         setState(() {});
+                      //       }
+                      //     });
+                      //   },
+                      // ),
+                      // _buildMessageItem(
+                      //   name: 'Sabilah Sayma',
+                      //   message: 'How are you today?',
+                      //   notificationCount: 9,
+                      //   time: '2 min ago',
+                      //   imageUrl:
+                      //       'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      //   onTap: () {
+                      //     Navigator.push(
+                      //       context,
+                      //       MaterialPageRoute(
+                      //         builder: (_) => const Conversations(),
+                      //       ),
+                      //     ).then((_) {
+                      //       if (mounted) {
+                      //         setState(() {});
+                      //       }
+                      //     });
+                      //   },
+                      // ),
+                      // _buildMessageItem(
+                      //   name: 'John Borino',
+                      //   message: 'Have a good day 🌸',
+                      //   notificationCount: 3,
+                      //   time: '2 min ago',
+                      //   imageUrl:
+                      //       'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTQzfHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      //   onTap: () {
+                      //     Navigator.push(
+                      //       context,
+                      //       MaterialPageRoute(
+                      //         builder: (_) => const Conversations(),
+                      //       ),
+                      //     ).then((_) {
+                      //       if (mounted) {
+                      //         setState(() {});
+                      //       }
+                      //     });
+                      //   },
+                      // ),
+                      // _buildMessageItem(
+                      //   name: 'Alice Wonderland',
+                      //   message: 'Enjoying the day ☀️',
+                      //   time: '3 min ago',
+                      //   imageUrl:
+                      //       'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                      //   notificationCount: 1,
+                      //   onTap: () {
+                      //     Navigator.push(
+                      //       context,
+                      //       MaterialPageRoute(
+                      //         builder: (_) => const Conversations(),
+                      //       ),
+                      //     ).then((_) {
+                      //       if (mounted) {
+                      //         setState(() {});
+                      //       }
+                      //     });
+                      //   },
+                      // ),
                       _buildMessageItem(
                         name: 'Bob The Builder',
                         message: 'Can we fix it? Yes, we can! 🛠️',

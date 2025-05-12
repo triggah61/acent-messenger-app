@@ -66,7 +66,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen>
                 children: [
                   SizedBox(height: 100),
                   Text1(
-                    text1: 'ChatWave',
+                    text1: 'Acent Messenger',
                     color: Colors.white,
                     size: 24,
                   ),

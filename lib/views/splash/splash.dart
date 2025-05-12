@@ -1,4 +1,5 @@
 import 'package:chattingapp/views/onboard/onboard.dart';
+import 'package:chattingapp/views/authentication/login_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -31,7 +32,8 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
     if (mounted) {
       Navigator.pushReplacement(
         context,
-        MaterialPageRoute(builder: (context) =>  OnboardingScreen()), // Change to your actual onboarding screen
+        // MaterialPageRoute(builder: (context) =>  OnboardingScreen()), // Change to your actual onboarding screen
+        MaterialPageRoute(builder: (context) =>  LoginScreen()),
       );
     }
   }
@@ -74,7 +76,7 @@ class _SplashScreenState extends State<SplashScreen> with TickerProviderStateMix
             ),
             const SizedBox(height: 20),
             Text(
-              "ChatWave", // Your Chat App Name
+              "Acent Messenger", // Your Chat App Name
               style: GoogleFonts.poppins(
                 fontSize: 28,
                 fontWeight: FontWeight.bold,

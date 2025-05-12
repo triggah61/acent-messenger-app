@@ -140,7 +140,7 @@ class _ConversationsState extends State<Conversations> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Maddy Lin',
+                    'Maddy Max',
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                     ),
@@ -182,48 +182,9 @@ class _ConversationsState extends State<Conversations> {
                       ),
                       const SizedBox(height: 8),
                       const MessageBubble(
-                        message: 'Thank You! I\'ll be waiting for that',
-                        isSent: true,
-                        time: '5:22 Am',
-                      ),
-                      const SizedBox(height: 8),
-                      const MessageBubble(
-                        message:
-                        'Hai Rizal, I\'m on the way to your home, Please wait a moment. Thanks!',
-                        isSent: false,
-                        time: '6:28 Am',
-                      ),
-                      const SizedBox(height: 8),
-                      const MessageBubble(
-                        message: 'Okay, I\'m here. Where should I drop it?',
-                        isSent: true,
-                        time: '7:15 Am',
-                      ),
-                      const SizedBox(height: 8),
-                      const MessageBubble(
-                        message:
-                        'Just bring it to the living room. I\'ll leave the door open',
-                        isSent: false,
-                        time: '7:20 Am',
-                      ),
-                      const SizedBox(height: 8),
-                      const MessageBubble(
                         message: 'Sure. I\'ll be there in a minute',
                         isSent: true,
                         time: '7:22 Am',
-                      ),
-                      const SizedBox(height: 8),
-                      const MessageBubble(
-                        message: 'Great. Thanks again!',
-                        isSent: false,
-                        time: '7:25 Am',
-                      ),
-                      const SizedBox(height: 8),
-                      const MessageBubble(
-                        message:
-                        'No problem! Let me know if you need anything else',
-                        isSent: true,
-                        time: '7:26 Am',
                       ),
                     ],
                   ),

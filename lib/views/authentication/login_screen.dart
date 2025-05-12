@@ -1,10 +1,11 @@
-
+import 'package:chattingapp/services/api_request.dart';
 import 'package:flutter/material.dart';
 import 'package:chattingapp/views/authentication/signup_sreeen.dart';
-
-
+import 'package:country_code_picker/country_code_picker.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 import '../../Constants/colors.dart';
-
 import '../../commonwidgets/botttommnavigationbar.dart';
 import '../../widgets/custombtn.dart';
 import '../../widgets/customtextfield.dart';
@@ -22,9 +23,16 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen>
     with SingleTickerProviderStateMixin {
   bool _rememberMe = false;
+  bool _isLoading = false;
+  final _phoneController = TextEditingController();
+  final _passwordController = TextEditingController();
+  
+  String _selectedCountryCode = '+1'; // Default country code
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
   late Animation<Offset> _slideAnimation;
+
+  final storage = const FlutterSecureStorage();
 
   @override
   void initState() {
@@ -50,7 +58,86 @@ class _LoginScreenState extends State<LoginScreen>
   @override
   void dispose() {
     _controller.dispose();
+    _phoneController.dispose();
+    _passwordController.dispose();
     super.dispose();
+  }
+
+  Future<void> _handleLogin() async {
+    if (_phoneController.text.isEmpty || _passwordController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please fill in all fields')),
+      );
+      return;
+    }
+    
+
+    // // Validate phone number format
+    // if (!RegExp(r'^\d{10}$').hasMatch(_phoneController.text)) {
+    //   ScaffoldMessenger.of(context).showSnackBar(
+    //     const SnackBar(content: Text('Please enter a valid 10-digit phone number')),
+    //   );
+    //   return;
+    // }
+
+    setState(() {
+      _isLoading = true;
+    });
+    bool authenticated = false;
+
+    try {
+      final response = await http.post(
+        Uri.parse('${ApiRequest.baseApiUrl}/auth/login'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'dialCode': _selectedCountryCode,
+          'phone': _phoneController.text,
+          'password': _passwordController.text,
+        }),
+      );
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if(data['token'] != null){
+          // Store the token
+          authenticated = true;
+          await storage.write(key: 'jwt_token', value: data['token']);
+        }else{
+          authenticated = false;
+          final data = jsonDecode(response.body);
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(data['message'].toString())),
+          );
+        }
+        
+        // return data;
+      }else{
+        authenticated = false;
+        print("Failed to login: ${response.body}");
+        final data = jsonDecode(response.body);
+         ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(data['message'].toString())),
+        );
+      }
+      
+      if (authenticated) {
+        Navigator.pushReplacement(
+          context,
+          _createRoute(const BottomNavBarScreen()),
+        );
+      }
+    } catch (e) {
+      if (authenticated) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
   }
 
   @override
@@ -69,7 +156,7 @@ class _LoginScreenState extends State<LoginScreen>
                 children: [
                   SizedBox(height: 100),
                   Text1(
-                    text1: 'ChatWave',
+                    text1: 'Acent Messenger',
                     color: Colors.white,
                     size: 24,
                   ),
@@ -104,14 +191,49 @@ class _LoginScreenState extends State<LoginScreen>
                             color: AppColors.buttonColor,
                           ),
                           const SizedBox(height: 20),
-                          const CustomTextField(
-                            label: 'Username',
-                            icon: Icons.person,
+                          // Phone Number Input with Country Code
+                          Container(
+                            height: 42,
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            decoration: BoxDecoration(
+                              border: Border.all(color: AppColors.textFormFieldBorderColor),
+                              borderRadius: BorderRadius.circular(8.0),
+                            ),
+                            child: Row(
+                              children: [
+                                CountryCodePicker(
+                                  onChanged: (CountryCode countryCode) {
+                                    setState(() {
+                                      _selectedCountryCode = countryCode.dialCode!;
+                                    });
+                                  },
+                                  initialSelection: 'US',
+                                  favorite: const ['US', 'GB', 'IN'],
+                                  showCountryOnly: false,
+                                  showOnlyCountryWhenClosed: false,
+                                  alignLeft: false,
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                ),
+                                Expanded(
+                                  child: TextFormField(
+                                    controller: _phoneController,
+                                    keyboardType: TextInputType.phone,
+                                    decoration: const InputDecoration(
+                                      border: InputBorder.none,
+                                      hintText: 'Phone Number',
+                                      contentPadding: EdgeInsets.symmetric(horizontal: 10),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                           ),
-                          const CustomTextField(
+                          CustomTextField(
                             label: 'Password',
                             icon: Icons.lock,
                             icon2: Icons.visibility,
+                            controller: _passwordController,
+                            obscureText: true,
                           ),
                           const SizedBox(height: 10),
                           Row(
@@ -147,12 +269,11 @@ class _LoginScreenState extends State<LoginScreen>
                           ),
                           const SizedBox(height: 20),
                           CustomButton(
-                            text: 'Login',
+                            text: _isLoading ? 'Logging in...' : 'Login',
                             onTap: () {
-                              Navigator.push(
-                                context,
-                                _createRoute( BottomNavBarScreen()),
-                              );
+                              if (!_isLoading) {
+                                _handleLogin();
+                              }
                             },
                           ),
                           const SizedBox(height: 20),
