@@ -97,7 +97,7 @@ class _LoginScreenState extends State<LoginScreen>
       );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        if(data['token'] != null){
+        if(data['data']['token'] != null){
           // Store the token
           authenticated = true;
           await storage.write(key: 'jwt_token', value: data['token']);

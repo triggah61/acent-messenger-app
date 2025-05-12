@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-
+import '../../widgets/auth_middleware.dart';
 
 
 class ContactsScreen extends StatelessWidget {
@@ -7,10 +7,12 @@ class ContactsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF121829), // Dark background color
-      body: SafeArea(
-        child: Column(
+
+    return AuthMiddleware(
+      child: Scaffold(
+        backgroundColor: const Color(0xFF121829), // Dark background color
+        body: SafeArea(
+          child: Column(
           children: [
             Container(
               padding: const EdgeInsets.all(16.0),
@@ -163,6 +165,7 @@ class ContactsScreen extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

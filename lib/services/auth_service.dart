@@ -3,18 +3,10 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthService {
-  // For Android Emulator, use 10.0.2.2 instead of localhost
-  // For iOS Simulator, use localhost
-  // For physical devices, use your computer's IP address
-  static const String baseUrl = 'http://192.168.0.102:8000/api';  // For Android Emulator
-  // static const String baseUrl = 'http://localhost:8000/api';  // For iOS Simulator
-  // static const String baseUrl = 'http://192.168.1.xxx:8000/api';  // For physical devices (replace xxx with your IP)
-  
+  static const String baseUrl = 'http://192.168.0.102:8000/api';
   final storage = const FlutterSecureStorage();
 
   Future<Map<String, dynamic>> login(String phoneNumber, String password) async {
-    print("Printing full url: $baseUrl/auth/login");
-    print(Uri.parse('$baseUrl/auth/login'));
     try {
       final response = await http.post(
         Uri.parse('$baseUrl/auth/login'),
@@ -27,13 +19,36 @@ class AuthService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        // Store the token
         await storage.write(key: 'jwt_token', value: data['token']);
-        // Store phone number for future use
         await storage.write(key: 'phone_number', value: phoneNumber);
         return data;
       } else {
         throw Exception('Failed to login: ${response.body}');
+      }
+    } catch (e) {
+      throw Exception('Failed to connect to the server: $e');
+    }
+  }
+
+  Future<Map<String, dynamic>> getProfile() async {
+    final token = await getToken();
+    if (token == null) {
+      throw Exception('No token found');
+    }
+
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/auth/profile'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Failed to fetch profile: ${response.body}');
       }
     } catch (e) {
       throw Exception('Failed to connect to the server: $e');
