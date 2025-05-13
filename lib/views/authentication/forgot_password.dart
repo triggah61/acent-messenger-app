@@ -1,7 +1,7 @@
 import 'package:chattingapp/views/authentication/reset_password.dart';
 import 'package:flutter/material.dart';
 
-import '../../Constants/colors.dart';
+import '../../constants/colors.dart';
 import '../../widgets/custombtn.dart';
 import '../../widgets/customtextfield.dart';
 import '../../widgets/detailstext1.dart';

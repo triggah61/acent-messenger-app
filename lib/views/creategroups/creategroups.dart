@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import '../../../Constants/colors.dart';
+import '../../../constants/colors.dart';
 
 class CreateGroupScreen extends StatefulWidget {
   const CreateGroupScreen({super.key});

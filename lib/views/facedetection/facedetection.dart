@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:chattingapp/Constants/colors.dart';
+import 'package:chattingapp/constants/colors.dart';
 
 import '../fingerprint/fingerprint.dart';
 

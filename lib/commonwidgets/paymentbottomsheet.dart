@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 
 
-import '../Constants/colors.dart';
-import '../Widgets/custombtn.dart';
-import '../Widgets/detailstext1.dart';
-import '../Widgets/detailstext2.dart';
+import '../constants/colors.dart';
+import '../widgets/custombtn.dart';
+import '../widgets/detailstext1.dart';
+import '../widgets/detailstext2.dart';
 import 'ordersucessbottomsheet.dart';
 
 class PaymentBottomSheet extends StatefulWidget {
