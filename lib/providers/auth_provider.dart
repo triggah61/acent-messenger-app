@@ -17,6 +17,10 @@ class AuthProvider with ChangeNotifier {
   bool get isAuthenticated => _profile != null;
   bool get isInitialized => _isInitialized;
   
+  // Get token for API requests
+  Future<String?> getToken() async {
+    return await _authService.getToken();
+  }
 
   // Call this after successful login to fetch profile
   Future<void> handleLoginSuccess(String token) async {

@@ -206,7 +206,7 @@ class _LoginScreenState extends State<LoginScreen>
                                     decoration: const InputDecoration(
                                       border: InputBorder.none,
                                       hintText: 'Phone Number',
-                                      contentPadding: EdgeInsets.symmetric(horizontal: 10),
+                                      contentPadding: EdgeInsets.symmetric(vertical: 10),
                                     ),
                                   ),
                                 ),
