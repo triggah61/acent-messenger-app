@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../../Widgets/detailstext1.dart';
+import '../../../widgets/detailstext1.dart';
 
 class AddressWidget extends StatelessWidget {
   const AddressWidget({

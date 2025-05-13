@@ -1,4 +1,4 @@
-import 'package:chattingapp/Constants/colors.dart';
+import 'package:chattingapp/constants/colors.dart';
 import 'package:flutter/material.dart';
 
 class SearchScreen extends StatelessWidget {

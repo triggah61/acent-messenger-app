@@ -1,6 +1,6 @@
 import 'package:chattingapp/views/authentication/login_screen.dart';
 import 'package:flutter/material.dart';
-import 'package:chattingapp/Constants/colors.dart';
+import 'package:chattingapp/constants/colors.dart';
 
 
 class FingerprintSecurityScreen extends StatefulWidget {

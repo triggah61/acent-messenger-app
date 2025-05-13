@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:provider/provider.dart';
-import '../../Constants/colors.dart';
+import '../../constants/colors.dart';
 import '../../commonwidgets/botttommnavigationbar.dart';
 import '../../widgets/custombtn.dart';
 import '../../widgets/detailstext1.dart';

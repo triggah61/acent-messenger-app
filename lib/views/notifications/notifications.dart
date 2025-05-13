@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import '../../../Constants/colors.dart';
-import '../../../Widgets/detailstext2.dart';
-import '../../../Widgets/text11.dart';
+import '../../../constants/colors.dart';
+import '../../../widgets/detailstext2.dart';
+import '../../../widgets/text11.dart';
 import '../../widgets/detailstext1.dart';
 
 class ChatNotifications extends StatefulWidget {

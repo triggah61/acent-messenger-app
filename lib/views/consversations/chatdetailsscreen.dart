@@ -1,7 +1,7 @@
 import 'package:chattingapp/views/contacts/contacts.dart';
 import 'package:flutter/material.dart';
 
-import '../../Constants/colors.dart';
+import '../../constants/colors.dart';
 import '../camera/camera.dart';
 import '../chatcalls/chatcalls.dart';
 import '../createpoll/createpoll.dart';

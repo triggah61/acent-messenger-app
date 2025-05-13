@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../Constants/colors.dart';
-import '../Widgets/custombtn.dart';
+import '../constants/colors.dart';
+import '../widgets/custombtn.dart';
 
 
 class OrderSuccessBottomSheet extends StatelessWidget {

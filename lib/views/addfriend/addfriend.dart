@@ -1,6 +1,6 @@
 import 'package:country_code_picker/country_code_picker.dart';
 import 'package:flutter/material.dart';
-import '../../../Constants/colors.dart';
+import '../../../constants/colors.dart';
 
 class AddFriendScreen extends StatelessWidget {
   const AddFriendScreen({super.key});

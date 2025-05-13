@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../../Constants/colors.dart';
+import '../../constants/colors.dart';
 import '../groupscalls/groupscalls.dart';
 
 class GroupChatScreen extends StatefulWidget {

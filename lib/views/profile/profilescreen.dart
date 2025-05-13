@@ -1,4 +1,3 @@
-import 'package:chattingapp/Constants/colors.dart';
 import 'package:chattingapp/services/api_request.dart';
 import 'package:chattingapp/providers/auth_provider.dart';
 import 'package:chattingapp/constants/config.dart';
