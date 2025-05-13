@@ -1,11 +1,15 @@
 import 'package:chattingapp/Constants/colors.dart';
 import 'package:chattingapp/services/api_request.dart';
 import 'package:chattingapp/providers/auth_provider.dart';
+import 'package:chattingapp/constants/config.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -16,10 +20,12 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoading = false;
+  bool _isUploadingPhoto = false;
   late TextEditingController _firstNameController;
   late TextEditingController _lastNameController;
   String _gender = 'Male';
   DateTime _birthday = DateTime(1997, 1, 12);
+  final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
@@ -204,6 +210,90 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Future<void> _uploadPhoto(File imageFile) async {
+    setState(() {
+      _isUploadingPhoto = true;
+    });
+
+    try {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final token = await authProvider.getToken();
+      
+      if (token == null) {
+        throw Exception('Not authenticated');
+      }
+
+      // Create multipart request
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${ApiRequest.baseApiUrl}/profile/uploadPhoto'),
+      );
+
+      // Add authorization header
+      request.headers.addAll({
+        'Authorization': 'Bearer $token',
+      });
+
+      // Add file to request
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'photo',
+          imageFile.path,
+        ),
+      );
+
+      // Send request
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      if (response.statusCode == 200) {
+        // Refresh profile data to get updated photo URL
+        await authProvider.fetchProfile();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Profile photo updated successfully')),
+          );
+        }
+      } else {
+        final data = jsonDecode(response.body);
+        throw Exception(data['message'] ?? 'Failed to upload photo');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.toString())),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isUploadingPhoto = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _pickAndUploadImage() async {
+    try {
+      final XFile? image = await _picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 80, // Compress image
+        maxWidth: 1024, // Limit image size
+        maxHeight: 1024,
+      );
+
+      if (image != null) {
+        await _uploadPhoto(File(image.path));
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error picking image: $e')),
+        );
+      }
+    }
+  }
+
   // Reusable Input Fields
   Widget _buildTextField({
     required String label,
@@ -381,21 +471,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     CircleAvatar(
                       radius: 60,
                       backgroundImage: profile.photo != null
-                          ? NetworkImage(profile.photo!)
+                          ? NetworkImage(Config.getPhotoUrl(profile.photo))
                           : null,
                       child: profile.photo == null
                           ? const Icon(Icons.person, size: 60)
                           : null,
                     ),
-                    CircleAvatar(
-                      backgroundColor: Colors.blueAccent,
-                      child: IconButton(
-                        icon: const Icon(Icons.edit, color: Colors.white),
-                        onPressed: () {
-                          // TODO: Implement photo upload
-                        },
+                    if (_isUploadingPhoto)
+                      const Positioned.fill(
+                        child: Center(
+                          child: CircularProgressIndicator(),
+                        ),
+                      )
+                    else
+                      CircleAvatar(
+                        backgroundColor: Colors.blueAccent,
+                        child: IconButton(
+                          icon: const Icon(Icons.edit, color: Colors.white),
+                          onPressed: _pickAndUploadImage,
+                        ),
                       ),
-                    ),
                   ],
                 ),
                 const SizedBox(height: 20),
