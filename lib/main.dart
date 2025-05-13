@@ -3,20 +3,34 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'views/splash/splash.dart';
 import 'providers/auth_provider.dart';
+import 'providers/chat_provider.dart';
+import 'package:chattingapp/services/auth_service.dart';
 
 void main() {
+  print("App - main: Starting application");
   runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+  const MyApp({Key? key}) : super(key: key);
 
   // This widget is the root of your application.
   @override
   Widget build(BuildContext context) {
+    print("App - MyApp: Building app widget");
     return MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AuthProvider()),
+        Provider<AuthService>(
+          create: (_) => AuthService(),
+        ),
+        ChangeNotifierProvider<AuthProvider>(
+          create: (_) => AuthProvider(),
+        ),
+        ChangeNotifierProvider<ChatProvider>(
+          create: (context) => ChatProvider(
+            Provider.of<AuthService>(context, listen: false),
+          ),
+        ),
       ],
       child: MaterialApp(
         debugShowCheckedModeBanner: false,

@@ -1,6 +1,11 @@
 import 'package:chattingapp/views/status/status.dart';
 import 'package:chattingapp/widgets/auth_middleware.dart';
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:chattingapp/providers/chat_provider.dart';
+import 'package:chattingapp/models/chat_session.dart';
+import 'package:chattingapp/constants/config.dart';
+import 'package:timeago/timeago.dart' as timeago;
 
 import '../addfriend/addfriend.dart';
 import '../creategroups/creategroups.dart';
@@ -8,7 +13,7 @@ import '../consversations/chatdetailsscreen.dart';
 import '../search/search.dart';
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key});
+  const HomeScreen({Key? key}) : super(key: key);
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -16,10 +21,37 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
+  final ScrollController _scrollController = ScrollController();
+
+  @override
+  void initState() {
+    super.initState();
+    print("HomeScreen - initState: Initializing");
+    _scrollController.addListener(_onScroll);
+    // Initial fetch
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      print("HomeScreen - initState: Fetching initial sessions");
+      context.read<ChatProvider>().fetchSessions();
+    });
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      print("HomeScreen - _onScroll: Near bottom, loading more sessions");
+      context.read<ChatProvider>().fetchSessions();
+    }
+  }
+
+  @override
+  void dispose() {
+    print("HomeScreen - dispose: Cleaning up");
+    _scrollController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-
+    print("HomeScreen - build: Building screen");
     return AuthMiddleware(child: Scaffold(
       key: _scaffoldKey,
       backgroundColor: const Color(0xFF121829),
@@ -282,167 +314,47 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(24.0),
-                  child: ListView(
-                    children: [
-                      _buildMessageItem(
-                        name: 'Alex Linderson',
-                        message: 'How are you today?',
-                        time: '2 min ago',
-                        imageUrl:
-                        'https://images.unsplash.com/photo-1547425260-76bcadfb4f2c?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8NXx8cGVyc29ufGVufDB8fDB8fHww&auto=format&fit=crop&w=500&q=60',
-                        notificationCount: 3,
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const Conversations(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
+                  child: Consumer<ChatProvider>(
+                    builder: (context, chatProvider, child) {
+                      print("HomeScreen - build: Consumer rebuilding. Sessions: ${chatProvider.sessions.length}, Loading: ${chatProvider.isLoading}");
+                      
+                      if (chatProvider.sessions.isEmpty && chatProvider.isLoading) {
+                        print("HomeScreen - build: Showing loading indicator");
+                        return const Center(child: CircularProgressIndicator());
+                      }
+
+                      if (chatProvider.sessions.isEmpty) {
+                        print("HomeScreen - build: No sessions to display");
+                        return const Center(child: Text('No conversations yet'));
+                      }
+
+                      print("HomeScreen - build: Building session list with ${chatProvider.sessions.length} items");
+                      return RefreshIndicator(
+                        onRefresh: () {
+                          print("HomeScreen - build: Refreshing sessions");
+                          return chatProvider.refreshSessions();
                         },
-                      ),
-                      // _buildMessageItem(
-                      //   name: 'Team Align',
-                      //   message: 'Don\'t miss to attend the meeting.',
-                      //   time: '2 min ago',
-                      //   imageUrl:
-                      //       'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                      //   notificationCount: 4,
-                      //   onTap: () {
-                      //     Navigator.push(
-                      //       context,
-                      //       MaterialPageRoute(
-                      //         builder: (_) => const Conversations(),
-                      //       ),
-                      //     ).then((_) {
-                      //       if (mounted) {
-                      //         setState(() {});
-                      //       }
-                      //     });
-                      //   },
-                      // ),
-                      // _buildMessageItem(
-                      //   name: 'John Abraham',
-                      //   message: 'Hey! Can you join the meeting?',
-                      //   time: '2 min ago',
-                      //   notificationCount: 5,
-                      //   imageUrl:
-                      //       'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTQzfHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                      //   onTap: () {
-                      //     Navigator.push(
-                      //       context,
-                      //       MaterialPageRoute(
-                      //         builder: (_) => const Conversations(),
-                      //       ),
-                      //     ).then((_) {
-                      //       if (mounted) {
-                      //         setState(() {});
-                      //       }
-                      //     });
-                      //   },
-                      // ),
-                      // _buildMessageItem(
-                      //   name: 'Sabilah Sayma',
-                      //   message: 'How are you today?',
-                      //   notificationCount: 9,
-                      //   time: '2 min ago',
-                      //   imageUrl:
-                      //       'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                      //   onTap: () {
-                      //     Navigator.push(
-                      //       context,
-                      //       MaterialPageRoute(
-                      //         builder: (_) => const Conversations(),
-                      //       ),
-                      //     ).then((_) {
-                      //       if (mounted) {
-                      //         setState(() {});
-                      //       }
-                      //     });
-                      //   },
-                      // ),
-                      // _buildMessageItem(
-                      //   name: 'John Borino',
-                      //   message: 'Have a good day 🌸',
-                      //   notificationCount: 3,
-                      //   time: '2 min ago',
-                      //   imageUrl:
-                      //       'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTQzfHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                      //   onTap: () {
-                      //     Navigator.push(
-                      //       context,
-                      //       MaterialPageRoute(
-                      //         builder: (_) => const Conversations(),
-                      //       ),
-                      //     ).then((_) {
-                      //       if (mounted) {
-                      //         setState(() {});
-                      //       }
-                      //     });
-                      //   },
-                      // ),
-                      // _buildMessageItem(
-                      //   name: 'Alice Wonderland',
-                      //   message: 'Enjoying the day ☀️',
-                      //   time: '3 min ago',
-                      //   imageUrl:
-                      //       'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                      //   notificationCount: 1,
-                      //   onTap: () {
-                      //     Navigator.push(
-                      //       context,
-                      //       MaterialPageRoute(
-                      //         builder: (_) => const Conversations(),
-                      //       ),
-                      //     ).then((_) {
-                      //       if (mounted) {
-                      //         setState(() {});
-                      //       }
-                      //     });
-                      //   },
-                      // ),
-                      _buildMessageItem(
-                        name: 'Bob The Builder',
-                        message: 'Can we fix it? Yes, we can! 🛠️',
-                        time: '5 min ago',
-                        imageUrl:
-                        'https://images.unsplash.com/photo-1568602471122-7832951cc4c5?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MjN8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const Conversations(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
+                        child: ListView.builder(
+                          controller: _scrollController,
+                          itemCount: chatProvider.sessions.length + (chatProvider.hasMore ? 1 : 0),
+                          itemBuilder: (context, index) {
+                            if (index == chatProvider.sessions.length) {
+                              print("HomeScreen - build: Showing loading more indicator");
+                              return const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(8.0),
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
                             }
-                          });
-                        },
-                      ),
-                      _buildMessageItem(
-                        name: 'Charlie Chaplin',
-                        message: 'Laughter is the best medicine 😂',
-                        time: '10 min ago',
-                        imageUrl:
-                        'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const Conversations(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
-                        },
-                      ),
-                    ],
+
+                            final session = chatProvider.sessions[index];
+                            print("HomeScreen - build: Building session tile for ${session.title}");
+                            return _ChatSessionTile(session: session);
+                          },
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -450,9 +362,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ],
         ),
       ),
-    )
-    );
-
+    ));
   }
 
   Widget _buildStatusItem({required String name, required String imageUrl}) {
@@ -484,73 +394,45 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
 
-  Widget _buildMessageItem({
-    required String name,
-    required String message,
-    required String time,
-    required String imageUrl,
-    int? notificationCount,
-    VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12.0),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(color: Colors.grey[200]!, width: 0.5),
-          ),
-        ),
-        child: Row(
-          children: [
-            CircleAvatar(radius: 30, backgroundImage: NetworkImage(imageUrl)),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    name,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                  Text(
-                    message,
-                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                  ),
-                ],
-              ),
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                Text(
-                  time,
-                  style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-                ),
-                if (notificationCount != null)
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.red,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Text(
-                      notificationCount.toString(),
-                      style: const TextStyle(color: Colors.white, fontSize: 12),
-                    ),
-                  ),
-              ],
-            ),
-          ],
-        ),
+class _ChatSessionTile extends StatelessWidget {
+  final ChatSession session;
+
+  const _ChatSessionTile({Key? key, required this.session}) : super(key: key);
+
+  @override
+  Widget build(BuildContext context) {
+    print("ChatSessionTile - build: Building tile for session ${session.id}");
+    final lastMessage = session.lastMessage;
+
+    return ListTile(
+      leading: CircleAvatar(
+        backgroundImage: session.photo != null
+            ? NetworkImage(Config.getPhotoUrl(session.photo!))
+            : null,
+        child: session.photo == null
+            ? Text(session.title.substring(0, 1).toUpperCase())
+            : null,
       ),
+      title: Text(session.title),
+      subtitle: lastMessage != null
+          ? Text(
+              lastMessage.content,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            )
+          : null,
+      trailing: lastMessage != null
+          ? Text(
+              timeago.format(lastMessage.createdAt),
+              style: Theme.of(context).textTheme.bodySmall,
+            )
+          : null,
+      onTap: () {
+        print("ChatSessionTile - onTap: Tapped session ${session.id}");
+        // TODO: Navigate to chat detail
+      },
     );
   }
 }
