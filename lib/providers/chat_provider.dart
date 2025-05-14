@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:chattingapp/constants/config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:chattingapp/services/auth_service.dart';
@@ -46,7 +47,7 @@ class ChatProvider with ChangeNotifier {
       }
       print("ChatProvider - fetchSessions: Token found, making API request");
 
-      final url = '${AuthService.baseUrl}/user/chat/sessionList?page=$_currentPage&limit=$_limit';
+      final url = '${Config.baseApiUrl}/user/chat/sessionList?page=$_currentPage&limit=$_limit';
       print("ChatProvider - fetchSessions: Requesting URL: $url");
 
       final response = await http.get(

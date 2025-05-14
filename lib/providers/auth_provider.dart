@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:chattingapp/services/api_request.dart';
+import 'package:chattingapp/constants/config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/profile.dart';
@@ -39,7 +39,7 @@ class AuthProvider with ChangeNotifier {
       final token = await _authService.getToken();
       if (token != null) {
         final response = await http.get(
-          Uri.parse('${ApiRequest.baseApiUrl}/user/profile/info'),
+          Uri.parse('${Config.baseApiUrl}/user/profile/info'),
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer $token'

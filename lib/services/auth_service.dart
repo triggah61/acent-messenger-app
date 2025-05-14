@@ -1,15 +1,15 @@
 import 'dart:convert';
+import 'package:chattingapp/constants/config.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthService {
-  static const String baseUrl = 'http://192.168.0.106:8000/api';
   final storage = const FlutterSecureStorage();
 
   Future<Map<String, dynamic>> login(String phoneNumber, String password) async {
     try {
       final response = await http.post(
-        Uri.parse('$baseUrl/auth/login'),
+        Uri.parse('${Config.baseApiUrl}/auth/login'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'phone_number': phoneNumber,
@@ -38,7 +38,7 @@ class AuthService {
 
     try {
       final response = await http.get(
-        Uri.parse('$baseUrl/auth/profile'),
+        Uri.parse('${Config.baseApiUrl}/auth/profile'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',

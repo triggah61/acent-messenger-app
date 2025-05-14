@@ -1,4 +1,4 @@
-import 'package:chattingapp/services/api_request.dart';
+import 'package:chattingapp/constants/config.dart';
 import 'package:flutter/material.dart';
 import 'package:chattingapp/views/authentication/signup_sreeen.dart';
 import 'package:country_code_picker/country_code_picker.dart';
@@ -78,7 +78,7 @@ class _LoginScreenState extends State<LoginScreen>
 
     try {
       final response = await http.post(
-        Uri.parse('${ApiRequest.baseApiUrl}/auth/loginRequest'),
+        Uri.parse('${Config.baseApiUrl}/auth/loginRequest'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'dialCode': _selectedCountryCode,

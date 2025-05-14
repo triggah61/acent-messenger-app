@@ -62,7 +62,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
 
       final response = await http.post(
-        Uri.parse('${ApiRequest.baseApiUrl}/profile/updateProfile'),
+        Uri.parse('${Config.baseApiUrl}/profile/updateProfile'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token'
@@ -225,7 +225,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Create multipart request
       var request = http.MultipartRequest(
         'POST',
-        Uri.parse('${ApiRequest.baseApiUrl}/profile/uploadPhoto'),
+        Uri.parse('${Config.baseApiUrl}/profile/uploadPhoto'),
       );
 
       // Add authorization header

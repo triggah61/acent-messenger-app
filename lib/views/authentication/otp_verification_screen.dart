@@ -1,3 +1,4 @@
+import 'package:chattingapp/constants/config.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -88,7 +89,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
 
     try {
       final response = await http.post(
-        Uri.parse('${ApiRequest.baseApiUrl}/auth/resendOTP'),
+        Uri.parse('${Config.baseApiUrl}/auth/resendOTP'),
         headers: {
           'Content-Type': 'application/json',
         },
@@ -128,7 +129,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
 
     try {
       final response = await http.post(
-        Uri.parse('${ApiRequest.baseApiUrl}/auth/login/verify'),
+        Uri.parse('${Config.baseApiUrl}/auth/login/verify'),
         headers: {
           'Content-Type': 'application/json',
         },
