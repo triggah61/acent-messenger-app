@@ -2,7 +2,12 @@ import 'package:chattingapp/constants/config.dart';
 import 'package:chattingapp/models/chat_session.dart';
 import 'package:chattingapp/views/contacts/contacts.dart';
 import 'package:flutter/material.dart';
-
+import 'package:http/http.dart' as http;
+import 'package:provider/provider.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:file_picker/file_picker.dart';
+import '../../providers/auth_provider.dart';
 import '../../constants/colors.dart';
 import '../camera/camera.dart';
 import '../chatcalls/chatcalls.dart';
@@ -24,11 +29,110 @@ class _ConversationsState extends State<Conversations> {
   bool _isAttachmentSheetVisible = false;
   final TextEditingController _messageController = TextEditingController();
   ChatSession? session;
+  List<File> _attachments = [];
+  bool _isSending = false;
 
   @override
   void dispose() {
     _messageController.dispose();
     super.dispose();
+  }
+
+  Future<void> _sendMessage() async {
+    if (_messageController.text.trim().isEmpty && _attachments.isEmpty) return;
+
+    setState(() {
+      _isSending = true;
+    });
+
+    try {
+      final token = await context.read<AuthProvider>().getToken();
+      if (token == null) {
+        throw Exception('No authentication token available');
+      }
+
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${Config.baseApiUrl}/user/chat/sendMessage'),
+      );
+
+      // Add headers
+      request.headers.addAll({
+        'Authorization': 'Bearer $token',
+      });
+
+      // Add form fields
+      request.fields['chatSessionId'] = widget.session?.id ?? '';
+      request.fields['message'] = _messageController.text.trim();
+
+      // Add attachments if any
+      for (var attachment in _attachments) {
+        request.files.add(
+          await http.MultipartFile.fromPath(
+            'attachments',
+            attachment.path,
+          ),
+        );
+      }
+
+      final response = await request.send();
+      final responseBody = await response.stream.bytesToString();
+
+      if (response.statusCode == 200) {
+        // Clear message and attachments after successful send
+        _messageController.clear();
+        setState(() {
+          _attachments = [];
+        });
+      } else {
+        throw Exception('Failed to send message: $responseBody');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to send message: ${e.toString()}')),
+      );
+    } finally {
+      setState(() {
+        _isSending = false;
+      });
+    }
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(source: source);
+      if (image != null) {
+        setState(() {
+          _attachments.add(File(image.path));
+        });
+        _hideAttachmentSheet();
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to pick image: ${e.toString()}')),
+      );
+    }
+  }
+
+  Future<void> _pickFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        allowMultiple: true,
+        type: FileType.any,
+      );
+
+      if (result != null) {
+        setState(() {
+          _attachments.addAll(result.files.map((file) => File(file.path!)));
+        });
+        _hideAttachmentSheet();
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to pick file: ${e.toString()}')),
+      );
+    }
   }
 
   void _toggleAttachmentSheet() {
@@ -177,6 +281,45 @@ class _ConversationsState extends State<Conversations> {
         ),
         body: Column(
           children: [
+            if (_attachments.isNotEmpty)
+              Container(
+                height: 100,
+                padding: const EdgeInsets.all(8),
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _attachments.length,
+                  itemBuilder: (context, index) {
+                    return Stack(
+                      children: [
+                        Container(
+                          width: 80,
+                          height: 80,
+                          margin: const EdgeInsets.only(right: 8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(8),
+                            image: DecorationImage(
+                              image: FileImage(_attachments[index]),
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 0,
+                          top: 0,
+                          child: IconButton(
+                            icon: const Icon(Icons.close, color: Colors.red),
+                            onPressed: () {
+                              setState(() {
+                                _attachments.removeAt(index);
+                              });
+                            },
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              ),
             Expanded(
               child: SingleChildScrollView(
                 reverse: true,
@@ -246,21 +389,17 @@ class _ConversationsState extends State<Conversations> {
                     ),
                   ),
                   IconButton(
-                    onPressed: () {
-                      Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (context) => const CallScreen()),
-                      );
-                      // Implement send message functionality here
-                      if (_messageController.text.isNotEmpty) {
-                        // Send the message
-                        _messageController.clear();
-                      }
-                    },
-                    icon: const Icon(
-                      Icons.send,
-                      color: Colors.blue,
-                    ),
+                    onPressed: _isSending ? null : _sendMessage,
+                    icon: _isSending
+                        ? const SizedBox(
+                            width: 24,
+                            height: 24,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(
+                            Icons.send,
+                            color: Colors.blue,
+                          ),
                   ),
                 ],
               ),
@@ -271,8 +410,6 @@ class _ConversationsState extends State<Conversations> {
       ),
     );
   }
-
-
 
   Widget _buildAttachmentSheet(BuildContext context) {
     return Container(
@@ -299,7 +436,7 @@ class _ConversationsState extends State<Conversations> {
             label: 'Poll',
             onPressed: () {
               _hideAttachmentSheet();
-              _handlePollAttachment(); // Navigate to the camera screen
+              _handlePollAttachment();
             },
           ),
           _AttachmentButton(
@@ -307,7 +444,7 @@ class _ConversationsState extends State<Conversations> {
             label: 'Contact',
             onPressed: () {
               _hideAttachmentSheet();
-              _handleContactAttachment(); // Navigate to the contact screen
+              _handleContactAttachment();
             },
           ),
           _AttachmentButton(
@@ -315,7 +452,7 @@ class _ConversationsState extends State<Conversations> {
             label: 'My Location',
             onPressed: () {
               _hideAttachmentSheet();
-              _handleLocationAttachment(); // Navigate to the location screen
+              _handleLocationAttachment();
             },
           ),
           _AttachmentButton(
@@ -323,7 +460,7 @@ class _ConversationsState extends State<Conversations> {
             label: 'Document',
             onPressed: () {
               _hideAttachmentSheet();
-              _handleDocumentAttachment(); // Navigate to the document screen
+              _pickFile();
             },
           ),
           _AttachmentButton(
@@ -331,29 +468,25 @@ class _ConversationsState extends State<Conversations> {
             label: 'Camera',
             onPressed: () {
               _hideAttachmentSheet();
-              _handleCameraAttachment(); // Navigate to the camera screen
+              _pickImage(ImageSource.camera);
             },
           ),
-
-
           _AttachmentButton(
             icon: Icons.mic,
             label: 'Record',
             onPressed: () {
               _hideAttachmentSheet();
-              _handleRecordAttachment(); // Navigate to the record screen
+              _handleRecordAttachment();
             },
           ),
-
           _AttachmentButton(
             icon: Icons.image,
             label: 'Gallery',
             onPressed: () {
               _hideAttachmentSheet();
-              _handleGalleryAttachment(); // Navigate to the gallery screen
+              _pickImage(ImageSource.gallery);
             },
           ),
-
         ],
       ),
     );
