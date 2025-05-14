@@ -1,4 +1,3 @@
-import 'package:chattingapp/services/api_request.dart';
 import 'package:chattingapp/providers/auth_provider.dart';
 import 'package:chattingapp/constants/config.dart';
 import 'package:flutter/material.dart';
