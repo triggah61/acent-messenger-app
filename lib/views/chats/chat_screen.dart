@@ -432,6 +432,12 @@ class _ChatSessionTile extends StatelessWidget {
       onTap: () {
         print("ChatSessionTile - onTap: Tapped session ${session.id}");
         // TODO: Navigate to chat detail
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => Conversations(session: session),
+          ),
+        );
       },
     );
   }

@@ -1,3 +1,5 @@
+import 'package:chattingapp/constants/config.dart';
+import 'package:chattingapp/models/chat_session.dart';
 import 'package:chattingapp/views/contacts/contacts.dart';
 import 'package:flutter/material.dart';
 
@@ -11,7 +13,8 @@ import '../record/record.dart';
 import '../sendlocation/sendlocation.dart';
 
 class Conversations extends StatefulWidget {
-  const Conversations({super.key});
+  final ChatSession? session;
+  const Conversations({super.key, this.session});
 
   @override
   State<Conversations> createState() => _ConversationsState();
@@ -20,6 +23,7 @@ class Conversations extends StatefulWidget {
 class _ConversationsState extends State<Conversations> {
   bool _isAttachmentSheetVisible = false;
   final TextEditingController _messageController = TextEditingController();
+  ChatSession? session;
 
   @override
   void dispose() {
@@ -129,29 +133,43 @@ class _ConversationsState extends State<Conversations> {
               },
             ),
           ],
-          title: const Row(
+          title: Row(
             children: [
               CircleAvatar(
-                backgroundImage:
-                AssetImage('images/c2.png'), // Assuming image is in assets folder
+                backgroundImage: widget.session?.photo != null
+                    ? NetworkImage(Config.getPhotoUrl(widget.session!.photo!))
+                    : const AssetImage('images/c2.png') as ImageProvider,
+                child: widget.session?.photo == null
+                    ? Text(widget.session?.title.substring(0, 1).toUpperCase() ?? '')
+                    : null,
               ),
-              SizedBox(width: 8),
+              const SizedBox(width: 8),
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Maddy Max',
-                    style: TextStyle(
+                    widget.session?.title ?? 'Unknown',
+                    style: const TextStyle(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  Text(
-                    '(+44) 50 9285 3022',
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: Colors.grey,
+                  if (widget.session?.type == 'group')
+                    Text(
+                      '${widget.session?.recipients.length ?? 0} participants',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
+                    )
+                  else
+                    Text(
+                      '${widget.session?.otherUser?.dialCode} ${widget.session?.otherUser?.phone}',
+                      style: const TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey,
+                      ),
                     ),
-                  ),
+
                 ],
               ),
             ],

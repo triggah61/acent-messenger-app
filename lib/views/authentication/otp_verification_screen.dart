@@ -8,7 +8,6 @@ import '../../commonwidgets/botttommnavigationbar.dart';
 import '../../widgets/custombtn.dart';
 import '../../widgets/detailstext1.dart';
 import '../../providers/auth_provider.dart';
-import '../../services/api_request.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   final String phone;

@@ -6,6 +6,7 @@ class ChatSession {
   final String type;
   final LastMessage? lastMessage;
   final String? createdBy;
+  final Profile? otherUser;
   final String status;
   final List<Recipient> recipients;
   final String? photo;
@@ -17,6 +18,7 @@ class ChatSession {
     required this.type,
     this.lastMessage,
     this.createdBy,
+    this.otherUser,
     required this.status,
     required this.recipients,
     this.photo,
@@ -30,6 +32,7 @@ class ChatSession {
       type: json['type'],
       lastMessage: json['lastMessage'] != null ? LastMessage.fromJson(json['lastMessage']) : null,
       createdBy: json['createdBy'],
+      otherUser: json['otherUser'] != null ? Profile.fromJson(json['otherUser']) : null,
       status: json['status'],
       recipients: (json['receipients'] as List).map((r) => Recipient.fromJson(r)).toList(),
       photo: json['photo'],
