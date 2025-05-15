@@ -5,7 +5,7 @@ class Message {
   final String content;
   final List<Attachment> attachments;
   final String status;
-  final List<String> deletedFor;
+  // final List<String> deletedFor;
   final String? replyTo;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -17,7 +17,7 @@ class Message {
     required this.content,
     required this.attachments,
     required this.status,
-    required this.deletedFor,
+    // required this.deletedFor,
     this.replyTo,
     required this.createdAt,
     required this.updatedAt,
@@ -33,7 +33,7 @@ class Message {
           .map((attachment) => Attachment.fromJson(attachment))
           .toList(),
       status: json['status'],
-      deletedFor: List<String>.from(json['deletedFor']),
+      // deletedFor: List<String>.from(json['deletedFor']),
       replyTo: json['replyTo'],
       createdAt: DateTime.parse(json['createdAt']),
       updatedAt: DateTime.parse(json['updatedAt']),

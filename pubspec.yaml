@@ -62,6 +62,7 @@ dependencies:
   image_picker: ^1.0.4
   permission_handler: ^11.3.0
   timeago: ^3.7.1
+  socket_io_client: ^2.0.3+1
 
 dev_dependencies:
   flutter_test:

@@ -2,6 +2,7 @@ import 'package:chattingapp/constants/config.dart';
 import 'package:chattingapp/models/chat_session.dart';
 import 'package:chattingapp/models/message.dart';
 import 'package:chattingapp/services/auth_service.dart';
+import 'package:chattingapp/services/socket_service.dart';
 import 'package:chattingapp/views/contacts/contacts.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -19,6 +20,7 @@ import '../record/record.dart';
 import '../sendlocation/sendlocation.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'dart:convert';
+import 'dart:async';
 
 class Conversations extends StatefulWidget {
   final ChatSession? session;
@@ -30,11 +32,14 @@ class Conversations extends StatefulWidget {
 
 class _ConversationsState extends State<Conversations> {
   final AuthService _authService = AuthService();
+  final SocketService _socketService = SocketService.instance;
   bool _isAttachmentSheetVisible = false;
   final TextEditingController _messageController = TextEditingController();
   ChatSession? session;
   List<File> _attachments = [];
   bool _isSending = false;
+  bool _isTyping = false;
+  Timer? _typingTimer;
 
   // Message list state
   List<Message> _messages = [];
@@ -42,17 +47,57 @@ class _ConversationsState extends State<Conversations> {
   bool _hasMore = true;
   int _currentPage = 1;
   final ScrollController _scrollController = ScrollController();
-  final int _limit = 10;
+  final int _limit = 20;
 
   @override
   void initState() {
     super.initState();
+    _initializeSocket();
     _loadMessages();
     _scrollController.addListener(_scrollListener);
   }
 
+  Future<void> _initializeSocket() async {
+    try {
+      await _socketService.initializeSocket();
+      _socketService.joinChatSession(widget.session?.id ?? '');
+      
+      // Listen for new messages
+      _socketService.onNewMessage((message) {
+        setState(() {
+          _messages.insert(0, message);
+        });
+      });
+
+      // Listen for typing events
+      _socketService.onTyping((userId, isTyping) {
+        if (userId != context.read<AuthProvider>().userId) {
+          setState(() {
+            _isTyping = isTyping;
+          });
+        }
+      });
+    } catch (e) {
+      print('Failed to initialize socket: $e');
+    }
+  }
+
+  void _handleTyping() {
+    if (_typingTimer?.isActive ?? false) {
+      _typingTimer?.cancel();
+    }
+
+    _socketService.emitTyping(widget.session?.id ?? '', true);
+
+    _typingTimer = Timer(const Duration(seconds: 2), () {
+      _socketService.emitTyping(widget.session?.id ?? '', false);
+    });
+  }
+
   @override
   void dispose() {
+    _typingTimer?.cancel();
+    _socketService.leaveChatSession(widget.session?.id ?? '');
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -371,6 +416,17 @@ class _ConversationsState extends State<Conversations> {
         ),
         body: Column(
           children: [
+            if (_isTyping)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                child: const Text(
+                  'Someone is typing...',
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontSize: 12,
+                  ),
+                ),
+              ),
             if (_attachments.isNotEmpty)
               Container(
                 height: 100,
@@ -466,6 +522,7 @@ class _ConversationsState extends State<Conversations> {
                       padding: const EdgeInsets.symmetric(horizontal: 8.0),
                       child: TextField(
                         controller: _messageController,
+                        onChanged: (_) => _handleTyping(),
                         decoration: InputDecoration(
                           hintText: 'Type a message ...',
                           border: InputBorder.none,
