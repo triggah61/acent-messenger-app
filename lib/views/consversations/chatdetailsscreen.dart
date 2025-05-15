@@ -1,5 +1,7 @@
 import 'package:chattingapp/constants/config.dart';
 import 'package:chattingapp/models/chat_session.dart';
+import 'package:chattingapp/models/message.dart';
+import 'package:chattingapp/services/auth_service.dart';
 import 'package:chattingapp/views/contacts/contacts.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -16,6 +18,8 @@ import '../documents/documents.dart';
 import '../gallery/gallery.dart';
 import '../record/record.dart';
 import '../sendlocation/sendlocation.dart';
+import 'package:timeago/timeago.dart' as timeago;
+import 'dart:convert';
 
 class Conversations extends StatefulWidget {
   final ChatSession? session;
@@ -26,16 +30,91 @@ class Conversations extends StatefulWidget {
 }
 
 class _ConversationsState extends State<Conversations> {
+  final AuthService _authService = AuthService();
   bool _isAttachmentSheetVisible = false;
   final TextEditingController _messageController = TextEditingController();
   ChatSession? session;
   List<File> _attachments = [];
   bool _isSending = false;
 
+  // Message list state
+  List<Message> _messages = [];
+  bool _isLoading = false;
+  bool _hasMore = true;
+  int _currentPage = 1;
+  final ScrollController _scrollController = ScrollController();
+  final int _limit = 10;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMessages();
+    _scrollController.addListener(_scrollListener);
+  }
+
   @override
   void dispose() {
     _messageController.dispose();
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  void _scrollListener() {
+    if (_scrollController.position.pixels ==
+        _scrollController.position.maxScrollExtent) {
+      if (!_isLoading && _hasMore) {
+        _loadMessages();
+      }
+    }
+  }
+
+  Future<void> _loadMessages() async {
+    if (_isLoading) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // final token = await context.read<AuthProvider>().getToken();
+
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('No authentication token available');
+      }
+
+      final response = await http.get(
+        Uri.parse(
+            '${Config.baseApiUrl}/user/chat/getMessages/${widget.session?.id}?page=$_currentPage&limit=$_limit'),
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body)['data'];
+        final List<Message> newMessages = (data['docs'] as List)
+            .map((message) => Message.fromJson(message))
+            .toList();
+
+        setState(() {
+          _messages.addAll(newMessages);
+          // _messages.reverse();
+          _hasMore = data['hasNextPage'] ?? false;
+          _currentPage++;
+          _isLoading = false;
+        });
+      } else {
+        throw Exception('Failed to load messages');
+      }
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load messages: ${e.toString()}')),
+      );
+    }
   }
 
   Future<void> _sendMessage() async {
@@ -46,7 +125,7 @@ class _ConversationsState extends State<Conversations> {
     });
 
     try {
-      final token = await context.read<AuthProvider>().getToken();
+      final token = await _authService.getToken();
       if (token == null) {
         throw Exception('No authentication token available');
       }
@@ -150,48 +229,63 @@ class _ConversationsState extends State<Conversations> {
   void _handleCameraAttachment() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => CameraScreen()), // Replace CameraScreen with your actual camera widget/route
+      MaterialPageRoute(
+          builder: (context) =>
+              CameraScreen()), // Replace CameraScreen with your actual camera widget/route
     );
   }
 
   void _handleRecordAttachment() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => RecordScreen()), // Replace RecordScreen with your actual record widget/route
+      MaterialPageRoute(
+          builder: (context) =>
+              RecordScreen()), // Replace RecordScreen with your actual record widget/route
     );
   }
+
   void _handlePollAttachment() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => CreatePollScreen()), // Replace RecordScreen with your actual record widget/route
+      MaterialPageRoute(
+          builder: (context) =>
+              CreatePollScreen()), // Replace RecordScreen with your actual record widget/route
     );
   }
 
   void _handleContactAttachment() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => ContactsScreen()), // Replace ContactScreen with your actual contact widget/route
+      MaterialPageRoute(
+          builder: (context) =>
+              ContactsScreen()), // Replace ContactScreen with your actual contact widget/route
     );
   }
 
   void _handleGalleryAttachment() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => GalleryScreen()), // Replace GalleryScreen with your actual gallery widget/route
+      MaterialPageRoute(
+          builder: (context) =>
+              GalleryScreen()), // Replace GalleryScreen with your actual gallery widget/route
     );
   }
 
   void _handleLocationAttachment() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => LocationScreen()), // Replace LocationScreen with your actual location widget/route
+      MaterialPageRoute(
+          builder: (context) =>
+              LocationScreen()), // Replace LocationScreen with your actual location widget/route
     );
   }
 
   void _handleDocumentAttachment() {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => DocumentScreen()), // Replace DocumentScreen with your actual document widget/route
+      MaterialPageRoute(
+          builder: (context) =>
+              DocumentScreen()), // Replace DocumentScreen with your actual document widget/route
     );
   }
 
@@ -224,7 +318,6 @@ class _ConversationsState extends State<Conversations> {
                   context,
                   MaterialPageRoute(builder: (context) => const CallScreen()),
                 );
-
               },
             ),
             IconButton(
@@ -244,7 +337,9 @@ class _ConversationsState extends State<Conversations> {
                     ? NetworkImage(Config.getPhotoUrl(widget.session!.photo!))
                     : const AssetImage('images/c2.png') as ImageProvider,
                 child: widget.session?.photo == null
-                    ? Text(widget.session?.title.substring(0, 1).toUpperCase() ?? '')
+                    ? Text(
+                        widget.session?.title.substring(0, 1).toUpperCase() ??
+                            '')
                     : null,
               ),
               const SizedBox(width: 8),
@@ -273,7 +368,6 @@ class _ConversationsState extends State<Conversations> {
                         color: Colors.grey,
                       ),
                     ),
-
                 ],
               ),
             ],
@@ -321,36 +415,35 @@ class _ConversationsState extends State<Conversations> {
                 ),
               ),
             Expanded(
-              child: SingleChildScrollView(
-                reverse: true,
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 20),
-                  child: Column(
-                    children: [
-                      Text(
-                        'Yesterday',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 12,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const MessageBubble(
-                        message:
-                        'Hai Rizal, I\'m on the way to your home, Please wait a moment. Thanks!',
-                        isSent: false,
-                        time: '4:26 Am',
-                      ),
-                      const SizedBox(height: 8),
-                      const MessageBubble(
-                        message: 'Sure. I\'ll be there in a minute',
-                        isSent: true,
-                        time: '7:22 Am',
-                      ),
-                    ],
-                  ),
-                ),
-              ),
+              child: _isLoading && _messages.isEmpty
+                  ? const Center(child: CircularProgressIndicator())
+                  : ListView.builder(
+                      controller: _scrollController,
+                      reverse: true,
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      itemCount: _messages.length + (_hasMore ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index == _messages.length) {
+                          return const Center(
+                            child: Padding(
+                              padding: EdgeInsets.all(8.0),
+                              child: CircularProgressIndicator(),
+                            ),
+                          );
+                        }
+
+                        final message = _messages[index];
+                        final isSent = message.sender.id ==
+                            context.read<AuthProvider>().userId;
+
+                        return MessageBubble(
+                          message: message.content,
+                          isSent: isSent,
+                          time: timeago.format(message.createdAt),
+                          attachments: message.attachments,
+                        );
+                      },
+                    ),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -380,7 +473,8 @@ class _ConversationsState extends State<Conversations> {
                         decoration: InputDecoration(
                           hintText: 'Type a message ...',
                           border: InputBorder.none,
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 8),
                           filled: true,
                           fillColor: Colors.white,
                         ),
@@ -406,7 +500,8 @@ class _ConversationsState extends State<Conversations> {
             ),
           ],
         ),
-        bottomSheet: _isAttachmentSheetVisible ? _buildAttachmentSheet(context) : null,
+        bottomSheet:
+            _isAttachmentSheetVisible ? _buildAttachmentSheet(context) : null,
       ),
     );
   }
@@ -521,7 +616,8 @@ class _AttachmentButton extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 8),
-        Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+        Text(label,
+            style: const TextStyle(fontSize: 12, color: Colors.black54)),
       ],
     );
   }
@@ -531,36 +627,38 @@ class MessageBubble extends StatelessWidget {
   final String message;
   final bool isSent;
   final String time;
+  final List<Attachment> attachments;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.isSent,
     required this.time,
+    this.attachments = const [],
   });
 
   @override
   Widget build(BuildContext context) {
-    Color bubbleColor = isSent
-        ? const Color(0xFFDCF8C6) // Light green for sent
-        : Colors.white; // White for received (or a light grey like #F0F0F0)
+    Color bubbleColor = isSent ? const Color(0xFFDCF8C6) : Colors.white;
     Color textColor = Colors.black87;
     Color timeColor = Colors.grey[600]!;
 
     return Align(
       alignment: isSent ? Alignment.bottomRight : Alignment.bottomLeft,
       child: Container(
-        padding: const EdgeInsets.all(12), // Reduced padding slightly
-        margin: const EdgeInsets.symmetric(vertical: 2), // Added vertical margin
+        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.symmetric(vertical: 2),
         decoration: BoxDecoration(
           color: bubbleColor,
           borderRadius: BorderRadius.only(
-            topLeft: !isSent ? const Radius.circular(18) : const Radius.circular(12), // More rounded
-            topRight: isSent ? const Radius.circular(18) : const Radius.circular(12),
+            topLeft:
+                !isSent ? const Radius.circular(18) : const Radius.circular(12),
+            topRight:
+                isSent ? const Radius.circular(18) : const Radius.circular(12),
             bottomLeft: const Radius.circular(18),
             bottomRight: const Radius.circular(18),
           ),
-          boxShadow: [ // Added a subtle shadow for depth
+          boxShadow: [
             BoxShadow(
               color: Color.fromARGB((0.1 * 255).toInt(), 128, 128, 128),
               spreadRadius: 0.5,
@@ -571,15 +669,52 @@ class MessageBubble extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment:
-          isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+              isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
           children: [
-            Text(
-              message,
-              style: TextStyle(
-                color: textColor,
+            if (message.isNotEmpty)
+              Text(
+                message,
+                style: TextStyle(
+                  color: textColor,
+                ),
               ),
-            ),
-            const SizedBox(height: 2), // Reduced spacing between message and time
+            if (attachments.isNotEmpty)
+              ...attachments
+                  .map((attachment) => Padding(
+                        padding: const EdgeInsets.only(top: 8.0),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            attachment.url,
+                            width: 200,
+                            height: 200,
+                            fit: BoxFit.cover,
+                            loadingBuilder: (context, child, loadingProgress) {
+                              if (loadingProgress == null) return child;
+                              return Container(
+                                width: 200,
+                                height: 200,
+                                color: Colors.grey[200],
+                                child: const Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
+                            },
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                width: 200,
+                                height: 200,
+                                color: Colors.grey[200],
+                                child: const Center(
+                                  child: Icon(Icons.error),
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                      ))
+                  .toList(),
+            const SizedBox(height: 2),
             Text(
               time,
               style: TextStyle(
@@ -593,14 +728,3 @@ class MessageBubble extends StatelessWidget {
     );
   }
 }
-
-
-
-
-
-
-
-
-
-
-

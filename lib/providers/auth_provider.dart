@@ -5,21 +5,36 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/profile.dart';
 import '../services/auth_service.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
   Profile? _profile;
   bool _isLoading = false;
   bool _isInitialized = false;
+  String? _token;
+  String? _userId;
 
   Profile? get profile => _profile;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _profile != null;
   bool get isInitialized => _isInitialized;
+  String? get token => _token;
+  String? get userId => _userId;
   
   // Get token for API requests
   Future<String?> getToken() async {
-    return await _authService.getToken();
+    if (_token != null) return _token;
+    final storage = const FlutterSecureStorage();
+    _token = await storage.read(key: 'token');
+    return _token;
+  }
+
+  Future<String?> getUserId() async {
+    if (_userId != null) return _userId;
+    final storage = const FlutterSecureStorage();
+    _userId = await storage.read(key: 'userId');
+    return _userId;
   }
 
   // Call this after successful login to fetch profile
@@ -76,6 +91,11 @@ class AuthProvider with ChangeNotifier {
     await _authService.logout();
     _profile = null;
     _isInitialized = false;
+    _token = null;
+    _userId = null;
+    final storage = const FlutterSecureStorage();
+    await storage.delete(key: 'token');
+    await storage.delete(key: 'userId');
     notifyListeners();
   }
 
@@ -99,5 +119,19 @@ class AuthProvider with ChangeNotifier {
       _isInitialized = true;
       notifyListeners();
     }
+  }
+
+  Future<void> setToken(String token) async {
+    _token = token;
+    final storage = const FlutterSecureStorage();
+    await storage.write(key: 'token', value: token);
+    notifyListeners();
+  }
+
+  Future<void> setUserId(String userId) async {
+    _userId = userId;
+    final storage = const FlutterSecureStorage();
+    await storage.write(key: 'userId', value: userId);
+    notifyListeners();
   }
 }
