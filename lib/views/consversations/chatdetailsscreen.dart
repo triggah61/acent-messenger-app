@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
-import 'package:file_picker/file_picker.dart';
 import '../../providers/auth_provider.dart';
 import '../../constants/colors.dart';
 import '../camera/camera.dart';
@@ -196,14 +195,11 @@ class _ConversationsState extends State<Conversations> {
 
   Future<void> _pickFile() async {
     try {
-      FilePickerResult? result = await FilePicker.platform.pickFiles(
-        allowMultiple: true,
-        type: FileType.any,
-      );
-
-      if (result != null) {
+      final ImagePicker picker = ImagePicker();
+      final XFile? file = await picker.pickMedia();
+      if (file != null) {
         setState(() {
-          _attachments.addAll(result.files.map((file) => File(file.path!)));
+          _attachments.add(File(file.path));
         });
         _hideAttachmentSheet();
       }
