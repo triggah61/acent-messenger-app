@@ -8,6 +8,9 @@ import 'dart:convert';
 import '../../widgets/auth_middleware.dart';
 import 'package:provider/provider.dart';
 import '../../providers/contacts_provider.dart';
+import '../../services/chat_service.dart';
+import 'invitation_screen.dart';
+import '../consversations/chatdetailsscreen.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -17,6 +20,8 @@ class ContactsScreen extends StatefulWidget {
 }
 
 class _ContactsScreenState extends State<ContactsScreen> {
+  final ChatService _chatService = ChatService(AuthService());
+
   @override
   void initState() {
     super.initState();
@@ -26,16 +31,55 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
-  void _handleContactAction(FormattedContact contact) {
-    print(contact.toString());
-    if (contact.isExisting) {
-      print('existing');  
-      // Navigate to chat
-      // TODO: Implement chat navigation
+  Future<void> _handleContactAction(FormattedContact contact) async {
+    if (contact.isExisting && contact.id != null) {
+      try {
+        // Show loading indicator
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Opening chat...'),
+              duration: Duration(seconds: 1),
+            ),
+          );
+        }
+
+        // Find or create chat session
+        final chatSession = await _chatService.findOrCreateSession(contact.id!);
+
+        // Navigate to chat details screen
+        if (mounted) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => Conversations(
+                session: chatSession,
+              ),
+            ),
+          );
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Error opening chat: $e'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
     } else {
-      print('not existing');
-      // Send invitation
-      // TODO: Implement invitation sending
+      // Navigate to invitation screen for non-existing contacts
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => InvitationScreen(
+              contact: contact,
+            ),
+          ),
+        );
+      }
     }
   }
 

@@ -1,3 +1,4 @@
+import 'package:chattingapp/models/message.dart';
 import 'package:chattingapp/models/profile.dart';
 
 class ChatSession {
@@ -74,7 +75,7 @@ class LastMessage {
 }
 
 class Recipient {
-  final String user;
+  final Sender user;
   final String role;
   final bool isMute;
   final String status;
@@ -90,7 +91,7 @@ class Recipient {
 
   factory Recipient.fromJson(Map<String, dynamic> json) {
     return Recipient(
-      user: json['user'],
+      user: Sender.fromJson(json['user']),
       role: json['role'],
       isMute: json['isMute'],
       status: json['status'],
