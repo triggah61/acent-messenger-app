@@ -129,7 +129,7 @@ class _HomeScreenState extends State<HomeScreen> {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (_) => const CreateGroupScreen(),
+                              builder: (_) => const CreateGroups(),
                             ),
                           ).then((_) {
                             if (mounted) {

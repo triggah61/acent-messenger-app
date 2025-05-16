@@ -1,229 +1,245 @@
 import 'package:flutter/material.dart';
-import '../../../constants/colors.dart';
+import 'package:provider/provider.dart';
+import 'dart:convert';
+import '../../providers/contacts_provider.dart';
+import '../../services/chat_service.dart';
+import '../../services/auth_service.dart';
+import '../consversations/chatdetailsscreen.dart';
 
-class CreateGroupScreen extends StatefulWidget {
-  const CreateGroupScreen({super.key});
+class CreateGroups extends StatefulWidget {
+  const CreateGroups({Key? key}) : super(key: key);
 
   @override
-  CreateGroupScreenState createState() => CreateGroupScreenState();
+  State<CreateGroups> createState() => _CreateGroupsState();
 }
 
-class CreateGroupScreenState extends State<CreateGroupScreen> {
-  final TextEditingController _groupNameController = TextEditingController();
-  List<Map<String, String>> selectedMembers = [];
+class _CreateGroupsState extends State<CreateGroups> {
+  final TextEditingController _titleController = TextEditingController();
+  final List<String> _selectedMemberIds = [];
+  bool _isLoading = false;
+  final ChatService _chatService = ChatService(AuthService());
 
-  void _navigateToAddMembers() async {
-    final result = await Navigator.push<List<Map<String, String>>>(
-      context,
-      MaterialPageRoute(builder: (context) => AddMembersScreen(selectedMembers)),
-    );
+  @override
+  void dispose() {
+    _titleController.dispose();
+    super.dispose();
+  }
 
-    if (result != null && mounted) { // Check if widget is still mounted
-      setState(() {
-        selectedMembers = result;
-      });
+  Future<void> _createGroup() async {
+    if (_titleController.text.trim().isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please enter a group title'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedMemberIds.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select at least one member'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final chatSession = await _chatService.createGroup(
+        _titleController.text.trim(),
+        _selectedMemberIds,
+      );
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => Conversations(
+              session: chatSession,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to create group: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      backgroundColor: const Color(0xFF121829),
       appBar: AppBar(
-        backgroundColor: AppColors.tabColor,
+        backgroundColor: Colors.transparent,
         elevation: 0,
-        title: const Text('Create Group', style: TextStyle(color: Colors.white)),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
           onPressed: () => Navigator.pop(context),
         ),
+        title: const Text(
+          'Create Group',
+          style: TextStyle(color: Colors.white),
+        ),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            TextField(
-              controller: _groupNameController,
-              decoration: InputDecoration(
-                labelText: 'Group Name',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-              ),
+      body: SafeArea(
+        child: Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(30),
+              topRight: Radius.circular(30),
             ),
-            const SizedBox(height: 16),
-            InkWell(
-              onTap: _navigateToAddMembers,
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.grey.shade300),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          ),
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Add members to group', style: TextStyle(fontSize: 16)),
-                    Icon(Icons.add, color: AppColors.buttonColor),
+                    const Text(
+                      'Group Details',
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: _titleController,
+                      decoration: InputDecoration(
+                        hintText: 'Enter group title',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        filled: true,
+                        fillColor: Colors.grey[100],
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    const Text(
+                      'Select Members',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '${_selectedMemberIds.length} members selected',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
                   ],
                 ),
               ),
-            ),
-            const SizedBox(height: 16),
-            Expanded(
-              child: ListView.builder(
-                itemCount: selectedMembers.length,
-                itemBuilder: (context, index) {
-                  final member = selectedMembers[index];
-                  return Card(
-                    color: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    child: ListTile(
-                      leading: CircleAvatar(backgroundImage: AssetImage(member['image']!)),
-                      title: Text(member['name']!),
-                      subtitle: Text(member['phone']!),
-                      trailing: IconButton(
-                        icon: const Icon(Icons.remove_circle, color: Colors.red),
-                        onPressed: () {
-                          setState(() {
-                            selectedMembers.removeAt(index);
-                          });
-                        },
+              Expanded(
+                child: Consumer<ContactsProvider>(
+                  builder: (context, contactsProvider, child) {
+                    final existingContacts = contactsProvider.existingContacts;
+                    
+                    if (existingContacts.isEmpty) {
+                      return const Center(
+                        child: Text(
+                          'No contacts available',
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontSize: 16,
+                          ),
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      padding: const EdgeInsets.symmetric(horizontal: 24),
+                      itemCount: existingContacts.length,
+                      itemBuilder: (context, index) {
+                        final contact = existingContacts[index];
+                        final isSelected = _selectedMemberIds.contains(contact.id);
+
+                        return ListTile(
+                          leading: CircleAvatar(
+                            radius: 24,
+                            backgroundImage: contact.photo != null
+                                ? MemoryImage(base64Decode(contact.photo!))
+                                : const NetworkImage('https://via.placeholder.com/150') as ImageProvider,
+                          ),
+                          title: Text(
+                            '${contact.firstName} ${contact.lastName}',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                          trailing: Checkbox(
+                            value: isSelected,
+                            onChanged: (bool? value) {
+                              setState(() {
+                                if (value == true && contact.id != null) {
+                                  _selectedMemberIds.add(contact.id!);
+                                } else if (value == false && contact.id != null) {
+                                  _selectedMemberIds.remove(contact.id!);
+                                }
+                              });
+                            },
+                          ),
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _createGroup,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
                       ),
                     ),
-                  );
-                },
-              ),
-            ),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.buttonColor,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: () {
-                  //Navigator.push( // Removed navigator here
-                  //context,
-                  //MaterialPageRoute(builder: (context) => AddMembersScreen(selectedMembers)),
-                  //);
-                },
-                child: const Padding(
-                  padding: EdgeInsets.all(12.0),
-                  child: Text('Create Group', style: TextStyle(color: Colors.white, fontSize: 16)),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
+                            'Create Group',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                            ),
+                          ),
+                  ),
                 ),
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    _groupNameController.dispose();
-    super.dispose();
-  }
-}
-
-class AddMembersScreen extends StatefulWidget {
-  final List<Map<String, String>> selectedMembers;
-  const AddMembersScreen(this.selectedMembers, {super.key});
-
-  @override
-  AddMembersScreenState createState() => AddMembersScreenState();
-}
-
-class AddMembersScreenState extends State<AddMembersScreen> {
-  List<Map<String, String>> allMembers = [...friends];
-  List<Map<String, String>> selected = [];
-
-  @override
-  void initState() {
-    super.initState();
-    selected = List.from(widget.selectedMembers);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        backgroundColor: AppColors.tabColor,
-        title: const Text('Add Members', style: TextStyle(color: Colors.white)),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(8.0),
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: TextField(
-                decoration: InputDecoration(
-                  labelText: 'Search',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  prefixIcon: const Icon(Icons.search),
-                ),
-                onChanged: (query) {
-                  setState(() {
-                    allMembers = friends
-                        .where((member) => member['name']!.toLowerCase().contains(query.toLowerCase()))
-                        .toList();
-                  });
-                },
-              ),
-            ),
-            Expanded(
-              child: ListView.builder(
-                itemCount: allMembers.length,
-                itemBuilder: (context, index) {
-                  final member = allMembers[index];
-                  final isSelected = selected.contains(member);
-                  return Card(
-                    color: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                    child: CheckboxListTile(
-                      title: Text(member['name']!),
-                      subtitle: Text(member['phone']!),
-                      secondary: CircleAvatar(backgroundImage: AssetImage(member['image']!)),
-                      value: isSelected,
-                      onChanged: (value) {
-                        setState(() {
-                          if (value == true) {
-                            selected.add(member);
-                          } else {
-                            selected.remove(member);
-                          }
-                        });
-                      },
-                    ),
-                  );
-                },
-              ),
-            ),
-            SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.buttonColor),
-                onPressed: () {
-                  Navigator.pop(context, selected);
-                },
-                child: const Padding(
-                  padding: EdgeInsets.all(12.0),
-                  child: Text('Add Members', style: TextStyle(color: Colors.white, fontSize: 16)),
-                ),
-              ),
-            ),
-            const SizedBox(height: 10)
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
 }
-
-final List<Map<String, String>> friends = [
-  {"name": "David Wayne", "phone": "(+44) 905 326 3022", "image": "images/c2.png"},
-  {"name": "Edward Mint", "phone": "(+44) 926 2322", "image": "images/c3.png"},
-  {"name": "May HG. Kang", "phone": "(+44) 9288 214", "image": "images/c4.png"},
-  {"name": "Lily Dare", "phone": "(+44) 905 5299", "image": "images/c5.png"},
-  {"name": "Dennis Dang", "phone": "(+44) 923 939", "image": "images/c2.png"},
-];

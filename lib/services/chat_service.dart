@@ -31,4 +31,32 @@ class ChatService {
       rethrow;
     }
   }
+
+  Future<ChatSession> createGroup(String title, List<String> recipientIds) async {
+    try {
+      final token = await _authService.getToken();
+      final response = await http.post(
+        Uri.parse('${Config.baseApiUrl}/user/chat/createSession'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'title': title,
+          'recepientIds': recipientIds,
+          'type': 'group',
+        }),
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return ChatSession.fromJson(data['data']);
+      } else {
+        throw Exception('Failed to create group');
+      }
+    } catch (e) {
+      print('Error in createGroup: $e');
+      rethrow;
+    }
+  }
 } 
