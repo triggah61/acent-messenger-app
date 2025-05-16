@@ -7,6 +7,7 @@ class SocketService {
   static SocketService? _instance;
   IO.Socket? _socket;
   final AuthService _authService = AuthService();
+  final Map<String, Function(dynamic)> _listeners = {};
 
   // Singleton pattern
   static SocketService get instance {
@@ -60,18 +61,38 @@ class SocketService {
 
   // Listen for new messages
   void onNewMessage(Function(Message) callback) {
-    _socket?.on('new_message', (data) {
-      print('new_message');
+    final listener = (data) {
+      print('new_message: $data');
       final message = Message.fromJson(data);
       callback(message);
-    });
+    };
+    _socket?.on('new_message', listener);
+    _listeners['new_message'] = listener;
+  }
+
+  // Remove new message listener
+  void removeNewMessageListener() {
+    if (_listeners.containsKey('new_message')) {
+      _socket?.off('new_message', _listeners['new_message']);
+      _listeners.remove('new_message');
+    }
   }
 
   // Listen for typing events
   void onTyping(Function(String userId, bool isTyping) callback) {
-    _socket?.on('typing', (data) {
+    final listener = (data) {
       callback(data['userId'], data['isTyping']);
-    });
+    };
+    _socket?.on('typing', listener);
+    _listeners['typing'] = listener;
+  }
+
+  // Remove typing listener
+  void removeTypingListener() {
+    if (_listeners.containsKey('typing')) {
+      _socket?.off('typing', _listeners['typing']);
+      _listeners.remove('typing');
+    }
   }
 
   // Emit typing event
@@ -84,6 +105,12 @@ class SocketService {
 
   // Disconnect socket
   void disconnect() {
+    // Remove all listeners
+    _listeners.forEach((event, listener) {
+      _socket?.off(event, listener);
+    });
+    _listeners.clear();
+    
     _socket?.disconnect();
     _socket = null;
   }

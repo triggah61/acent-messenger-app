@@ -64,14 +64,16 @@ class _ConversationsState extends State<Conversations> {
       
       // Listen for new messages
       _socketService.onNewMessage((message) {
-        setState(() {
-          _messages.insert(0, message);
-        });
+        if (mounted) {
+          setState(() {
+            _messages.insert(0, message);
+          });
+        }
       });
 
       // Listen for typing events
       _socketService.onTyping((userId, isTyping) {
-        if (userId != context.read<AuthProvider>().userId) {
+        if (mounted && userId != context.read<AuthProvider>().userId) {
           setState(() {
             _isTyping = isTyping;
           });
@@ -97,6 +99,8 @@ class _ConversationsState extends State<Conversations> {
   @override
   void dispose() {
     _typingTimer?.cancel();
+    _socketService.removeNewMessageListener();
+    _socketService.removeTypingListener();
     _socketService.leaveChatSession(widget.session?.id ?? '');
     _messageController.dispose();
     _scrollController.dispose();
@@ -332,6 +336,8 @@ class _ConversationsState extends State<Conversations> {
 
   @override
   Widget build(BuildContext context) {
+    
+    final profileInfo = Provider.of<AuthProvider>(context, listen: false).profile;
     return GestureDetector(
       onTap: () {
         // Dismiss keyboard if open
@@ -485,11 +491,13 @@ class _ConversationsState extends State<Conversations> {
                         }
 
                         final message = _messages[index];
-                        final isSent = message.sender.id ==
-                            context.read<AuthProvider>().userId;
+                        final isSent = message.sender.id == profileInfo?.id;
+
+                        print('message.sender.id: ${message.sender.id}, profileInfo?.id: ${profileInfo?.id}');
 
                         return MessageBubble(
                           message: message.content,
+                          // message: message.sender.id,
                           isSent: isSent,
                           time: timeago.format(message.createdAt),
                           attachments: message.attachments,
