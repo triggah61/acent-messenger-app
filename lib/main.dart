@@ -5,10 +5,29 @@ import 'views/splash/splash.dart';
 import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
 import 'package:chattingapp/services/auth_service.dart';
+import 'providers/contacts_provider.dart';
 
 void main() {
   print("App - main: Starting application");
-  runApp(const MyApp());
+  runApp(
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => ContactsProvider()),
+        Provider<AuthService>(
+          create: (_) => AuthService(),
+        ),
+        ChangeNotifierProvider<AuthProvider>(
+          create: (_) => AuthProvider(),
+        ),
+        ChangeNotifierProvider<ChatProvider>(
+          create: (context) => ChatProvider(
+            Provider.of<AuthService>(context, listen: false),
+          ),
+        ),
+      ],
+      child: const MyApp(),
+    ),
+  );
 }
 
 class MyApp extends StatelessWidget {
