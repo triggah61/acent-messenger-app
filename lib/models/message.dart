@@ -5,11 +5,11 @@ class Message {
   final String content;
   final List<Attachment> attachments;
   final String status;
-  // final List<String> deletedFor;
+  final List<String> deletedFor;
   final ReplyTo? replyTo;
   final DateTime createdAt;
   final DateTime updatedAt;
-  final List<Reaction> reactions;
+  final List<MessageReaction> reactions;
 
   Message({
     required this.id,
@@ -18,7 +18,7 @@ class Message {
     required this.content,
     required this.attachments,
     required this.status,
-    // required this.deletedFor,
+    required this.deletedFor,
     this.replyTo,
     required this.createdAt,
     required this.updatedAt,
@@ -35,15 +35,15 @@ class Message {
           .map((attachment) => Attachment.fromJson(attachment))
           .toList(),
       status: json['status'],
-      // deletedFor: List<String>.from(json['deletedFor']),
+      deletedFor: List<String>.from(json['deletedFor'] ?? []),
       replyTo: json['replyTo'] != null ? ReplyTo.fromJson(json['replyTo']) : null,
       createdAt: DateTime.parse(json['createdAt']),
       updatedAt: DateTime.parse(json['updatedAt']),
-      // reactions: json['reactions'] != null
-      //     ? (json['reactions'] as List)
-      //         .map((reaction) => Reaction.fromJson(reaction))
-      //         .toList()
-      //     : [],
+      reactions: json['reactions'] != null
+          ? (json['reactions'] as List)
+              .map((reaction) => MessageReaction.fromJson(reaction))
+              .toList()
+          : [],
     );
   }
 }
@@ -129,22 +129,47 @@ class Attachment {
   }
 }
 
-class Reaction {
-  final String type;
-  final int count;
-  final List<String> userIds;
+class MessageReaction {
+  final String reaction;
+  final List<ReactionUser> users;
 
-  Reaction({
-    required this.type,
-    required this.count,
-    required this.userIds,
+  MessageReaction({
+    required this.reaction,
+    this.users = const [],
   });
 
-  factory Reaction.fromJson(Map<String, dynamic> json) {
-    return Reaction(
-      type: json['type'],
-      count: json['count'],
-      userIds: List<String>.from(json['userIds']),
+  factory MessageReaction.fromJson(Map<String, dynamic> json) {
+    return MessageReaction(
+      reaction: json['reaction'],
+      users:   (json['users'] as List)
+          .map((user) => ReactionUser.fromJson(user))
+          .toList(),
+    );
+  }
+}
+
+class ReactionUser {
+  final String id;
+  final String firstName;
+  final String lastName;
+  final String reaction;
+  final DateTime reactedAt;
+
+  ReactionUser({
+    required this.id,
+    required this.firstName,
+    required this.lastName,
+    required this.reaction,
+    required this.reactedAt,
+  });
+
+  factory ReactionUser.fromJson(Map<String, dynamic> json) {
+    return ReactionUser(
+      id: json['_id'],
+      firstName: json['firstName'],
+      lastName: json['lastName'],
+      reaction: json['reaction'],
+      reactedAt: DateTime.parse(json['reactedAt']),
     );
   }
 }

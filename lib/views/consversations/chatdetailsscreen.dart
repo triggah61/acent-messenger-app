@@ -691,7 +691,7 @@ class MessageBubble extends StatelessWidget {
   final String time;
   final List<Attachment> attachments;
   final String messageId;
-  final List<Reaction> reactions;
+  final List<MessageReaction> reactions;
 
   const MessageBubble({
     super.key,
@@ -787,31 +787,34 @@ class MessageBubble extends StatelessWidget {
                   child: Wrap(
                     spacing: 4,
                     children: reactions.map((reaction) {
-                      return Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.grey[200],
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              _getReactionEmoji(reaction.type),
-                              style: const TextStyle(fontSize: 12),
-                            ),
-                            if (reaction.count > 1)
-                              Padding(
-                                padding: const EdgeInsets.only(left: 2),
-                                child: Text(
-                                  reaction.count.toString(),
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: Colors.grey[600],
+                      return GestureDetector(
+                        onTap: () => _showReactionUsers(context, reaction),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.grey[200],
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _getReactionEmoji(reaction.reaction),
+                                style: const TextStyle(fontSize: 12),
+                              ),
+                              if (reaction.users.length > 1)
+                                Padding(
+                                  padding: const EdgeInsets.only(left: 2),
+                                  child: Text(
+                                    reaction.users.length.toString(),
+                                    style: TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.grey[600],
+                                    ),
                                   ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
                       );
                     }).toList(),
@@ -869,6 +872,61 @@ class MessageBubble extends StatelessWidget {
             );
           }
         },
+      ),
+    );
+  }
+
+  void _showReactionUsers(BuildContext context, MessageReaction reaction) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => Container(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text(
+                  _getReactionEmoji(reaction.reaction),
+                  style: const TextStyle(fontSize: 24),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${reaction.reaction.toUpperCase()} Reactions',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: reaction.users?.length,
+                itemBuilder: (context, index) {
+                  final user = reaction.users[index];
+                  return ListTile(
+                    leading: CircleAvatar(
+                      child: Text(user.firstName[0]),
+                    ),
+                    title: Text('${user.firstName} ${user.lastName}'),
+                    subtitle: Text(
+                      timeago.format(user.reactedAt),
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
