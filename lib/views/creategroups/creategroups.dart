@@ -1,3 +1,4 @@
+import 'package:chattingapp/providers/group_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
@@ -55,7 +56,7 @@ class _CreateGroupsState extends State<CreateGroups> {
         _titleController.text.trim(),
         _selectedMemberIds,
       );
-
+      await context.read<GroupProvider>().fetchSessions(refresh: true);
       if (mounted) {
         Navigator.pushReplacement(
           context,
