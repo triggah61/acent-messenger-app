@@ -79,34 +79,6 @@ class SettingsScreen extends StatelessWidget {
                       ),
                       _buildSettingsItem(
                         context: context,
-                        icon: Icons.chat,
-                        title: 'Chat',
-                        subtitle: 'Chat history, theme, wallpapers',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const HomeScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      _buildSettingsItem(
-                        context: context,
-                        icon: Icons.search,
-                        title: 'Search',
-                        subtitle: 'Search Messages, Members',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const SearchScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      _buildSettingsItem(
-                        context: context,
                         icon: Icons.notifications,
                         title: 'Notifications',
                         subtitle: 'Messages, group, and others',
@@ -129,20 +101,6 @@ class SettingsScreen extends StatelessWidget {
                             context,
                             MaterialPageRoute(
                               builder: (context) => const HelpCenterScreen(),
-                            ),
-                          );
-                        },
-                      ),
-                      _buildSettingsItem(
-                        context: context,
-                        icon: Icons.security,
-                        title: 'Security',
-                        subtitle: 'Account security settings',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const SecurityScreen(),
                             ),
                           );
                         },

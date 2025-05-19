@@ -435,7 +435,7 @@ class _ConversationsState extends State<Conversations> {
               CircleAvatar(
                 backgroundImage: widget.session?.photo != null
                     ? NetworkImage(Config.getPhotoUrl(widget.session!.photo!))
-                    : const AssetImage('images/c2.png') as ImageProvider,
+                    : null,
                 child: widget.session?.photo == null
                     ? Text(
                         widget.session?.title.substring(0, 1).toUpperCase() ??

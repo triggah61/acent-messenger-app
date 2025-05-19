@@ -8,4 +8,9 @@ class Config {
     if (photoPath == null || photoPath.isEmpty) return '';
     return '$awsS3Url/$photoPath';
   }
+
+  static String wordToUpperCase(String? value) {
+    if (value == null || value.isEmpty) return '';
+    return value[0].toUpperCase() + value.substring(1);
+  }
 } 

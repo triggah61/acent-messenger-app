@@ -1,4 +1,6 @@
 import 'package:chattingapp/constants/colors.dart';
+import 'package:chattingapp/models/chat_session.dart';
+import 'package:chattingapp/views/consversations/chatdetailsscreen.dart';
 import 'package:flutter/material.dart';
 
 class SearchScreen extends StatelessWidget {
@@ -102,6 +104,25 @@ class SearchScreen extends StatelessWidget {
                       ),
                   ],
                 ),
+                onTap: () {
+                  final session = ChatSession(
+                    id: UniqueKey().toString(),
+                    title: chat['name'],
+                    type: 'single',
+                    status: 'active',
+                    recipients: [],
+                    createdAt: DateTime.now(),
+
+                    photo: chat['image'],
+                  );
+
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => Conversations(session: session),
+                    ),
+                  );
+                },
               ),
             ),
           );

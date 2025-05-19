@@ -516,7 +516,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     _buildProfileInfo(
                       label: 'Status',
-                      value: profile.status ?? 'No status',
+                      value: Config.wordToUpperCase(profile.status ?? 'No status'),
                       icon: Icons.info,
                     ),
                   ],
