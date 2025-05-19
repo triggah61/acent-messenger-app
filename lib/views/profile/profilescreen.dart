@@ -472,7 +472,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           ? NetworkImage(Config.getPhotoUrl(profile.photo))
                           : null,
                       child: profile.photo == null
-                          ? const Icon(Icons.person, size: 60)
+                          ? Text(
+                        '${(profile.firstName?.substring(0, 1).toUpperCase() ?? "")}'
+                            '${(profile.lastName?.substring(0, 1).toUpperCase() ?? "")}',
+                        style: const TextStyle(
+                            fontSize: 36), // Slightly smaller to fit 2 letters
+                      )
                           : null,
                     ),
                     if (_isUploadingPhoto)

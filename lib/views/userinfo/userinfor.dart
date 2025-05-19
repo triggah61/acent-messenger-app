@@ -1,3 +1,4 @@
+import 'package:chattingapp/constants/config.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -82,16 +83,18 @@ class _UserInformationScreenState extends State<UserInformationScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          ClipOval(
-            child: Image.network(
-              profile?.photo ?? placeholderImageUrl,
-              width: 120,
-              height: 120,
-              fit: BoxFit.cover,
-              errorBuilder: (context, object, stackTrace) {
-                return const Icon(Icons.error, size: 60);
-              },
-            ),
+          CircleAvatar(
+            radius: 60,
+            backgroundImage: profile?.photo != null
+                ? NetworkImage(Config.getPhotoUrl(profile!.photo!))
+                : null,
+            child: profile?.photo == null
+                ? Text(
+              '${(profile?.firstName?.substring(0, 1).toUpperCase() ?? "")}'
+                  '${(profile?.lastName?.substring(0, 1).toUpperCase() ?? "")}',
+              style: const TextStyle(
+                  fontSize: 36), // Slightly smaller to fit 2 letters
+            ) : null,
           ),
           const SizedBox(height: 16),
           Text(
