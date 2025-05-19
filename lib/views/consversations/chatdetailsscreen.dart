@@ -598,6 +598,7 @@ class _ConversationsState extends State<Conversations> {
 
                         final message = _messages[index];
                         final isSent = message.sender.id == profileInfo?.id;
+                        final isGroup = widget.session?.type == 'group';
 
                         return Dismissible(
                           key: Key(message.id),
@@ -625,6 +626,11 @@ class _ConversationsState extends State<Conversations> {
                             messageId: message.id,
                             reactions: message.reactions,
                             replyTo: message.replyTo,
+                            senderImageUrl: isGroup && !isSent && message.sender.photo != null
+                                ? Config.getPhotoUrl(message.sender.photo!)
+                                : null,
+                            senderName: '${message.sender.firstName} ${message.sender.lastName}',
+                            isGroup: isGroup,
                           ),
                         );
                       },
@@ -818,6 +824,10 @@ class MessageBubble extends StatelessWidget {
   final List<MessageReaction> reactions;
   final ReplyTo? replyTo;
 
+  final String? senderImageUrl;
+  final String? senderName;
+  final bool isGroup;
+
   const MessageBubble({
     super.key,
     required this.message,
@@ -827,6 +837,10 @@ class MessageBubble extends StatelessWidget {
     this.attachments = const [],
     this.reactions = const [],
     this.replyTo,
+
+    this.senderImageUrl,
+    this.senderName,
+    this.isGroup = false,
   });
 
   @override
@@ -869,6 +883,18 @@ class MessageBubble extends StatelessWidget {
             crossAxisAlignment:
                 isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
+              if (isGroup && !isSent)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 4.0),
+                    child: CircleAvatar(
+                      radius: 16,
+                      backgroundImage:
+                      senderImageUrl != null ? NetworkImage(senderImageUrl!) : null,
+                      child: senderImageUrl == null
+                          ? Text(senderName?.substring(0, 1).toUpperCase() ?? '')
+                          : null,
+                    )
+                ),
               if (replyTo != null)
                 Container(
                   padding: const EdgeInsets.all(8),
