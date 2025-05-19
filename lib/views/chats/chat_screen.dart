@@ -109,21 +109,21 @@ class _HomeScreenState extends State<HomeScreen> {
                       );
                     },
                     menuChildren: [
-                      MenuItemButton(
-                        onPressed: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => const AddFriendScreen(),
-                            ),
-                          ).then((_) {
-                            if (mounted) {
-                              setState(() {});
-                            }
-                          });
-                        },
-                        child: const Text('Add Friend'),
-                      ),
+                      // MenuItemButton(
+                      //   onPressed: () {
+                      //     Navigator.push(
+                      //       context,
+                      //       MaterialPageRoute(
+                      //         builder: (_) => const AddFriendScreen(),
+                      //       ),
+                      //     ).then((_) {
+                      //       if (mounted) {
+                      //         setState(() {});
+                      //       }
+                      //     });
+                      //   },
+                      //   child: const Text('Add Friend'),
+                      // ),
                       MenuItemButton(
                         onPressed: () {
                           Navigator.push(

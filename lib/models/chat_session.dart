@@ -68,7 +68,7 @@ class LastMessage {
       content: json['content'],
       attachments: json['attachments'],
       status: json['status'],
-      replyTo: json['replyTo'],
+      // replyTo: json['replyTo'],
       createdAt: DateTime.parse(json['createdAt']),
     );
   }

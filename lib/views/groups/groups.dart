@@ -129,8 +129,8 @@ class ChatTile extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (context) => const GroupChatScreen(),
-            // builder: (context) => Conversations(session: session),
+            // builder: (context) => const GroupChatScreen(),
+            builder: (context) => Conversations(session: session),
           ),
         );
       },

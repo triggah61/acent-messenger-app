@@ -141,7 +141,7 @@ class MessageReaction {
   factory MessageReaction.fromJson(Map<String, dynamic> json) {
     return MessageReaction(
       reaction: json['reaction'],
-      users:   (json['users'] as List)
+      users: (json['users'] as List)
           .map((user) => ReactionUser.fromJson(user))
           .toList(),
     );

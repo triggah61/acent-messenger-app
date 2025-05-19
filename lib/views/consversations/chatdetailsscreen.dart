@@ -42,6 +42,7 @@ class _ConversationsState extends State<Conversations> {
   bool _isSending = false;
   bool _isTyping = false;
   Timer? _typingTimer;
+  Message? _replyingTo;
 
   // Message list state
   List<Message> _messages = [];
@@ -226,6 +227,11 @@ class _ConversationsState extends State<Conversations> {
       // Add form fields
       request.fields['chatSessionId'] = widget.session?.id ?? '';
       request.fields['message'] = _messageController.text.trim();
+      
+      // Add reply data if replying
+      if (_replyingTo != null) {
+        request.fields['replyTo'] = _replyingTo!.id;
+      }
 
       // Add attachments if any
       for (var attachment in _attachments) {
@@ -241,10 +247,11 @@ class _ConversationsState extends State<Conversations> {
       final responseBody = await response.stream.bytesToString();
 
       if (response.statusCode == 200) {
-        // Clear message and attachments after successful send
+        // Clear message, attachments, and reply after successful send
         _messageController.clear();
         setState(() {
           _attachments = [];
+          _replyingTo = null;
         });
         if (widget.session?.type == 'group') {
           context.read<GroupProvider>().fetchSessions(refresh: true);
@@ -263,6 +270,12 @@ class _ConversationsState extends State<Conversations> {
         _isSending = false;
       });
     }
+  }
+
+  void _cancelReply() {
+    setState(() {
+      _replyingTo = null;
+    });
   }
 
   Future<void> _pickImage(ImageSource source) async {
@@ -474,6 +487,58 @@ class _ConversationsState extends State<Conversations> {
                   ),
                 ),
               ),
+            if (_replyingTo != null)
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  border: Border(
+                    bottom: BorderSide(
+                      color: Colors.grey[300]!,
+                      width: 1,
+                    ),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 4,
+                      height: 40,
+                      color: Colors.blue,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Replying to ${_replyingTo!.sender.firstName}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              color: Colors.blue,
+                            ),
+                          ),
+                          Text(
+                            _replyingTo!.content.isNotEmpty
+                                ? _replyingTo!.content
+                                : 'Photo',
+                            style: TextStyle(
+                              color: Colors.grey[600],
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.close),
+                      onPressed: _cancelReply,
+                    ),
+                  ],
+                ),
+              ),
             if (_attachments.isNotEmpty)
               Container(
                 height: 100,
@@ -534,16 +599,33 @@ class _ConversationsState extends State<Conversations> {
                         final message = _messages[index];
                         final isSent = message.sender.id == profileInfo?.id;
 
-                        print(
-                            'message.sender.id: ${message.sender.id}, profileInfo?.id: ${profileInfo?.id}');
-
-                        return MessageBubble(
-                          message: message.content,
-                          isSent: isSent,
-                          time: timeago.format(message.createdAt),
-                          attachments: message.attachments,
-                          messageId: message.id,
-                          reactions: message.reactions,
+                        return Dismissible(
+                          key: Key(message.id),
+                          direction: DismissDirection.endToStart,
+                          background: Container(
+                            alignment: Alignment.centerRight,
+                            padding: const EdgeInsets.only(right: 20),
+                            color: Colors.blue,
+                            child: const Icon(
+                              Icons.reply,
+                              color: Colors.white,
+                            ),
+                          ),
+                          confirmDismiss: (direction) async {
+                            setState(() {
+                              _replyingTo = message;
+                            });
+                            return false; // Prevent actual dismissal
+                          },
+                          child: MessageBubble(
+                            message: message.content,
+                            isSent: isSent,
+                            time: timeago.format(message.createdAt),
+                            attachments: message.attachments,
+                            messageId: message.id,
+                            reactions: message.reactions,
+                            replyTo: message.replyTo,
+                          ),
                         );
                       },
                     ),
@@ -734,6 +816,7 @@ class MessageBubble extends StatelessWidget {
   final List<Attachment> attachments;
   final String messageId;
   final List<MessageReaction> reactions;
+  final ReplyTo? replyTo;
 
   const MessageBubble({
     super.key,
@@ -743,6 +826,7 @@ class MessageBubble extends StatelessWidget {
     required this.messageId,
     this.attachments = const [],
     this.reactions = const [],
+    this.replyTo,
   });
 
   @override
@@ -785,6 +869,38 @@ class MessageBubble extends StatelessWidget {
             crossAxisAlignment:
                 isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
+              if (replyTo != null)
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.grey[200],
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Replying to message',
+                        style: TextStyle(
+                          color: Colors.grey[600],
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      if (replyTo!.content != null)
+                        Text(
+                          replyTo!.content!,
+                          style: TextStyle(
+                            color: textColor,
+                            fontSize: 12,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
               if (message.isNotEmpty)
                 Text(
                   message,
