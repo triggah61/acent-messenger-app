@@ -79,9 +79,42 @@ class _ConversationsState extends State<Conversations> {
           });
         }
       });
+
+      // Listen for reaction updates
+      _socketService.onMessageReactionsUpdated((data) {
+        if (mounted) {
+          _updateMessageReactions(data['messageId'], data['reactions']);
+        }
+      });
     } catch (e) {
       print('Failed to initialize socket: $e');
     }
+  }
+
+  void _updateMessageReactions(String messageId, List<dynamic> reactions) {
+    setState(() {
+      final messageIndex = _messages.indexWhere((m) => m.id == messageId);
+      if (messageIndex != -1) {
+        final updatedMessage = _messages[messageIndex];
+        final updatedReactions = reactions
+            .map((r) => MessageReaction.fromJson(r))
+            .toList();
+        
+        _messages[messageIndex] = Message(
+          id: updatedMessage.id,
+          chatSession: updatedMessage.chatSession,
+          sender: updatedMessage.sender,
+          content: updatedMessage.content,
+          attachments: updatedMessage.attachments,
+          status: updatedMessage.status,
+          deletedFor: updatedMessage.deletedFor,
+          replyTo: updatedMessage.replyTo,
+          createdAt: updatedMessage.createdAt,
+          updatedAt: updatedMessage.updatedAt,
+          reactions: updatedReactions,
+        );
+      }
+    });
   }
 
   void _handleTyping() {
@@ -101,6 +134,7 @@ class _ConversationsState extends State<Conversations> {
     _typingTimer?.cancel();
     _socketService.removeNewMessageListener();
     _socketService.removeTypingListener();
+    _socketService.removeReactionUpdatesListener();
     _socketService.leaveChatSession(widget.session?.id ?? '');
     _messageController.dispose();
     _scrollController.dispose();

@@ -95,6 +95,23 @@ class SocketService {
     }
   }
 
+  // Listen for reaction updates
+  void onMessageReactionsUpdated(Function(Map<String, dynamic>) callback) {
+    final listener = (data) {
+      callback(data);
+    };
+    _socket?.on('message_reactions_updated', listener);
+    _listeners['message_reactions_updated'] = listener;
+  }
+
+  // Remove reaction updates listener
+  void removeReactionUpdatesListener() {
+    if (_listeners.containsKey('message_reactions_updated')) {
+      _socket?.off('message_reactions_updated', _listeners['message_reactions_updated']);
+      _listeners.remove('message_reactions_updated');
+    }
+  }
+
   // Emit typing event
   void emitTyping(String chatSessionId, bool isTyping) {
     _socket?.emit('typing', {
