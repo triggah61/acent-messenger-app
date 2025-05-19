@@ -1,6 +1,8 @@
 import 'package:chattingapp/constants/config.dart';
 import 'package:chattingapp/models/chat_session.dart';
 import 'package:chattingapp/models/message.dart';
+import 'package:chattingapp/providers/chat_provider.dart';
+import 'package:chattingapp/providers/group_provider.dart';
 import 'package:chattingapp/services/auth_service.dart';
 import 'package:chattingapp/services/socket_service.dart';
 import 'package:chattingapp/views/contacts/contacts.dart';
@@ -61,7 +63,7 @@ class _ConversationsState extends State<Conversations> {
     try {
       await _socketService.initializeSocket();
       _socketService.joinChatSession(widget.session?.id ?? '');
-      
+
       // Listen for new messages
       _socketService.onNewMessage((message) {
         if (mounted) {
@@ -96,10 +98,9 @@ class _ConversationsState extends State<Conversations> {
       final messageIndex = _messages.indexWhere((m) => m.id == messageId);
       if (messageIndex != -1) {
         final updatedMessage = _messages[messageIndex];
-        final updatedReactions = reactions
-            .map((r) => MessageReaction.fromJson(r))
-            .toList();
-        
+        final updatedReactions =
+            reactions.map((r) => MessageReaction.fromJson(r)).toList();
+
         _messages[messageIndex] = Message(
           id: updatedMessage.id,
           chatSession: updatedMessage.chatSession,
@@ -245,6 +246,11 @@ class _ConversationsState extends State<Conversations> {
         setState(() {
           _attachments = [];
         });
+        if (widget.session?.type == 'group') {
+          context.read<GroupProvider>().fetchSessions(refresh: true);
+        } else {
+          context.read<ChatProvider>().fetchSessions(refresh: true);
+        }
       } else {
         throw Exception('Failed to send message: $responseBody');
       }
@@ -370,8 +376,8 @@ class _ConversationsState extends State<Conversations> {
 
   @override
   Widget build(BuildContext context) {
-    
-    final profileInfo = Provider.of<AuthProvider>(context, listen: false).profile;
+    final profileInfo =
+        Provider.of<AuthProvider>(context, listen: false).profile;
     return GestureDetector(
       onTap: () {
         // Dismiss keyboard if open
@@ -458,7 +464,8 @@ class _ConversationsState extends State<Conversations> {
           children: [
             if (_isTyping)
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                 child: const Text(
                   'Someone is typing...',
                   style: TextStyle(
@@ -527,7 +534,8 @@ class _ConversationsState extends State<Conversations> {
                         final message = _messages[index];
                         final isSent = message.sender.id == profileInfo?.id;
 
-                        print('message.sender.id: ${message.sender.id}, profileInfo?.id: ${profileInfo?.id}');
+                        print(
+                            'message.sender.id: ${message.sender.id}, profileInfo?.id: ${profileInfo?.id}');
 
                         return MessageBubble(
                           message: message.content,
@@ -755,8 +763,12 @@ class MessageBubble extends StatelessWidget {
           decoration: BoxDecoration(
             color: bubbleColor,
             borderRadius: BorderRadius.only(
-              topLeft: !isSent ? const Radius.circular(18) : const Radius.circular(12),
-              topRight: isSent ? const Radius.circular(18) : const Radius.circular(12),
+              topLeft: !isSent
+                  ? const Radius.circular(18)
+                  : const Radius.circular(12),
+              topRight: isSent
+                  ? const Radius.circular(18)
+                  : const Radius.circular(12),
               bottomLeft: const Radius.circular(18),
               bottomRight: const Radius.circular(18),
             ),
@@ -770,7 +782,8 @@ class MessageBubble extends StatelessWidget {
             ],
           ),
           child: Column(
-            crossAxisAlignment: isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            crossAxisAlignment:
+                isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
               if (message.isNotEmpty)
                 Text(
@@ -790,7 +803,8 @@ class MessageBubble extends StatelessWidget {
                               width: 200,
                               height: 200,
                               fit: BoxFit.cover,
-                              loadingBuilder: (context, child, loadingProgress) {
+                              loadingBuilder:
+                                  (context, child, loadingProgress) {
                                 if (loadingProgress == null) return child;
                                 return Container(
                                   width: 200,
@@ -824,7 +838,8 @@ class MessageBubble extends StatelessWidget {
                       return GestureDetector(
                         onTap: () => _showReactionUsers(context, reaction),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: Colors.grey[200],
                             borderRadius: BorderRadius.circular(12),
@@ -902,7 +917,8 @@ class MessageBubble extends StatelessWidget {
             Navigator.pop(context);
           } catch (e) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text('Failed to add reaction: ${e.toString()}')),
+              SnackBar(
+                  content: Text('Failed to add reaction: ${e.toString()}')),
             );
           }
         },
