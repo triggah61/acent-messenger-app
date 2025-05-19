@@ -497,10 +497,11 @@ class _ConversationsState extends State<Conversations> {
 
                         return MessageBubble(
                           message: message.content,
-                          // message: message.sender.id,
                           isSent: isSent,
                           time: timeago.format(message.createdAt),
                           attachments: message.attachments,
+                          messageId: message.id,
+                          reactions: message.reactions,
                         );
                       },
                     ),
@@ -689,13 +690,17 @@ class MessageBubble extends StatelessWidget {
   final bool isSent;
   final String time;
   final List<Attachment> attachments;
+  final String messageId;
+  final List<Reaction> reactions;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.isSent,
     required this.time,
+    required this.messageId,
     this.attachments = const [],
+    this.reactions = const [],
   });
 
   @override
@@ -704,87 +709,309 @@ class MessageBubble extends StatelessWidget {
     Color textColor = Colors.black87;
     Color timeColor = Colors.grey[600]!;
 
-    return Align(
-      alignment: isSent ? Alignment.bottomRight : Alignment.bottomLeft,
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        margin: const EdgeInsets.symmetric(vertical: 2),
-        decoration: BoxDecoration(
-          color: bubbleColor,
-          borderRadius: BorderRadius.only(
-            topLeft:
-                !isSent ? const Radius.circular(18) : const Radius.circular(12),
-            topRight:
-                isSent ? const Radius.circular(18) : const Radius.circular(12),
-            bottomLeft: const Radius.circular(18),
-            bottomRight: const Radius.circular(18),
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Color.fromARGB((0.1 * 255).toInt(), 128, 128, 128),
-              spreadRadius: 0.5,
-              blurRadius: 1,
-              offset: const Offset(0, 1),
+    return GestureDetector(
+      onLongPress: () {
+        _showReactionPicker(context);
+      },
+      child: Align(
+        alignment: isSent ? Alignment.bottomRight : Alignment.bottomLeft,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          decoration: BoxDecoration(
+            color: bubbleColor,
+            borderRadius: BorderRadius.only(
+              topLeft: !isSent ? const Radius.circular(18) : const Radius.circular(12),
+              topRight: isSent ? const Radius.circular(18) : const Radius.circular(12),
+              bottomLeft: const Radius.circular(18),
+              bottomRight: const Radius.circular(18),
             ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment:
-              isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-          children: [
-            if (message.isNotEmpty)
+            boxShadow: [
+              BoxShadow(
+                color: Color.fromARGB((0.1 * 255).toInt(), 128, 128, 128),
+                spreadRadius: 0.5,
+                blurRadius: 1,
+                offset: const Offset(0, 1),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+            children: [
+              if (message.isNotEmpty)
+                Text(
+                  message,
+                  style: TextStyle(
+                    color: textColor,
+                  ),
+                ),
+              if (attachments.isNotEmpty)
+                ...attachments
+                    .map((attachment) => Padding(
+                          padding: const EdgeInsets.only(top: 8.0),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(8),
+                            child: Image.network(
+                              attachment.url,
+                              width: 200,
+                              height: 200,
+                              fit: BoxFit.cover,
+                              loadingBuilder: (context, child, loadingProgress) {
+                                if (loadingProgress == null) return child;
+                                return Container(
+                                  width: 200,
+                                  height: 200,
+                                  color: Colors.grey[200],
+                                  child: const Center(
+                                    child: CircularProgressIndicator(),
+                                  ),
+                                );
+                              },
+                              errorBuilder: (context, error, stackTrace) {
+                                return Container(
+                                  width: 200,
+                                  height: 200,
+                                  color: Colors.grey[200],
+                                  child: const Center(
+                                    child: Icon(Icons.error),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ))
+                    .toList(),
+              if (reactions.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 4.0),
+                  child: Wrap(
+                    spacing: 4,
+                    children: reactions.map((reaction) {
+                      return Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _getReactionEmoji(reaction.type),
+                              style: const TextStyle(fontSize: 12),
+                            ),
+                            if (reaction.count > 1)
+                              Padding(
+                                padding: const EdgeInsets.only(left: 2),
+                                child: Text(
+                                  reaction.count.toString(),
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: Colors.grey[600],
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              const SizedBox(height: 2),
               Text(
-                message,
+                time,
                 style: TextStyle(
-                  color: textColor,
+                  color: timeColor,
+                  fontSize: 10,
                 ),
               ),
-            if (attachments.isNotEmpty)
-              ...attachments
-                  .map((attachment) => Padding(
-                        padding: const EdgeInsets.only(top: 8.0),
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(8),
-                          child: Image.network(
-                            attachment.url,
-                            width: 200,
-                            height: 200,
-                            fit: BoxFit.cover,
-                            loadingBuilder: (context, child, loadingProgress) {
-                              if (loadingProgress == null) return child;
-                              return Container(
-                                width: 200,
-                                height: 200,
-                                color: Colors.grey[200],
-                                child: const Center(
-                                  child: CircularProgressIndicator(),
-                                ),
-                              );
-                            },
-                            errorBuilder: (context, error, stackTrace) {
-                              return Container(
-                                width: 200,
-                                height: 200,
-                                color: Colors.grey[200],
-                                child: const Center(
-                                  child: Icon(Icons.error),
-                                ),
-                              );
-                            },
-                          ),
-                        ),
-                      ))
-                  .toList(),
-            const SizedBox(height: 2),
-            Text(
-              time,
-              style: TextStyle(
-                color: timeColor,
-                fontSize: 10,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showReactionPicker(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => ReactionPicker(
+        messageId: messageId,
+        onReactionSelected: (reactionType) async {
+          try {
+            final token = await AuthService().getToken();
+            if (token == null) {
+              throw Exception('No authentication token available');
+            }
+
+            final response = await http.post(
+              Uri.parse('${Config.baseApiUrl}/user/chat/toggleReaction'),
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer $token',
+              },
+              body: json.encode({
+                'messageId': messageId,
+                'reactionType': reactionType,
+              }),
+            );
+
+            if (response.statusCode != 200) {
+              throw Exception('Failed to add reaction');
+            }
+
+            // Close the reaction picker
+            Navigator.pop(context);
+          } catch (e) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Failed to add reaction: ${e.toString()}')),
+            );
+          }
+        },
+      ),
+    );
+  }
+
+  String _getReactionEmoji(String type) {
+    switch (type) {
+      case 'like':
+        return '👍';
+      case 'love':
+        return '❤️';
+      case 'laugh':
+        return '😂';
+      case 'sad':
+        return '😢';
+      case 'angry':
+        return '😠';
+      case 'wow':
+        return '😮';
+      case 'cry':
+        return '😭';
+      default:
+        return '👍';
+    }
+  }
+}
+
+class ReactionPicker extends StatelessWidget {
+  final String messageId;
+  final Function(String) onReactionSelected;
+
+  const ReactionPicker({
+    super.key,
+    required this.messageId,
+    required this.onReactionSelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Text(
+            'Add Reaction',
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Wrap(
+            spacing: 20,
+            runSpacing: 20,
+            alignment: WrapAlignment.center,
+            children: [
+              _ReactionButton(
+                emoji: '👍',
+                label: 'Like',
+                onTap: () => onReactionSelected('like'),
+              ),
+              _ReactionButton(
+                emoji: '❤️',
+                label: 'Love',
+                onTap: () => onReactionSelected('love'),
+              ),
+              _ReactionButton(
+                emoji: '😂',
+                label: 'Laugh',
+                onTap: () => onReactionSelected('laugh'),
+              ),
+              _ReactionButton(
+                emoji: '😢',
+                label: 'Sad',
+                onTap: () => onReactionSelected('sad'),
+              ),
+              _ReactionButton(
+                emoji: '😠',
+                label: 'Angry',
+                onTap: () => onReactionSelected('angry'),
+              ),
+              _ReactionButton(
+                emoji: '😮',
+                label: 'Wow',
+                onTap: () => onReactionSelected('wow'),
+              ),
+              _ReactionButton(
+                emoji: '😭',
+                label: 'Cry',
+                onTap: () => onReactionSelected('cry'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReactionButton extends StatelessWidget {
+  final String emoji;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ReactionButton({
+    required this.emoji,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              color: Colors.grey[100],
+              borderRadius: BorderRadius.circular(25),
+            ),
+            child: Center(
+              child: Text(
+                emoji,
+                style: const TextStyle(fontSize: 24),
               ),
             ),
-          ],
-        ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            label,
+            style: const TextStyle(
+              fontSize: 12,
+              color: Colors.black54,
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -6,9 +6,10 @@ class Message {
   final List<Attachment> attachments;
   final String status;
   // final List<String> deletedFor;
-  final String? replyTo;
+  final ReplyTo? replyTo;
   final DateTime createdAt;
   final DateTime updatedAt;
+  final List<Reaction> reactions;
 
   Message({
     required this.id,
@@ -21,6 +22,7 @@ class Message {
     this.replyTo,
     required this.createdAt,
     required this.updatedAt,
+    this.reactions = const [],
   });
 
   factory Message.fromJson(Map<String, dynamic> json) {
@@ -34,9 +36,14 @@ class Message {
           .toList(),
       status: json['status'],
       // deletedFor: List<String>.from(json['deletedFor']),
-      replyTo: json['replyTo'],
+      replyTo: json['replyTo'] != null ? ReplyTo.fromJson(json['replyTo']) : null,
       createdAt: DateTime.parse(json['createdAt']),
       updatedAt: DateTime.parse(json['updatedAt']),
+      // reactions: json['reactions'] != null
+      //     ? (json['reactions'] as List)
+      //         .map((reaction) => Reaction.fromJson(reaction))
+      //         .toList()
+      //     : [],
     );
   }
 }
@@ -66,6 +73,23 @@ class Sender {
       dialCode: json['dialCode'],
       phone: json['phone'],
       photo: json['photo'],
+    );
+  }
+}
+
+class ReplyTo {
+  final String id;
+  final String? content;
+
+  ReplyTo({
+    required this.id,
+    this.content,
+  });
+
+  factory ReplyTo.fromJson(Map<String, dynamic> json) {
+    return ReplyTo(
+      id: json['_id'],
+      content: json['content'],
     );
   }
 }
@@ -103,4 +127,24 @@ class Attachment {
       updatedAt: DateTime.parse(json['updatedAt']),
     );
   }
-} 
+}
+
+class Reaction {
+  final String type;
+  final int count;
+  final List<String> userIds;
+
+  Reaction({
+    required this.type,
+    required this.count,
+    required this.userIds,
+  });
+
+  factory Reaction.fromJson(Map<String, dynamic> json) {
+    return Reaction(
+      type: json['type'],
+      count: json['count'],
+      userIds: List<String>.from(json['userIds']),
+    );
+  }
+}
