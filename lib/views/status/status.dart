@@ -1,9 +1,134 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
+import 'package:chattingapp/constants/config.dart';
+import 'package:chattingapp/models/post.dart';
+import 'package:chattingapp/services/auth_service.dart';
+import 'package:timeago/timeago.dart' as timeago;
 import 'package:photo_view/photo_view.dart';
 
-
-class StatusScreen extends StatelessWidget {
+class StatusScreen extends StatefulWidget {
   const StatusScreen({super.key});
+
+  @override
+  State<StatusScreen> createState() => _StatusScreenState();
+}
+
+class _StatusScreenState extends State<StatusScreen> {
+  final AuthService _authService = AuthService();
+  List<Post> _posts = [];
+  bool _isLoading = false;
+  bool _isUploading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadFeed();
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+  }
+
+  Future<void> _loadFeed() async {
+    if (_isLoading) return;
+
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('No authentication token available');
+      }
+
+      final response = await http.get(
+        Uri.parse('${Config.baseApiUrl}/user/post/feed'),
+        headers: {
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body)['data'];
+        setState(() {
+          _posts = (data as List).map((post) => Post.fromJson(post)).toList();
+        });
+      } else {
+        throw Exception('Failed to load feed');
+      }
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to load feed: ${e.toString()}')),
+      );
+    } finally {
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _uploadStatus() async {
+    try {
+      final ImagePicker picker = ImagePicker();
+      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
+      
+      if (image == null) return;
+
+      setState(() {
+        _isUploading = true;
+      });
+
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('No authentication token available');
+      }
+
+      var request = http.MultipartRequest(
+        'POST',
+        Uri.parse('${Config.baseApiUrl}/user/post/createPost'),
+      );
+
+      request.headers.addAll({
+        'Authorization': 'Bearer $token',
+      });
+
+      request.files.add(
+        await http.MultipartFile.fromPath(
+          'attachment',
+          image.path,
+        ),
+      );
+
+      final response = await request.send();
+      final responseBody = await response.stream.bytesToString();
+
+      if (response.statusCode == 200) {
+        await _loadFeed();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Status uploaded successfully')),
+          );
+        }
+      } else {
+        throw Exception('Failed to upload status: $responseBody');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to upload status: ${e.toString()}')),
+        );
+      }
+    } finally {
+      setState(() {
+        _isUploading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -13,102 +138,65 @@ class StatusScreen extends StatelessWidget {
         backgroundColor: Colors.white,
         elevation: 0,
       ),
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16.0),
-            child: InkWell(
-              onTap: () {
-                // Logic to add your status
-              },
-              child: Container(
-                padding: const EdgeInsets.all(12.0),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey[300]!),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(8.0),
-                      decoration: BoxDecoration(
-                        color: Colors.red[100],
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(Icons.camera_alt, color: Colors.red),
-                    ),
-                    const SizedBox(width: 16),
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('My Status',
-                            style: TextStyle(fontWeight: FontWeight.w500)),
-                        Text('Tap to add your status',
-                            style: TextStyle(color: Colors.grey[600])),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          const Padding(
-            padding: EdgeInsets.only(left: 16.0, top: 8.0),
-            child: Text('Recent Updates',
-                style: TextStyle(fontWeight: FontWeight.w500)),
-          ),
-          Expanded(
-            child: ListView(
-              padding: const EdgeInsets.only(top: 8.0),
+      body: _isLoading
+          ? const Center(child: CircularProgressIndicator())
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildStatusItem(
-                  context: context,
-                  name: 'Micheal Brown',
-                  time: 'Just now',
-                  imageUrl:
-                  'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTN3-b6hE_5K-l4bv_gBuFtF5zWoPEhSkLsuw&s',
+                Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: InkWell(
+                    onTap: _isUploading ? null : _uploadStatus,
+                    child: Container(
+                      padding: const EdgeInsets.all(12.0),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: Colors.grey[300]!),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8.0),
+                            decoration: BoxDecoration(
+                              color: Colors.red[100],
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.camera_alt, color: Colors.red),
+                          ),
+                          const SizedBox(width: 16),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('My Status',
+                                  style: TextStyle(fontWeight: FontWeight.w500)),
+                              Text('Tap to add your status',
+                                  style: TextStyle(color: Colors.grey[600])),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 ),
-                _buildStatusItem(
-                  context: context,
-                  name: 'Oliver Taylor',
-                  time: '10 minutes ago',
-                  imageUrl:
-                  'https://images.unsplash.com/photo-1552058544-f2b08422138a?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTh8fHVzZXJ8ZW58MHx8MHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
+                const Padding(
+                  padding: EdgeInsets.only(left: 16.0, top: 8.0),
+                  child: Text('Recent Updates',
+                      style: TextStyle(fontWeight: FontWeight.w500)),
                 ),
-                _buildStatusItem(
-                  context: context,
-                  name: 'Liam Anderson',
-                  time: '16 hours ago',
-                  imageUrl:
-                    'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcTDpWYsLSeY1sLvwgFNwBeJGjszUfEofDpwJw&s'
-                ),
-                _buildStatusItem(
-                  context: context,
-                  name: 'Lauren Taylor',
-                  time: '18 hours ago',
-                  imageUrl:
-                    'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcScGQQPJTeRXYxfbXVhLLXPl4aCJCexZ4dS7Q&s'
-                ),
-                _buildStatusItem(
-                  context: context,
-                  name: 'Charlotte Martinez',
-                  time: '21 hours ago',
-                  imageUrl:
-                    'https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRC8kiSH5ZSAcVoj3tAQQDoP_ux0sSricMyUg&s'
-                ),
-                _buildStatusItem(
-                  context: context,
-                  name: 'Emma Wilson',
-                  time: '21 hours ago',
-                  initials: 'E',
-
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    children: _posts.map((post) => _buildStatusItem(
+                      context: context,
+                      name: '${post.user.firstName} ${post.user.lastName}',
+                      time: timeago.format(post.createdAt),
+                      imageUrl: post.attachment.url,
+                      initials: post.user.photo == null ? post.user.firstName[0] : null,
+                    )).toList(),
+                  ),
                 ),
               ],
             ),
-          ),
-        ],
-      ),
     );
   }
 
@@ -135,15 +223,14 @@ class StatusScreen extends StatelessWidget {
           child: CircleAvatar(
             backgroundColor: Colors.white,
             radius: 24,
-            backgroundImage:
-            imageUrl != null ? NetworkImage(imageUrl) : null,
+            backgroundImage: imageUrl != null ? NetworkImage(imageUrl) : null,
             child: imageUrl == null && initials != null
                 ? Center(
-              child: Text(
-                initials,
-                style: const TextStyle(fontSize: 20, color: Colors.red),
-              ),
-            )
+                    child: Text(
+                      initials,
+                      style: const TextStyle(fontSize: 20, color: Colors.red),
+                    ),
+                  )
                 : null,
           ),
         ),
