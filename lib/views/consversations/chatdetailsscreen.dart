@@ -160,8 +160,6 @@ class _ConversationsState extends State<Conversations> {
     });
 
     try {
-      // final token = await context.read<AuthProvider>().getToken();
-
       final token = await _authService.getToken();
       if (token == null) {
         throw Exception('No authentication token available');
@@ -227,7 +225,7 @@ class _ConversationsState extends State<Conversations> {
       // Add form fields
       request.fields['chatSessionId'] = widget.session?.id ?? '';
       request.fields['message'] = _messageController.text.trim();
-      
+
       // Add reply data if replying
       if (_replyingTo != null) {
         request.fields['replyTo'] = _replyingTo!.id;
@@ -626,10 +624,13 @@ class _ConversationsState extends State<Conversations> {
                             messageId: message.id,
                             reactions: message.reactions,
                             replyTo: message.replyTo,
-                            senderImageUrl: isGroup && !isSent && message.sender.photo != null
+                            senderImageUrl: isGroup &&
+                                    !isSent &&
+                                    message.sender.photo != null
                                 ? Config.getPhotoUrl(message.sender.photo!)
                                 : null,
-                            senderName: '${message.sender.firstName} ${message.sender.lastName}',
+                            senderName:
+                                '${message.sender.firstName} ${message.sender.lastName}',
                             isGroup: isGroup,
                           ),
                         );
@@ -837,7 +838,6 @@ class MessageBubble extends StatelessWidget {
     this.attachments = const [],
     this.reactions = const [],
     this.replyTo,
-
     this.senderImageUrl,
     this.senderName,
     this.isGroup = false,
@@ -854,175 +854,190 @@ class MessageBubble extends StatelessWidget {
         _showReactionPicker(context);
       },
       child: Align(
-        alignment: isSent ? Alignment.bottomRight : Alignment.bottomLeft,
-        child: Container(
-          padding: const EdgeInsets.all(12),
-          margin: const EdgeInsets.symmetric(vertical: 2),
-          decoration: BoxDecoration(
-            color: bubbleColor,
-            borderRadius: BorderRadius.only(
-              topLeft: !isSent
-                  ? const Radius.circular(18)
-                  : const Radius.circular(12),
-              topRight: isSent
-                  ? const Radius.circular(18)
-                  : const Radius.circular(12),
-              bottomLeft: const Radius.circular(18),
-              bottomRight: const Radius.circular(18),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Color.fromARGB((0.1 * 255).toInt(), 128, 128, 128),
-                spreadRadius: 0.5,
-                blurRadius: 1,
-                offset: const Offset(0, 1),
-              ),
-            ],
-          ),
+          alignment: isSent ? Alignment.bottomRight : Alignment.bottomLeft,
           child: Column(
-            crossAxisAlignment:
-                isSent ? CrossAxisAlignment.end : CrossAxisAlignment.start,
             children: [
-              if (isGroup && !isSent)
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 4.0),
-                    child: CircleAvatar(
-                      radius: 16,
-                      backgroundImage:
-                      senderImageUrl != null ? NetworkImage(senderImageUrl!) : null,
-                      child: senderImageUrl == null
-                          ? Text(senderName?.substring(0, 1).toUpperCase() ?? '')
-                          : null,
-                    )
+              Text(
+                'Replying to message',
+                style: TextStyle(
+                  color: Colors.grey[600],
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
                 ),
-              if (replyTo != null)
-                Container(
-                  padding: const EdgeInsets.all(8),
-                  margin: const EdgeInsets.only(bottom: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[200],
-                    borderRadius: BorderRadius.circular(8),
+              ),
+              Container(
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.symmetric(vertical: 2),
+                decoration: BoxDecoration(
+                  color: bubbleColor,
+                  borderRadius: BorderRadius.only(
+                    topLeft: !isSent
+                        ? const Radius.circular(18)
+                        : const Radius.circular(12),
+                    topRight: isSent
+                        ? const Radius.circular(18)
+                        : const Radius.circular(12),
+                    bottomLeft: const Radius.circular(18),
+                    bottomRight: const Radius.circular(18),
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Replying to message',
-                        style: TextStyle(
-                          color: Colors.grey[600],
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Color.fromARGB((0.1 * 255).toInt(), 128, 128, 128),
+                      spreadRadius: 0.5,
+                      blurRadius: 1,
+                      offset: const Offset(0, 1),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: isSent
+                      ? CrossAxisAlignment.end
+                      : CrossAxisAlignment.start,
+                  children: [
+                    if (isGroup && !isSent)
+                      Padding(
+                          padding: const EdgeInsets.only(bottom: 4.0),
+                          child: CircleAvatar(
+                            radius: 16,
+                            backgroundImage: senderImageUrl != null
+                                ? NetworkImage(senderImageUrl!)
+                                : null,
+                            child: senderImageUrl == null
+                                ? Text(
+                                    senderName?.substring(0, 1).toUpperCase() ??
+                                        '')
+                                : null,
+                          )),
+                    if (replyTo != null)
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        margin: const EdgeInsets.only(bottom: 8),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Replying to message',
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            if (replyTo!.content != null)
+                              Text(
+                                replyTo!.content!,
+                                style: TextStyle(
+                                  color: textColor,
+                                  fontSize: 12,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                          ],
                         ),
                       ),
-                      if (replyTo!.content != null)
-                        Text(
-                          replyTo!.content!,
-                          style: TextStyle(
-                            color: textColor,
-                            fontSize: 12,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                    if (message.isNotEmpty)
+                      Text(
+                        message,
+                        style: TextStyle(
+                          color: textColor,
                         ),
-                    ],
-                  ),
-                ),
-              if (message.isNotEmpty)
-                Text(
-                  message,
-                  style: TextStyle(
-                    color: textColor,
-                  ),
-                ),
-              if (attachments.isNotEmpty)
-                ...attachments
-                    .map((attachment) => Padding(
-                          padding: const EdgeInsets.only(top: 8.0),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.network(
-                              attachment.url,
-                              width: 200,
-                              height: 200,
-                              fit: BoxFit.cover,
-                              loadingBuilder:
-                                  (context, child, loadingProgress) {
-                                if (loadingProgress == null) return child;
-                                return Container(
-                                  width: 200,
-                                  height: 200,
-                                  color: Colors.grey[200],
-                                  child: const Center(
-                                    child: CircularProgressIndicator(),
-                                  ),
-                                );
-                              },
-                              errorBuilder: (context, error, stackTrace) {
-                                return Container(
-                                  width: 200,
-                                  height: 200,
-                                  color: Colors.grey[200],
-                                  child: const Center(
-                                    child: Icon(Icons.error),
-                                  ),
-                                );
-                              },
-                            ),
-                          ),
-                        ))
-                    .toList(),
-              if (reactions.isNotEmpty)
-                Padding(
-                  padding: const EdgeInsets.only(top: 4.0),
-                  child: Wrap(
-                    spacing: 4,
-                    children: reactions.map((reaction) {
-                      return GestureDetector(
-                        onTap: () => _showReactionUsers(context, reaction),
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 6, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: Colors.grey[200],
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _getReactionEmoji(reaction.reaction),
-                                style: const TextStyle(fontSize: 12),
-                              ),
-                              if (reaction.users.length > 1)
-                                Padding(
-                                  padding: const EdgeInsets.only(left: 2),
-                                  child: Text(
-                                    reaction.users.length.toString(),
-                                    style: TextStyle(
-                                      fontSize: 10,
-                                      color: Colors.grey[600],
-                                    ),
+                      ),
+                    if (attachments.isNotEmpty)
+                      ...attachments
+                          .map((attachment) => Padding(
+                                padding: const EdgeInsets.only(top: 8.0),
+                                child: ClipRRect(
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Image.network(
+                                    attachment.url,
+                                    width: 200,
+                                    height: 200,
+                                    fit: BoxFit.cover,
+                                    loadingBuilder:
+                                        (context, child, loadingProgress) {
+                                      if (loadingProgress == null) return child;
+                                      return Container(
+                                        width: 200,
+                                        height: 200,
+                                        color: Colors.grey[200],
+                                        child: const Center(
+                                          child: CircularProgressIndicator(),
+                                        ),
+                                      );
+                                    },
+                                    errorBuilder: (context, error, stackTrace) {
+                                      return Container(
+                                        width: 200,
+                                        height: 200,
+                                        color: Colors.grey[200],
+                                        child: const Center(
+                                          child: Icon(Icons.error),
+                                        ),
+                                      );
+                                    },
                                   ),
                                 ),
-                            ],
-                          ),
+                              ))
+                          .toList(),
+                    if (reactions.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4.0),
+                        child: Wrap(
+                          spacing: 4,
+                          children: reactions.map((reaction) {
+                            return GestureDetector(
+                              onTap: () =>
+                                  _showReactionUsers(context, reaction),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.grey[200],
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      _getReactionEmoji(reaction.reaction),
+                                      style: const TextStyle(fontSize: 12),
+                                    ),
+                                    if (reaction.users.length > 1)
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 2),
+                                        child: Text(
+                                          reaction.users.length.toString(),
+                                          style: TextStyle(
+                                            fontSize: 10,
+                                            color: Colors.grey[600],
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                            );
+                          }).toList(),
                         ),
-                      );
-                    }).toList(),
-                  ),
-                ),
-              const SizedBox(height: 2),
-              Text(
-                time,
-                style: TextStyle(
-                  color: timeColor,
-                  fontSize: 10,
+                      ),
+                    const SizedBox(height: 2),
+                    Text(
+                      time,
+                      style: TextStyle(
+                        color: timeColor,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-          ),
-        ),
-      ),
+          )),
     );
   }
 

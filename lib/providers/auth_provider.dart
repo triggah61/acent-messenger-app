@@ -22,13 +22,6 @@ class AuthProvider with ChangeNotifier {
   String? get token => _token;
   String? get userId => _userId;
   
-  // Get token for API requests
-  Future<String?> getToken() async {
-    if (_token != null) return _token;
-    final storage = const FlutterSecureStorage();
-    _token = await storage.read(key: 'token');
-    return _token;
-  }
 
   Future<String?> getUserId() async {
     if (_userId != null) return _userId;

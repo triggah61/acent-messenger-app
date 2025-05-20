@@ -1,5 +1,6 @@
 import 'package:chattingapp/providers/auth_provider.dart';
 import 'package:chattingapp/constants/config.dart';
+import 'package:chattingapp/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -17,6 +18,9 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
+  
+
+  final AuthService _authService = AuthService();
   bool _isLoading = false;
   bool _isUploadingPhoto = false;
   late TextEditingController _firstNameController;
@@ -53,8 +57,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
 
     try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final token = await authProvider.getToken();
+      final token = await _authService.getToken();
       
       if (token == null) {
         throw Exception('Not authenticated');
@@ -76,7 +79,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (response.statusCode == 200) {
         // Refresh profile data
-        await authProvider.fetchProfile();
+        await Provider.of<AuthProvider>(context, listen: false).fetchProfile();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Profile updated successfully')),
@@ -214,8 +217,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
 
     try {
-      final authProvider = Provider.of<AuthProvider>(context, listen: false);
-      final token = await authProvider.getToken();
+       final token = await _authService.getToken();
       
       if (token == null) {
         throw Exception('Not authenticated');
@@ -246,7 +248,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (response.statusCode == 200) {
         // Refresh profile data to get updated photo URL
-        await authProvider.fetchProfile();
+        await Provider.of<AuthProvider>(context, listen: false).fetchProfile();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Profile photo updated successfully')),

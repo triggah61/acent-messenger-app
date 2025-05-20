@@ -26,9 +26,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   void initState() {
     super.initState();
     // Load contacts when screen initializes
-    Future.microtask(() => 
-      context.read<ContactsProvider>().loadContacts()
-    );
+    Future.microtask(() => context.read<ContactsProvider>().loadContacts());
   }
 
   Future<void> _handleContactAction(FormattedContact contact) async {
@@ -132,7 +130,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       if (contactsProvider.isLoading) {
                         return const Center(child: CircularProgressIndicator());
                       }
-                      
+
                       if (contactsProvider.permissionDenied) {
                         return Center(
                           child: Column(
@@ -191,19 +189,28 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                       ),
                                     )
                                   : ListView.builder(
-                                      itemCount: contactsProvider.formattedContacts.length,
+                                      itemCount: contactsProvider
+                                          .formattedContacts.length,
                                       itemBuilder: (context, index) {
-                                        final contact = contactsProvider.formattedContacts[index];
+                                        final contact = contactsProvider
+                                            .formattedContacts[index];
                                         return _buildContactItem(
-                                          name: '${contact.firstName} ${contact.lastName}'.trim(),
+                                          name:
+                                              '${contact.firstName} ${contact.lastName}'
+                                                  .trim(),
                                           status: contact.isExisting
                                               ? 'Send Message'
                                               : 'Send Invitation',
-                                          imageUrl: contact.photo != null
-                                              ? 'data:image/jpeg;base64,${contact.photo}'
-                                              : 'https://via.placeholder.com/150',
+                                          imageUrl: contact.photo != null &&
+                                                  contact.isExisting
+                                              ? Config.getPhotoUrl(
+                                                  contact.photo)
+                                              : contact.photo != null
+                                                  ? 'data:image/jpeg;base64,${contact.photo}'
+                                                  : "",
                                           isExisting: contact.isExisting,
-                                          onTap: () => _handleContactAction(contact),
+                                          onTap: () =>
+                                              _handleContactAction(contact),
                                         );
                                       },
                                     ),
@@ -240,6 +247,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               backgroundImage: imageUrl.startsWith('data:')
                   ? MemoryImage(base64Decode(imageUrl.split(',')[1]))
                   : NetworkImage(imageUrl) as ImageProvider,
+              child: imageUrl.isEmpty ? Text(name.substring(0, 1).toUpperCase()) : null,
             ),
             const SizedBox(width: 16),
             Expanded(

@@ -167,6 +167,8 @@ class _HomeScreenState extends State<HomeScreen> {
                       'https://images.unsplash.com/photo-1580489944761-15a19d654956?ixlib=rb-4.0.3&ixid=M3wxMjA3fDB8MHxzZWFyY2h8MTB8fHBlcnNvbnxlbnwwfHwwfHx8MA%3D%3D&auto=format&fit=crop&w=500&q=60',
                     ),
                   ),
+
+                  
                   GestureDetector(
                     onTap: () {
                       Navigator.push(
