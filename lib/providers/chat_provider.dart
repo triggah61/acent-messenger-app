@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:chattingapp/constants/config.dart';
+import 'package:chattingapp/services/socket_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:chattingapp/services/auth_service.dart';
@@ -7,17 +8,39 @@ import 'package:chattingapp/models/chat_session.dart';
 
 class ChatProvider with ChangeNotifier {
   final AuthService _authService;
+  final SocketService _socketService = SocketService.instance;
   List<ChatSession> _sessions = [];
   bool _isLoading = false;
   bool _hasMore = true;
   int _currentPage = 1;
   static const int _limit = 10;
 
-  ChatProvider(this._authService);
+  ChatProvider(this._authService) {
+    _initializeSocket();
+  }
 
   List<ChatSession> get sessions => _sessions;
   bool get isLoading => _isLoading;
   bool get hasMore => _hasMore;
+
+  @override
+  void dispose() {
+    _socketService.removeNewSessionListener();
+    super.dispose();
+  }
+
+  Future<void> _initializeSocket() async {
+    try {
+      await _socketService.initializeSocket();
+      _socketService.onNewSession((data) {
+        print("ChatProvider - _initializeSocket: New session event received");
+        print(data);
+        fetchSessions(refresh: true);
+      });
+    } catch (e) {
+      print('Failed to initialize socket: $e');
+    }
+  }
 
   Future<void> fetchSessions({bool refresh = false}) async {
     print("ChatProvider - fetchSessions: Starting fetch. Refresh: $refresh");

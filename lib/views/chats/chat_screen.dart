@@ -1,4 +1,5 @@
 import 'package:chattingapp/services/auth_service.dart';
+import 'package:chattingapp/services/socket_service.dart';
 import 'package:chattingapp/views/status/status.dart';
 import 'package:chattingapp/widgets/auth_middleware.dart';
 import 'package:flutter/material.dart';
@@ -67,6 +68,7 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     print("HomeScreen - initState: Initializing");
     _scrollController.addListener(_onScroll);
+
     // Initial fetch
     WidgetsBinding.instance.addPostFrameCallback((_) {
       print("HomeScreen - initState: Fetching initial sessions");

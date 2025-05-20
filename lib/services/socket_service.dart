@@ -70,6 +70,21 @@ class SocketService {
     _listeners['new_message'] = listener;
   }
 
+  void onNewSession(Function(List<dynamic>) callback) {
+    final listener = (data) {
+      callback(data);
+    };
+    _socket?.on('new_chat_session', listener);
+    _listeners['new_chat_session'] = listener;
+  }
+
+  void removeNewSessionListener() {
+    if (_listeners.containsKey('new_chat_session')) {
+      _socket?.off('new_chat_session', _listeners['new_chat_session']);
+      _listeners.remove('new_chat_session');
+    }
+  }
+
   // Remove new message listener
   void removeNewMessageListener() {
     if (_listeners.containsKey('new_message')) {
@@ -119,6 +134,8 @@ class SocketService {
       'isTyping': isTyping,
     });
   }
+
+
 
   // Disconnect socket
   void disconnect() {
