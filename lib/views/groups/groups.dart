@@ -27,6 +27,23 @@ class GroupChatList extends StatelessWidget {
           backgroundColor: Colors.white,
           elevation: 0,
           iconTheme: const IconThemeData(color: Colors.black),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CreateGroup(),
+                  ),
+                ).then((_) {
+                  if (mounted) {
+                    setState(() {});
+                  }
+                });
+              },
+            ),
+          ],
         ),
         body: const ChatListView(),
       ),
