@@ -24,7 +24,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
     ContactsScreen(),
     CallsScreen(),
     StatusScreen(),
-    SearchScreen(),
+    // SearchScreen(),
     SettingsScreen()
   ];
 
