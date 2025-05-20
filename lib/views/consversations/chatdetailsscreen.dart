@@ -857,14 +857,14 @@ class MessageBubble extends StatelessWidget {
           alignment: isSent ? Alignment.bottomRight : Alignment.bottomLeft,
           child: Column(
             children: [
-              Text(
-                'Replying to message',
-                style: TextStyle(
-                  color: Colors.grey[600],
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
+              // Text(
+              //   'Replying to message',
+              //   style: TextStyle(
+              //     color: Colors.grey[600],
+              //     fontSize: 12,
+              //     fontWeight: FontWeight.bold,
+              //   ),
+              // ),
               Container(
                 padding: const EdgeInsets.all(12),
                 margin: const EdgeInsets.symmetric(vertical: 2),
