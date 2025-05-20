@@ -66,7 +66,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
             _buildBottomNavBarItem(Icons.contacts, 'Contacts'),  // Contacts Screen
             _buildBottomNavBarItem(Icons.call, 'Calls'),         // Calls Screen
             _buildBottomNavBarItem(Icons.update, 'Status'),      // Status Screen
-            _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen
+            // _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen
             _buildBottomNavBarItem(Icons.settings, 'Settings'),  // Settings Screen
           ],
           currentIndex: _selectedIndex,
