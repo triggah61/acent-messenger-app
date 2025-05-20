@@ -94,25 +94,33 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    IconButton(
-                      icon: const Icon(Icons.search, color: Colors.white),
-                      onPressed: () {},
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.grey[800],
-                      ),
-                    ),
-                    const Text('Contacts',
-                        style: TextStyle(
+                    
+                    // IconButton(
+                    //   icon: const Icon(Icons.search, color: Colors.white),
+                    //   onPressed: () {},
+                    //   style: IconButton.styleFrom(
+                    //     backgroundColor: Colors.grey[800],
+                    //   ),
+                    // ),
+                    Expanded(
+                      child: Center(
+                        child: const Text(
+                          'Contacts',
+                          style: TextStyle(
                             color: Colors.white,
                             fontSize: 24,
-                            fontWeight: FontWeight.w700)),
-                    IconButton(
-                      icon: const Icon(Icons.person_add, color: Colors.white),
-                      onPressed: () {},
-                      style: IconButton.styleFrom(
-                        backgroundColor: Colors.blue[400],
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
                       ),
                     ),
+                    // IconButton(
+                    //   icon: const Icon(Icons.person_add, color: Colors.white),
+                    //   onPressed: () {},
+                    //   style: IconButton.styleFrom(
+                    //     backgroundColor: Colors.blue[400],
+                    //   ),
+                    // ),
                   ],
                 ),
               ),
@@ -171,12 +179,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('My Contacts',
-                                style: TextStyle(
-                                    fontSize: 20,
-                                    fontWeight: FontWeight.w600,
-                                    color: Colors.black87)),
-                            const SizedBox(height: 20),
+                            // const Text('My Contacts',
+                            //     style: TextStyle(
+                            //         fontSize: 20,
+                            //         fontWeight: FontWeight.w600,
+                            //         color: Colors.black87)),
+                            // const SizedBox(height: 20),
                             Expanded(
                               child: contactsProvider.formattedContacts.isEmpty
                                   ? const Center(

@@ -138,23 +138,23 @@ class _HomeScreenState extends State<HomeScreen> {
                     padding: const EdgeInsets.all(16.0),
                     child: Row(
                       children: [
-                        IconButton(
-                          icon: const Icon(Icons.search, color: Colors.white),
-                          onPressed: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                  builder: (_) => const SearchScreen()),
-                            ).then((_) {
-                              if (mounted) {
-                                setState(() {});
-                              }
-                            });
-                          },
-                          style: IconButton.styleFrom(
-                            backgroundColor: Colors.grey[800],
-                          ),
-                        ),
+                        // IconButton(
+                        //   icon: const Icon(Icons.search, color: Colors.white),
+                        //   onPressed: () {
+                        //     Navigator.push(
+                        //       context,
+                        //       MaterialPageRoute(
+                        //           builder: (_) => const SearchScreen()),
+                        //     ).then((_) {
+                        //       if (mounted) {
+                        //         setState(() {});
+                        //       }
+                        //     });
+                        //   },
+                        //   style: IconButton.styleFrom(
+                        //     backgroundColor: Colors.grey[800],
+                        //   ),
+                        // ),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Center(
