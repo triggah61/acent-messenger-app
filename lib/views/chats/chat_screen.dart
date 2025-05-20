@@ -168,41 +168,6 @@ class _HomeScreenState extends State<HomeScreen> {
                             ),
                           ),
                         ),
-                        MenuAnchor(
-                          builder: (
-                            BuildContext context,
-                            MenuController controller,
-                            Widget? child,
-                          ) {
-                            return IconButton(
-                              onPressed: () {
-                                if (controller.isOpen) {
-                                  controller.close();
-                                } else {
-                                  controller.open();
-                                }
-                              },
-                              icon: const Icon(Icons.add, color: Colors.white),
-                            );
-                          },
-                          menuChildren: [
-                            MenuItemButton(
-                              onPressed: () {
-                                Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => const CreateGroups(),
-                                  ),
-                                ).then((_) {
-                                  if (mounted) {
-                                    setState(() {});
-                                  }
-                                });
-                              },
-                              child: const Text('Create Group'),
-                            ),
-                          ],
-                        ),
                       ],
                     ),
                   ),

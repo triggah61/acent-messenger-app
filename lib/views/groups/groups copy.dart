@@ -6,7 +6,6 @@ import 'package:chattingapp/models/chat_session.dart';
 import 'package:chattingapp/constants/config.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../groupsconversations/groupsconversations.dart';
-import '../../widgets/auth_middleware.dart';
 
 import '../consversations/chatdetailsscreen.dart';
 import '../creategroups/creategroups.dart';
@@ -16,58 +15,38 @@ class GroupChatList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return AuthMiddleware(
-      child: Scaffold(
-        backgroundColor: const Color(0xFF121829),
-        body: SafeArea(
-          child: Column(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(16.0),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: const Text(
-                          'Groups',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 24,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const CreateGroups(),
-                          ),
-                        );
-                      },
-                      icon: const Icon(Icons.add, color: Colors.white),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.only(
-                      topLeft: Radius.circular(30),
-                      topRight: Radius.circular(30),
-                    ),
-                  ),
-                  child: const ChatListView(),
-                ),
-              ),
-            ],
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.grey[100],
+        appBar: AppBar(
+          centerTitle: true,
+          title: const Text(
+            'Groups',
+            style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
           ),
+          backgroundColor: Colors.white,
+          elevation: 0,
+          iconTheme: const IconThemeData(color: Colors.black),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.add),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const CreateGroups(),
+                  ),
+                ).then((_) {
+                  if (mounted) {
+                    setState(() {});
+                  }
+                });
+              },
+            ),
+          ],
         ),
+        body: const ChatListView(),
       ),
     );
   }
@@ -96,8 +75,7 @@ class _ChatListViewState extends State<ChatListView> {
   }
 
   void _onScroll() {
-    if (_scrollController.position.pixels >=
-        _scrollController.position.maxScrollExtent - 200) {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
       print("ChatListView - _onScroll: Near bottom, loading more groups");
       context.read<GroupProvider>().fetchSessions();
     }
@@ -114,9 +92,8 @@ class _ChatListViewState extends State<ChatListView> {
   Widget build(BuildContext context) {
     return Consumer<GroupProvider>(
       builder: (context, groupProvider, child) {
-        print(
-            "ChatListView - build: Consumer rebuilding. Sessions: ${groupProvider.sessions.length}, Loading: ${groupProvider.isLoading}");
-
+        print("ChatListView - build: Consumer rebuilding. Sessions: ${groupProvider.sessions.length}, Loading: ${groupProvider.isLoading}");
+        
         if (groupProvider.sessions.isEmpty && groupProvider.isLoading) {
           print("ChatListView - build: Showing loading indicator");
           return const Center(child: CircularProgressIndicator());
@@ -127,8 +104,7 @@ class _ChatListViewState extends State<ChatListView> {
           return const Center(child: Text('No groups yet'));
         }
 
-        print(
-            "ChatListView - build: Building group list with ${groupProvider.sessions.length} items");
+        print("ChatListView - build: Building group list with ${groupProvider.sessions.length} items");
         return RefreshIndicator(
           onRefresh: () {
             print("ChatListView - build: Refreshing groups");
@@ -136,8 +112,7 @@ class _ChatListViewState extends State<ChatListView> {
           },
           child: ListView.builder(
             controller: _scrollController,
-            itemCount:
-                groupProvider.sessions.length + (groupProvider.hasMore ? 1 : 0),
+            itemCount: groupProvider.sessions.length + (groupProvider.hasMore ? 1 : 0),
             itemBuilder: (context, index) {
               if (index == groupProvider.sessions.length) {
                 print("ChatListView - build: Showing loading more indicator");
@@ -150,8 +125,7 @@ class _ChatListViewState extends State<ChatListView> {
               }
 
               final session = groupProvider.sessions[index];
-              print(
-                  "ChatListView - build: Building group tile for ${session.title}");
+              print("ChatListView - build: Building group tile for ${session.title}");
               return ChatTile(session: session);
             },
           ),
