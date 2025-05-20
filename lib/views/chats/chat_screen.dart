@@ -83,7 +83,7 @@ class _HomeScreenState extends State<HomeScreen> {
       final token = await _authService.getToken();
       if (token == null) throw Exception('No token');
       final response = await http.get(
-        Uri.parse('${Config.baseApiUrl}/user/contact/list'),
+        Uri.parse('${Config.baseApiUrl}/user/contact/list&limit=-1'),
         headers: {'Authorization': 'Bearer $token'},
       );
       if (response.statusCode == 200) {

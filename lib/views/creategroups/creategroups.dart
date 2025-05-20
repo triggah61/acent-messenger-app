@@ -2,10 +2,41 @@ import 'package:chattingapp/providers/group_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
-import '../../providers/contacts_provider.dart';
 import '../../services/chat_service.dart';
 import '../../services/auth_service.dart';
+import 'package:chattingapp/constants/config.dart';
+import 'package:http/http.dart' as http;
 import '../consversations/chatdetailsscreen.dart';
+
+// Contact model for API response
+class Contact {
+  final String id;
+  final String firstName;
+  final String lastName;
+  final String? photo;
+  final String dialCode;
+  final String phone;
+
+  Contact({
+    required this.id,
+    required this.firstName,
+    required this.lastName,
+    required this.dialCode,
+    required this.phone,
+    this.photo,
+  });
+
+  factory Contact.fromJson(Map<String, dynamic> json) {
+    return Contact(
+      id: json['_id'],
+      firstName: json['firstName'] ?? '',
+      lastName: json['lastName'] ?? '',
+      dialCode: json['dialCode'] ?? '',
+      phone: json['phone'] ?? '',
+      photo: json['photo'],
+    );
+  }
+}
 
 class CreateGroups extends StatefulWidget {
   const CreateGroups({Key? key}) : super(key: key);
@@ -19,6 +50,54 @@ class _CreateGroupsState extends State<CreateGroups> {
   final List<String> _selectedMemberIds = [];
   bool _isLoading = false;
   final ChatService _chatService = ChatService(AuthService());
+  List<Contact> _contacts = [];
+  bool _isContactsLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchContacts();
+  }
+
+  Future<void> _fetchContacts() async {
+    setState(() {
+      _isContactsLoading = true;
+    });
+    try {
+      final token = await AuthService().getToken();
+      if (token == null) throw Exception('No token');
+      final response = await http.get(
+        Uri.parse('${Config.baseApiUrl}/user/contact/list'),
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final List<Contact> contacts = (data['contacts']['docs'] as List)
+            .map((c) => Contact.fromJson(c))
+            .toList();
+        setState(() {
+          _contacts = contacts;
+        });
+      } else {
+        throw Exception('Failed to fetch contacts');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to fetch contacts: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isContactsLoading = false;
+        });
+      }
+    }
+  }
 
   @override
   void dispose() {
@@ -156,60 +235,56 @@ class _CreateGroupsState extends State<CreateGroups> {
                 ),
               ),
               Expanded(
-                child: Consumer<ContactsProvider>(
-                  builder: (context, contactsProvider, child) {
-                    final existingContacts = contactsProvider.existingContacts;
-                    
-                    if (existingContacts.isEmpty) {
-                      return const Center(
-                        child: Text(
-                          'No contacts available',
-                          style: TextStyle(
-                            color: Colors.grey,
-                            fontSize: 16,
-                          ),
-                        ),
-                      );
-                    }
-
-                    return ListView.builder(
-                      padding: const EdgeInsets.symmetric(horizontal: 24),
-                      itemCount: existingContacts.length,
-                      itemBuilder: (context, index) {
-                        final contact = existingContacts[index];
-                        final isSelected = _selectedMemberIds.contains(contact.id);
-
-                        return ListTile(
-                          leading: CircleAvatar(
-                            radius: 24,
-                            backgroundImage: contact.photo != null
-                                ? MemoryImage(base64Decode(contact.photo!))
-                                : const NetworkImage('https://via.placeholder.com/150') as ImageProvider,
-                          ),
-                          title: Text(
-                            '${contact.firstName} ${contact.lastName}',
-                            style: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
+                child: _isContactsLoading
+                    ? const Center(child: CircularProgressIndicator())
+                    : _contacts.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No contacts available',
+                              style: TextStyle(
+                                color: Colors.grey,
+                                fontSize: 16,
+                              ),
                             ),
-                          ),
-                          trailing: Checkbox(
-                            value: isSelected,
-                            onChanged: (bool? value) {
-                              setState(() {
-                                if (value == true && contact.id != null) {
-                                  _selectedMemberIds.add(contact.id!);
-                                } else if (value == false && contact.id != null) {
-                                  _selectedMemberIds.remove(contact.id!);
-                                }
-                              });
+                          )
+                        : ListView.builder(
+                            padding: const EdgeInsets.symmetric(horizontal: 24),
+                            itemCount: _contacts.length,
+                            itemBuilder: (context, index) {
+                              final contact = _contacts[index];
+                              final isSelected = _selectedMemberIds.contains(contact.id);
+                              return ListTile(
+                                leading: CircleAvatar(
+                                  radius: 24,
+                                  backgroundImage: contact.photo != null
+                                      ? NetworkImage(Config.getPhotoUrl(contact.photo!))
+                                      : null,
+                                  child: contact.photo == null
+                                      ? Text(contact.firstName.isNotEmpty ? contact.firstName[0].toUpperCase() : '?')
+                                      : null,
+                                ),
+                                title: Text(
+                                  '${contact.firstName} ${contact.lastName}',
+                                  style: const TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                trailing: Checkbox(
+                                  value: isSelected,
+                                  onChanged: (bool? value) {
+                                    setState(() {
+                                      if (value == true) {
+                                        _selectedMemberIds.add(contact.id);
+                                      } else {
+                                        _selectedMemberIds.remove(contact.id);
+                                      }
+                                    });
+                                  },
+                                ),
+                              );
                             },
                           ),
-                        );
-                      },
-                    );
-                  },
-                ),
               ),
               Padding(
                 padding: const EdgeInsets.all(24.0),
