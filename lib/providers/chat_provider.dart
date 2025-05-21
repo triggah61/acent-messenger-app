@@ -1,10 +1,10 @@
 import 'dart:convert';
-import 'package:chattingapp/constants/config.dart';
-import 'package:chattingapp/services/socket_service.dart';
+import 'package:acent_messenger/constants/config.dart';
+import 'package:acent_messenger/services/socket_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import 'package:chattingapp/services/auth_service.dart';
-import 'package:chattingapp/models/chat_session.dart';
+import 'package:acent_messenger/services/auth_service.dart';
+import 'package:acent_messenger/models/chat_session.dart';
 
 class ChatProvider with ChangeNotifier {
   final AuthService _authService;

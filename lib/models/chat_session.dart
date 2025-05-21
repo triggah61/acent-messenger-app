@@ -1,5 +1,5 @@
-import 'package:chattingapp/models/message.dart';
-import 'package:chattingapp/models/profile.dart';
+import 'package:acent_messenger/models/message.dart';
+import 'package:acent_messenger/models/profile.dart';
 
 class ChatSession {
   final String id;

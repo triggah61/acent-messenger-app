@@ -1,6 +1,6 @@
 import 'dart:convert';
 
-import 'package:chattingapp/constants/config.dart';
+import 'package:acent_messenger/constants/config.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/profile.dart';

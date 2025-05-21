@@ -1,8 +1,8 @@
-import 'package:chattingapp/views/calls/calls.dart';
-import 'package:chattingapp/views/contacts/contacts.dart';
-import 'package:chattingapp/views/search/search.dart';
-import 'package:chattingapp/views/settings/settings.dart';
-import 'package:chattingapp/views/status/status.dart';
+import 'package:acent_messenger/views/calls/calls.dart';
+import 'package:acent_messenger/views/contacts/contacts.dart';
+import 'package:acent_messenger/views/search/search.dart';
+import 'package:acent_messenger/views/settings/settings.dart';
+import 'package:acent_messenger/views/status/status.dart';
 import 'package:flutter/material.dart';
 
 import '../views/chats/chat_screen.dart';

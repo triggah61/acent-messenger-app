@@ -1,12 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:chattingapp/providers/auth_provider.dart';
-import 'package:chattingapp/services/auth_service.dart';
-import 'package:chattingapp/constants/config.dart';
+import 'package:acent_messenger/providers/auth_provider.dart';
+import 'package:acent_messenger/services/auth_service.dart';
+import 'package:acent_messenger/constants/config.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:chattingapp/commonwidgets/botttommnavigationbar.dart';
+import 'package:acent_messenger/commonwidgets/botttommnavigationbar.dart';
 
 class ProfileSetupScreen extends StatefulWidget {
   const ProfileSetupScreen({super.key});

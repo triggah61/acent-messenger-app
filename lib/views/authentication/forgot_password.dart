@@ -1,4 +1,4 @@
-import 'package:chattingapp/views/authentication/reset_password.dart';
+import 'package:acent_messenger/views/authentication/reset_password.dart';
 import 'package:flutter/material.dart';
 
 import '../../constants/colors.dart';

@@ -1,8 +1,8 @@
-import 'package:chattingapp/services/auth_service.dart';
+import 'package:acent_messenger/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:chattingapp/constants/config.dart';
+import 'package:acent_messenger/constants/config.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../widgets/auth_middleware.dart';

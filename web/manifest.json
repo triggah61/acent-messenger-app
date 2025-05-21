@@ -1,6 +1,6 @@
 {
-    "name": "chattingapp",
-    "short_name": "chattingapp",
+    "name": "acent_messenger",
+    "short_name": "acent_messenger",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

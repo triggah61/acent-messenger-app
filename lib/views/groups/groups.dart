@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_image_stack/flutter_image_stack.dart';
 import 'package:provider/provider.dart';
-import 'package:chattingapp/providers/group_provider.dart';
-import 'package:chattingapp/models/chat_session.dart';
-import 'package:chattingapp/constants/config.dart';
+import 'package:acent_messenger/providers/group_provider.dart';
+import 'package:acent_messenger/models/chat_session.dart';
+import 'package:acent_messenger/constants/config.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import '../groupsconversations/groupsconversations.dart';
 import '../../widgets/auth_middleware.dart';

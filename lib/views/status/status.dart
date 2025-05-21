@@ -3,9 +3,9 @@ import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import 'package:chattingapp/constants/config.dart';
-import 'package:chattingapp/models/post.dart';
-import 'package:chattingapp/services/auth_service.dart';
+import 'package:acent_messenger/constants/config.dart';
+import 'package:acent_messenger/models/post.dart';
+import 'package:acent_messenger/services/auth_service.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:photo_view/photo_view.dart';
 

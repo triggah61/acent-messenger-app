@@ -1,11 +1,11 @@
-import 'package:chattingapp/constants/colors.dart';
+import 'package:acent_messenger/constants/colors.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'views/splash/splash.dart';
 import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/group_provider.dart';
-import 'package:chattingapp/services/auth_service.dart';
+import 'package:acent_messenger/services/auth_service.dart';
 import 'providers/contacts_provider.dart';
 
 void main() {

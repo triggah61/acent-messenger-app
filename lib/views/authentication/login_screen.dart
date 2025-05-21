@@ -1,6 +1,6 @@
-import 'package:chattingapp/constants/config.dart';
+import 'package:acent_messenger/constants/config.dart';
 import 'package:flutter/material.dart';
-import 'package:chattingapp/views/authentication/signup_sreeen.dart';
+import 'package:acent_messenger/views/authentication/signup_sreeen.dart';
 import 'package:country_code_picker/country_code_picker.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;

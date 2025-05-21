@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'package:chattingapp/constants/config.dart';
+import 'package:acent_messenger/constants/config.dart';
 import 'package:http/http.dart' as http;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 

@@ -1,4 +1,4 @@
-# chattingapp
+# acent_messenger
 
 A new Flutter project.
 

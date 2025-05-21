@@ -1,4 +1,4 @@
-import 'package:chattingapp/models/chat_session.dart';
+import 'package:acent_messenger/models/chat_session.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../constants/config.dart';

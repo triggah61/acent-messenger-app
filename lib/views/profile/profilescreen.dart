@@ -1,6 +1,6 @@
-import 'package:chattingapp/providers/auth_provider.dart';
-import 'package:chattingapp/constants/config.dart';
-import 'package:chattingapp/services/auth_service.dart';
+import 'package:acent_messenger/providers/auth_provider.dart';
+import 'package:acent_messenger/constants/config.dart';
+import 'package:acent_messenger/services/auth_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -9,7 +9,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:chattingapp/views/authentication/login_screen.dart';
+import 'package:acent_messenger/views/authentication/login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});

@@ -1,7 +1,7 @@
-import 'package:chattingapp/views/helpcenter/helpcenter.dart';
-import 'package:chattingapp/views/notifications/notifications.dart';
-import 'package:chattingapp/views/profile/profilescreen.dart';
-import 'package:chattingapp/views/search/search.dart';
+import 'package:acent_messenger/views/helpcenter/helpcenter.dart';
+import 'package:acent_messenger/views/notifications/notifications.dart';
+import 'package:acent_messenger/views/profile/profilescreen.dart';
+import 'package:acent_messenger/views/search/search.dart';
 import 'package:flutter/material.dart';
 
 import '../chats/chat_screen.dart';

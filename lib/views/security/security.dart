@@ -1,4 +1,4 @@
-import 'package:chattingapp/constants/colors.dart';
+import 'package:acent_messenger/constants/colors.dart';
 import 'package:flutter/material.dart';
 
 

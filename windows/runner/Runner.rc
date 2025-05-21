@@ -90,12 +90,12 @@ BEGIN
         BLOCK "040904e4"
         BEGIN
             VALUE "CompanyName", "com.example" "\0"
-            VALUE "FileDescription", "chattingapp" "\0"
+            VALUE "FileDescription", "acent_messenger" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "chattingapp" "\0"
+            VALUE "InternalName", "acent_messenger" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2025 com.example. All rights reserved." "\0"
-            VALUE "OriginalFilename", "chattingapp.exe" "\0"
-            VALUE "ProductName", "chattingapp" "\0"
+            VALUE "OriginalFilename", "acent_messenger.exe" "\0"
+            VALUE "ProductName", "acent_messenger" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

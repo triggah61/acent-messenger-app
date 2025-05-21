@@ -1,10 +1,10 @@
-import 'package:chattingapp/providers/group_provider.dart';
+import 'package:acent_messenger/providers/group_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'dart:convert';
 import '../../services/chat_service.dart';
 import '../../services/auth_service.dart';
-import 'package:chattingapp/constants/config.dart';
+import 'package:acent_messenger/constants/config.dart';
 import 'package:http/http.dart' as http;
 import '../consversations/chatdetailsscreen.dart';
 

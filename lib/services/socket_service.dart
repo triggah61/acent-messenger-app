@@ -1,7 +1,7 @@
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:chattingapp/constants/config.dart';
-import 'package:chattingapp/models/message.dart';
-import 'package:chattingapp/services/auth_service.dart';
+import 'package:acent_messenger/constants/config.dart';
+import 'package:acent_messenger/models/message.dart';
+import 'package:acent_messenger/services/auth_service.dart';
 
 class SocketService {
   static SocketService? _instance;

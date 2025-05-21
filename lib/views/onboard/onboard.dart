@@ -1,4 +1,4 @@
-import 'package:chattingapp/constants/colors.dart';
+import 'package:acent_messenger/constants/colors.dart';
 import 'package:flutter/material.dart';
 import 'package:smooth_page_indicator/smooth_page_indicator.dart';
 

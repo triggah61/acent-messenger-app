@@ -1,6 +1,6 @@
-import 'package:chattingapp/constants/colors.dart';
-import 'package:chattingapp/models/chat_session.dart';
-import 'package:chattingapp/views/consversations/chatdetailsscreen.dart';
+import 'package:acent_messenger/constants/colors.dart';
+import 'package:acent_messenger/models/chat_session.dart';
+import 'package:acent_messenger/views/consversations/chatdetailsscreen.dart';
 import 'package:flutter/material.dart';
 
 class SearchScreen extends StatelessWidget {

@@ -1,12 +1,13 @@
-import 'package:chattingapp/views/chats/chat_screen.dart';
-import 'package:chattingapp/views/authentication/login_screen.dart';
-import 'package:chattingapp/views/profile/profile_setup_screen.dart';
+import 'package:acent_messenger/views/chats/chat_screen.dart';
+import 'package:acent_messenger/views/authentication/login_screen.dart';
+import 'package:acent_messenger/views/profile/profile_setup_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:chattingapp/providers/auth_provider.dart';
-import 'package:chattingapp/commonwidgets/botttommnavigationbar.dart';
+import 'package:acent_messenger/providers/auth_provider.dart';
+import 'package:acent_messenger/commonwidgets/botttommnavigationbar.dart';
+
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
