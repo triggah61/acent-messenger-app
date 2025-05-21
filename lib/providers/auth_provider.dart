@@ -10,14 +10,14 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 class AuthProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
   Profile? _profile;
-  bool _isLoading = false;
+  bool _isLoading = true; // Start with loading true
   bool _isInitialized = false;
   String? _token;
   String? _userId;
 
   Profile? get profile => _profile;
   bool get isLoading => _isLoading;
-  bool get isAuthenticated => _profile != null;
+  bool get isAuthenticated => _profile != null && _token != null;
   bool get isInitialized => _isInitialized;
   String? get token => _token;
   String? get userId => _userId;
@@ -32,13 +32,23 @@ class AuthProvider with ChangeNotifier {
 
   // Call this after successful login to fetch profile
   Future<void> handleLoginSuccess(String token) async {
-    await _authService.storage.write(key: 'jwt_token', value: token);
-    await fetchProfile();
+    _isLoading = true;
+    notifyListeners();
+    
+    try {
+      await _authService.storage.write(key: 'jwt_token', value: token);
+      _token = token;
+      await fetchProfile();
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
   }
 
   // Manual profile fetch
   Future<void> fetchProfile() async {
-    if (_isLoading) return;
+
+    print("AuthProvider - fetchProfile: isLoading: $_isLoading");
     
     _isLoading = true;
     notifyListeners();
@@ -53,8 +63,6 @@ class AuthProvider with ChangeNotifier {
             'Authorization': 'Bearer $token'
           },
         );
-
-        // print("Response: ${response.body}, ${response.statusCode}");
         
         if (response.statusCode == 200) {
           print("Profile: ${response.body}, ${response.statusCode}");
@@ -102,10 +110,15 @@ class AuthProvider with ChangeNotifier {
     try {
       final token = await _authService.getToken();
       if (token != null) {
-        await fetchProfile();
+        _token = token; // Set the token
+        await fetchProfile(); // This will set the profile if token is valid
+      } else {
+        _profile = null;
+        _token = null;
       }
     } catch (e) {
       _profile = null;
+      _token = null;
       print("Error checking auth status: $e");
     } finally {
       _isLoading = false;
