@@ -17,7 +17,7 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
         elevation: 0,
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () {},
+          onPressed: () => Navigator.pop(context),
         ),
         title: const Text('Help Center',
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
@@ -66,13 +66,34 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
             Expanded(
               child: ListView(
                 children: [
-                  _buildHelpItem('How do I create a new account?'),
-                  _buildHelpItem('I forgot my password. How do I reset it?'),
-                  _buildHelpItem('I’m having trouble logging in. What can I do?'),
-                  _buildHelpItem('How do I create a new chat group?'),
-                  _buildHelpItem('How do I block or report a user?'),
-                  _buildHelpItem('How does the "Seen" feature work?'),
-                  _buildHelpItem('How do I change my profile picture?'),
+                  _buildHelpItem(
+                    'How do I create a new account?',
+                    'To create a new account, click on "Sign Up" on the login screen and follow the instructions.',
+                  ),
+                  _buildHelpItem(
+                    'I forgot my password. How do I reset it?',
+                    'Click "Forgot Password" on the login page, then follow the email instructions to reset it.',
+                  ),
+                  _buildHelpItem(
+                    'I’m having trouble logging in. What can I do?',
+                    'Make sure your credentials are correct and you have an active internet connection. Try resetting your password if needed.',
+                  ),
+                  _buildHelpItem(
+                    'How do I create a new chat group?',
+                    'Go to the chats tab, tap the "+" icon, and select "New Group". Add members and name your group.',
+                  ),
+                  _buildHelpItem(
+                    'How do I block or report a user?',
+                    'Open the user’s profile, tap the menu icon, and select "Block" or "Report".',
+                  ),
+                  _buildHelpItem(
+                    'How does the "Seen" feature work?',
+                    'When a message has been viewed, it will show as "Seen" with a timestamp below the message.',
+                  ),
+                  _buildHelpItem(
+                    'How do I change my profile picture?',
+                    'Go to your profile, tap your picture, and select a new image from your gallery or camera.',
+                  ),
                 ],
               ),
             ),
@@ -100,15 +121,19 @@ class _HelpCenterScreenState extends State<HelpCenterScreen> {
     );
   }
 
-  Widget _buildHelpItem(String title) {
+  Widget _buildHelpItem(String question, String answer) {
     return Card(
       color: Colors.white,
       elevation: 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      child: ListTile(
-        title: Text(title, style: TextStyle(fontWeight: FontWeight.bold)),
+      child: ExpansionTile(
+        title: Text(question, style: TextStyle(fontWeight: FontWeight.bold)),
         trailing: Icon(Icons.chevron_right, color: Colors.blueAccent),
-        onTap: () {},
+        children: [
+          Padding(padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Text(answer),
+          )
+        ],
       ),
     );
   }

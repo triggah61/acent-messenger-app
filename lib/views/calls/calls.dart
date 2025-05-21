@@ -61,51 +61,28 @@ class CallsScreen extends StatelessWidget {
                               color: Colors.black87)),
                       const SizedBox(height: 20),
                       Expanded(
-                        child: ListView(
+                        child: true
+                            ? Center(child: Text('No calls yet'))
+                            : ListView(
                           children: [
-                            _buildCallItem(
-                                name: 'Team Align',
-                                time: DateTime.now(),
-                                type: CallType.team),
-                            _buildCallItem(
-                                name: 'Jhon Abraham',
-                                time: DateTime.now()
-                                    .subtract(const Duration(hours: 2)),
-                                type: CallType.individual),
-                            _buildCallItem(
-                                name: 'Sabilah Sayma',
-                                time: DateTime.now().subtract(const Duration(days: 1)),
-                                type: CallType.individual),
-                            _buildCallItem(
-                                name: 'Alex Linderson',
-                                time: DateTime.now().subtract(const Duration(days: 2)),
-                                type: CallType.individual),
-                            _buildCallItem(
-                                name: 'Jhon Abraham',
-                                time: DateTime(2022, 7, 3),
-                                type: CallType.individual),
-                            _buildCallItem(
-                                name: 'John Borino',
-                                time: DateTime.now().subtract(const Duration(days: 3)),
-                                type: CallType.individual),
-                            _buildCallItem(
-                                name: 'Alice Wonderland',
-                                time: DateTime.now()
-                                    .subtract(const Duration(days: 4)),
-                                type: CallType.individual),
-                            _buildCallItem(
-                                name: 'Bob The Builder',
-                                time: DateTime.now()
-                                    .subtract(const Duration(days: 5)),
-                                type: CallType.team),
-                            _buildCallItem(
-                                name: 'Charlie Chaplin',
-                                time: DateTime.now()
-                                    .subtract(const Duration(days: 6)),
-                                type: CallType.individual),
-                          ],
-                        ),
+
+                          // _buildCallItem(
+                            //     name: 'Team Align',
+                            //     time: DateTime.now(),
+                            //     type: CallType.team),
+                            // _buildCallItem(
+                            //     name: 'Sabilah Sayma',
+                            //     time: DateTime.now().subtract(const Duration(days: 1)),
+                            //     type: CallType.individual),
+                            // _buildCallItem(
+                            //     name: 'Bob The Builder',
+                            //     time: DateTime.now()
+                            //         .subtract(const Duration(days: 5)),
+                            //     type: CallType.team),
+                        // more items
+                        ],
                       ),
+                    ),
                     ],
                   ),
                 ),
