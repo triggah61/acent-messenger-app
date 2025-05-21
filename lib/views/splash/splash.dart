@@ -1,5 +1,6 @@
 import 'package:chattingapp/views/chats/chat_screen.dart';
 import 'package:chattingapp/views/authentication/login_screen.dart';
+import 'package:chattingapp/views/profile/profile_setup_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -41,6 +42,15 @@ class _SplashScreenState extends State<SplashScreen>
     super.dispose();
   }
 
+  bool _isProfileComplete(AuthProvider authProvider) {
+    final profile = authProvider.profile;
+    return profile != null &&
+        profile.firstName != null &&
+        profile.firstName!.isNotEmpty &&
+        profile.lastName != null &&
+        profile.lastName!.isNotEmpty;
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -57,10 +67,18 @@ class _SplashScreenState extends State<SplashScreen>
             print(
                 "SplashScreen - _buildSplashContent: isLoading: ${authProvider.isLoading}; Auth status: ${authProvider.isAuthenticated}; token: ${authProvider.token}");
             if (authProvider.isAuthenticated) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (context) => const BottomNavBarScreen()),
-              );
+              // Check if profile is complete
+              if (_isProfileComplete(authProvider)) {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const BottomNavBarScreen()),
+                );
+              } else {
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (context) => const ProfileSetupScreen()),
+                );
+              }
             } else {
               Navigator.pushReplacement(
                 context,

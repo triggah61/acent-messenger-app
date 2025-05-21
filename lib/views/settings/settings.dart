@@ -50,24 +50,26 @@ class SettingsScreen extends StatelessWidget {
                   padding: const EdgeInsets.all(24.0),
                   child: ListView(
                     children: [
+                      // _buildSettingsItem(
+                      //   context: context,
+                      //   icon: Icons.person,
+                      //   title: 'User Info',
+                      //   subtitle: 'Privacy, security, change number',
+                      //   onTap: () {
+                      //     Navigator.push(
+                      //       context,
+                      //       MaterialPageRoute(
+                      //         builder: (context) => const UserInformationScreen(),
+                      //       ),
+                      //     );
+                      //   },
+                      // ),
+
                       _buildSettingsItem(
                         context: context,
                         icon: Icons.person,
-                        title: 'User Info',
-                        subtitle: 'Privacy, security, change number',
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) => const UserInformationScreen(),
-                            ),
-                          );
-                        },
-                      ), _buildSettingsItem(
-                        context: context,
-                        icon: Icons.person,
                         title: 'Profile',
-                        subtitle: 'email, number',
+                        subtitle: 'Phone gender, birthday and more',
                         onTap: () {
                           Navigator.push(
                             context,
