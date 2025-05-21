@@ -1,6 +1,6 @@
 class Config {
   static const String awsS3Url = 'https://chingu.s3.ap-northeast-2.amazonaws.com';
-  static const String baseApiUrl = 'http://192.168.0.101:8000/api';
+  static const String baseApiUrl = 'http://192.99.68.40:8000/api';
   
   
   // Helper method to get full photo URL
@@ -13,4 +13,4 @@ class Config {
     if (value == null || value.isEmpty) return '';
     return value[0].toUpperCase() + value.substring(1);
   }
-} 
+}
