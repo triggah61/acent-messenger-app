@@ -34,53 +34,76 @@ class _DepositScreenState extends State<DepositScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF121829),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Deposit Bitcoin',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        centerTitle: true,
-      ),
-      body: Consumer<WalletProvider>(
-        builder: (context, walletProvider, child) {
-          final wallet = walletProvider.wallet;
-          if (wallet == null) {
-            return const Center(
-              child: Text(
-                'Wallet not available',
-                style: TextStyle(color: Colors.white),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 16),
+                  const Expanded(
+                    child: Text(
+                      'Deposit Bitcoin',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            );
-          }
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                _buildInstructionCard(),
-                const SizedBox(height: 24),
-                _buildQRCodeCard(wallet.address),
-                const SizedBox(height: 24),
-                _buildAddressCard(wallet.address),
-                const SizedBox(height: 24),
-                _buildAmountSection(),
-                const SizedBox(height: 24),
-                _buildWarningCard(),
-              ],
             ),
-          );
-        },
+            Expanded(
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(30),
+                    topRight: Radius.circular(30),
+                  ),
+                ),
+                child: Consumer<WalletProvider>(
+                  builder: (context, walletProvider, child) {
+                    final wallet = walletProvider.wallet;
+                    if (wallet == null) {
+                      return const Center(
+                        child: Text(
+                          'Wallet not available',
+                          style: TextStyle(color: Colors.black87),
+                        ),
+                      );
+                    }
+
+                    return SingleChildScrollView(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        children: [
+                          const SizedBox(height: 10),
+                          _buildInstructionCard(),
+                          const SizedBox(height: 24),
+                          _buildQRCodeCard(wallet.address),
+                          const SizedBox(height: 24),
+                          _buildAddressCard(wallet.address),
+                          const SizedBox(height: 24),
+                          // _buildAmountSection(),
+                          const SizedBox(height: 24),
+                          _buildWarningCard(),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -90,8 +113,9 @@ class _DepositScreenState extends State<DepositScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,7 +140,7 @@ class _DepositScreenState extends State<DepositScreen> {
                 child: Text(
                   'How to Deposit',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: Colors.black87,
                     fontSize: 18,
                     fontWeight: FontWeight.w600,
                   ),
@@ -170,8 +194,8 @@ class _DepositScreenState extends State<DepositScreen> {
           Expanded(
             child: Text(
               description,
-              style: const TextStyle(
-                color: Colors.white70,
+              style: TextStyle(
+                color: Colors.grey[700],
                 fontSize: 14,
               ),
             ),
@@ -188,13 +212,21 @@ class _DepositScreenState extends State<DepositScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[300]!),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
       ),
       child: Column(
         children: [
           const Text(
             'Scan QR Code',
             style: TextStyle(
-              color: Color(0xFF121829),
+              color: Colors.black87,
               fontSize: 18,
               fontWeight: FontWeight.w600,
             ),
@@ -205,14 +237,14 @@ class _DepositScreenState extends State<DepositScreen> {
               data: _qrData!,
               version: QrVersions.auto,
               size: 200.0,
-              foregroundColor: const Color(0xFF121829),
+              foregroundColor: Colors.black87,
             )
           else
             Container(
               width: 200,
               height: 200,
               decoration: BoxDecoration(
-                color: Colors.grey[300],
+                color: Colors.grey[100],
                 borderRadius: BorderRadius.circular(8),
               ),
               child: const Center(
@@ -220,10 +252,10 @@ class _DepositScreenState extends State<DepositScreen> {
               ),
             ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Scan this QR code with your Bitcoin wallet',
             style: TextStyle(
-              color: Colors.grey,
+              color: Colors.grey[600],
               fontSize: 14,
             ),
             textAlign: TextAlign.center,
@@ -238,9 +270,9 @@ class _DepositScreenState extends State<DepositScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey[800]!),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -248,7 +280,7 @@ class _DepositScreenState extends State<DepositScreen> {
           const Text(
             'Your Bitcoin Address',
             style: TextStyle(
-              color: Colors.white,
+              color: Colors.black87,
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
@@ -257,8 +289,9 @@ class _DepositScreenState extends State<DepositScreen> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F1419),
+              color: Colors.white,
               borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: Colors.grey[300]!),
             ),
             child: Row(
               children: [
@@ -266,7 +299,7 @@ class _DepositScreenState extends State<DepositScreen> {
                   child: Text(
                     address,
                     style: const TextStyle(
-                      color: Colors.white,
+                      color: Colors.black87,
                       fontSize: 14,
                       fontFamily: 'monospace',
                     ),
@@ -301,8 +334,9 @@ class _DepositScreenState extends State<DepositScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -310,7 +344,7 @@ class _DepositScreenState extends State<DepositScreen> {
           const Text(
             'Specify Amount (Optional)',
             style: TextStyle(
-              color: Colors.white,
+              color: Colors.black87,
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
@@ -319,17 +353,25 @@ class _DepositScreenState extends State<DepositScreen> {
           TextField(
             controller: _amountController,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.black87),
             decoration: InputDecoration(
               hintText: '0.00000000',
-              hintStyle: const TextStyle(color: Colors.white54),
+              hintStyle: TextStyle(color: Colors.grey[400]),
               suffixText: 'BTC',
-              suffixStyle: const TextStyle(color: Colors.white70),
+              suffixStyle: TextStyle(color: Colors.grey[600]),
               filled: true,
-              fillColor: const Color(0xFF0F1419),
+              fillColor: Colors.white,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.blueAccent),
               ),
               contentPadding: const EdgeInsets.all(16),
             ),
@@ -338,10 +380,10 @@ class _DepositScreenState extends State<DepositScreen> {
             },
           ),
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'If you specify an amount, it will be included in the QR code',
             style: TextStyle(
-              color: Colors.white54,
+              color: Colors.grey[600],
               fontSize: 12,
             ),
           ),
@@ -381,13 +423,13 @@ class _DepositScreenState extends State<DepositScreen> {
             ],
           ),
           const SizedBox(height: 12),
-          const Text(
+          Text(
             '• Only send Bitcoin (BTC) to this address\n'
             '• Sending any other cryptocurrency will result in permanent loss\n'
             '• Minimum deposit: 0.00001 BTC\n'
             '• Deposits require network confirmations',
             style: TextStyle(
-              color: Colors.white70,
+              color: Colors.grey[700],
               fontSize: 14,
               height: 1.5,
             ),

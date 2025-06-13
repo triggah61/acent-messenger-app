@@ -22,7 +22,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
     HomeScreen(),
     GroupChatList(),
     ContactsScreen(),
-    CallsScreen(),
+    // CallsScreen(),
     StatusScreen(),
     WalletScreen(),
     // SearchScreen(),
@@ -65,7 +65,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
             _buildBottomNavBarItem(Icons.chat, 'Chats'),         // Chats Screen
             _buildBottomNavBarItem(Icons.group, 'Groups'),       // Groups Screen
             _buildBottomNavBarItem(Icons.contacts, 'Contacts'),  // Contacts Screen
-            _buildBottomNavBarItem(Icons.call, 'Calls'),         // Calls Screen
+            // _buildBottomNavBarItem(Icons.call, 'Calls'),         // Calls Screen
             _buildBottomNavBarItem(Icons.update, 'Status'),      // Status Screen
             _buildBottomNavBarItem(Icons.wallet, 'Wallet'),      // Wallet Screen
             // _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen

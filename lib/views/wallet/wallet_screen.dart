@@ -33,26 +33,44 @@ class _WalletScreenState extends State<WalletScreen> {
       child: Scaffold(
         backgroundColor: const Color(0xFF121829),
         body: SafeArea(
-          child: RefreshIndicator(
-            onRefresh: () => context.read<WalletProvider>().refreshWalletData(),
-            child: SingleChildScrollView(
-              physics: const AlwaysScrollableScrollPhysics(),
-              child: Padding(
+          child: Column(
+            children: [
+              Container(
                 padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _buildHeader(),
-                    const SizedBox(height: 20),
-                    _buildBalanceCard(),
-                    const SizedBox(height: 20),
-                    _buildActionButtons(),
-                    const SizedBox(height: 30),
-                    _buildTransactionHistory(),
-                  ],
+                child: _buildHeader(),
+              ),
+              Expanded(
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(30),
+                      topRight: Radius.circular(30),
+                    ),
+                  ),
+                  child: RefreshIndicator(
+                    onRefresh: () => context.read<WalletProvider>().refreshWalletData(),
+                    child: SingleChildScrollView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      child: Padding(
+                        padding: const EdgeInsets.all(24.0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 10),
+                            _buildBalanceCard(),
+                            const SizedBox(height: 20),
+                            _buildActionButtons(),
+                            const SizedBox(height: 30),
+                            _buildTransactionHistory(),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ),
       ),
@@ -250,7 +268,7 @@ class _WalletScreenState extends State<WalletScreen> {
             const Text(
               'Recent Transactions',
               style: TextStyle(
-                color: Colors.white,
+                color: Colors.black87,
                 fontSize: 20,
                 fontWeight: FontWeight.w600,
               ),
@@ -278,8 +296,9 @@ class _WalletScreenState extends State<WalletScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Row(
         children: [
@@ -300,7 +319,7 @@ class _WalletScreenState extends State<WalletScreen> {
                 Text(
                   transaction.description ?? (isDeposit ? 'Deposit' : 'Withdrawal'),
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: Colors.black87,
                     fontSize: 16,
                     fontWeight: FontWeight.w500,
                   ),
@@ -308,8 +327,8 @@ class _WalletScreenState extends State<WalletScreen> {
                 const SizedBox(height: 4),
                 Text(
                   _formatDate(transaction.createdAt),
-                  style: const TextStyle(
-                    color: Colors.white54,
+                  style: TextStyle(
+                    color: Colors.grey[600],
                     fontSize: 14,
                   ),
                 ),
@@ -355,8 +374,9 @@ class _WalletScreenState extends State<WalletScreen> {
       width: double.infinity,
       height: 180,
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[100],
         borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.grey[300]!),
       ),
       child: const Center(
         child: CircularProgressIndicator(
@@ -379,10 +399,10 @@ class _WalletScreenState extends State<WalletScreen> {
         children: [
           const Icon(Icons.error, color: Colors.red, size: 48),
           const SizedBox(height: 16),
-          Text(
+          const Text(
             'Error loading wallet',
-            style: const TextStyle(
-              color: Colors.white,
+            style: TextStyle(
+              color: Colors.black87,
               fontSize: 18,
               fontWeight: FontWeight.w600,
             ),
@@ -390,8 +410,8 @@ class _WalletScreenState extends State<WalletScreen> {
           const SizedBox(height: 8),
           Text(
             error,
-            style: const TextStyle(
-              color: Colors.white70,
+            style: TextStyle(
+              color: Colors.grey[600],
               fontSize: 14,
             ),
             textAlign: TextAlign.center,
@@ -406,21 +426,22 @@ class _WalletScreenState extends State<WalletScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(32),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         children: [
           Icon(
             Icons.receipt_long,
-            color: Colors.white.withOpacity(0.3),
+            color: Colors.grey[400],
             size: 48,
           ),
           const SizedBox(height: 16),
           Text(
             'No transactions yet',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.grey[600],
               fontSize: 16,
             ),
           ),

@@ -34,60 +34,83 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFF121829),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'Withdraw Bitcoin',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        centerTitle: true,
-      ),
-      body: Consumer<WalletProvider>(
-        builder: (context, walletProvider, child) {
-          final wallet = walletProvider.wallet;
-          if (wallet == null) {
-            return const Center(
-              child: Text(
-                'Wallet not available',
-                style: TextStyle(color: Colors.white),
-              ),
-            );
-          }
-
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      body: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(16.0),
+              child: Row(
                 children: [
-                  _buildBalanceCard(wallet),
-                  const SizedBox(height: 24),
-                  _buildAmountSection(wallet),
-                  const SizedBox(height: 24),
-                  _buildNetworkFeeSection(walletProvider),
-                  const SizedBox(height: 24),
-                  _buildAddressSection(),
-                  const SizedBox(height: 24),
-                  _buildDescriptionSection(),
-                  const SizedBox(height: 24),
-                  _buildSummaryCard(wallet, walletProvider),
-                  const SizedBox(height: 24),
-                  _buildWithdrawButton(walletProvider),
+                  IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                  const SizedBox(width: 16),
+                  const Expanded(
+                    child: Text(
+                      'Withdraw Bitcoin',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ),
                 ],
               ),
             ),
-          );
-        },
+            Expanded(
+              child: Container(
+                decoration: const BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.only(
+                    topLeft: Radius.circular(30),
+                    topRight: Radius.circular(30),
+                  ),
+                ),
+                child: Consumer<WalletProvider>(
+                  builder: (context, walletProvider, child) {
+                    final wallet = walletProvider.wallet;
+                    if (wallet == null) {
+                      return const Center(
+                        child: Text(
+                          'Wallet not available',
+                          style: TextStyle(color: Colors.black87),
+                        ),
+                      );
+                    }
+
+                    return SingleChildScrollView(
+                      padding: const EdgeInsets.all(24.0),
+                      child: Form(
+                        key: _formKey,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const SizedBox(height: 10),
+                            _buildBalanceCard(wallet),
+                            const SizedBox(height: 24),
+                            _buildAmountSection(wallet),
+                            const SizedBox(height: 24),
+                            _buildNetworkFeeSection(walletProvider),
+                            const SizedBox(height: 24),
+                            _buildAddressSection(),
+                            const SizedBox(height: 24),
+                            _buildDescriptionSection(),
+                            const SizedBox(height: 24),
+                            _buildSummaryCard(wallet, walletProvider),
+                            const SizedBox(height: 24),
+                            _buildWithdrawButton(walletProvider),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -133,8 +156,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -142,7 +166,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           const Text(
             'Amount to Withdraw',
             style: TextStyle(
-              color: Colors.white,
+              color: Colors.black87,
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
@@ -151,17 +175,25 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           TextFormField(
             controller: _amountController,
             keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.black87),
             decoration: InputDecoration(
               hintText: '0.00000000',
-              hintStyle: const TextStyle(color: Colors.white54),
+              hintStyle: TextStyle(color: Colors.grey[400]),
               suffixText: 'BTC',
-              suffixStyle: const TextStyle(color: Colors.white70),
+              suffixStyle: TextStyle(color: Colors.grey[600]),
               filled: true,
-              fillColor: const Color(0xFF0F1419),
+              fillColor: Colors.white,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.blueAccent),
               ),
               contentPadding: const EdgeInsets.all(16),
             ),
@@ -225,8 +257,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -234,7 +267,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           const Text(
             'Network Fee',
             style: TextStyle(
-              color: Colors.white,
+              color: Colors.black87,
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
@@ -259,10 +292,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         margin: const EdgeInsets.only(bottom: 12),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isSelected ? Colors.blueAccent.withOpacity(0.2) : const Color(0xFF0F1419),
+          color: isSelected ? Colors.blueAccent.withOpacity(0.1) : Colors.white,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
-            color: isSelected ? Colors.blueAccent : Colors.transparent,
+            color: isSelected ? Colors.blueAccent : Colors.grey[300]!,
             width: 2,
           ),
         ),
@@ -274,7 +307,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isSelected ? Colors.blueAccent : Colors.white54,
+                  color: isSelected ? Colors.blueAccent : Colors.grey[400]!,
                   width: 2,
                 ),
               ),
@@ -302,7 +335,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                       Text(
                         _getFeeTypeTitle(fee.type),
                         style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.white70,
+                          color: isSelected ? Colors.black87 : Colors.grey[700],
                           fontSize: 16,
                           fontWeight: FontWeight.w500,
                         ),
@@ -310,7 +343,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                       Text(
                         '${_btcFormat.format(fee.fee)} BTC',
                         style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.white70,
+                          color: isSelected ? Colors.black87 : Colors.grey[700],
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                         ),
@@ -321,7 +354,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                   Text(
                     fee.description,
                     style: TextStyle(
-                      color: isSelected ? Colors.white70 : Colors.white54,
+                      color: isSelected ? Colors.grey[600] : Colors.grey[500],
                       fontSize: 12,
                     ),
                   ),
@@ -339,8 +372,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -348,7 +382,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           const Text(
             'Destination Address',
             style: TextStyle(
-              color: Colors.white,
+              color: Colors.black87,
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
@@ -356,19 +390,27 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           const SizedBox(height: 12),
           TextFormField(
             controller: _addressController,
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.black87),
             decoration: InputDecoration(
               hintText: 'Enter Bitcoin address (e.g., 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa)',
-              hintStyle: const TextStyle(color: Colors.white54),
+              hintStyle: TextStyle(color: Colors.grey[400]),
               filled: true,
-              fillColor: const Color(0xFF0F1419),
+              fillColor: Colors.white,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.blueAccent),
               ),
               contentPadding: const EdgeInsets.all(16),
               suffixIcon: IconButton(
-                icon: const Icon(Icons.qr_code_scanner, color: Colors.white54),
+                icon: Icon(Icons.qr_code_scanner, color: Colors.grey[600]),
                 onPressed: () {
                   // QR scanner functionality can be added here
                   ScaffoldMessenger.of(context).showSnackBar(
@@ -399,8 +441,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey[200]!),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -408,7 +451,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           const Text(
             'Description (Optional)',
             style: TextStyle(
-              color: Colors.white,
+              color: Colors.black87,
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
@@ -416,16 +459,24 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           const SizedBox(height: 12),
           TextFormField(
             controller: _descriptionController,
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.black87),
             maxLines: 3,
             decoration: InputDecoration(
               hintText: 'Add a note for this transaction...',
-              hintStyle: const TextStyle(color: Colors.white54),
+              hintStyle: TextStyle(color: Colors.grey[400]),
               filled: true,
-              fillColor: const Color(0xFF0F1419),
+              fillColor: Colors.white,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide.none,
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: Colors.grey[300]!),
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: Colors.blueAccent),
               ),
               contentPadding: const EdgeInsets.all(16),
             ),
@@ -450,9 +501,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E2746),
+        color: Colors.grey[50],
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.blueAccent.withOpacity(0.3)),
+        border: Border.all(color: Colors.blueAccent.withOpacity(0.5)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -460,7 +511,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           const Text(
             'Transaction Summary',
             style: TextStyle(
-              color: Colors.white,
+              color: Colors.black87,
               fontSize: 16,
               fontWeight: FontWeight.w600,
             ),
@@ -468,13 +519,13 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           const SizedBox(height: 16),
           _buildSummaryRow('Amount', '${_btcFormat.format(amount)} BTC'),
           _buildSummaryRow('Network Fee', '${_btcFormat.format(selectedFee.fee)} BTC'),
-          const Divider(color: Colors.white24),
+          Divider(color: Colors.grey[300]),
           _buildSummaryRow('Total', '${_btcFormat.format(total)} BTC', isTotal: true),
           const SizedBox(height: 8),
           Text(
             'Remaining Balance: ${_btcFormat.format(wallet.btcBalance - total)} BTC',
-            style: const TextStyle(
-              color: Colors.white54,
+            style: TextStyle(
+              color: Colors.grey[600],
               fontSize: 12,
             ),
           ),
@@ -492,7 +543,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           Text(
             label,
             style: TextStyle(
-              color: isTotal ? Colors.white : Colors.white70,
+              color: isTotal ? Colors.black87 : Colors.grey[700],
               fontSize: isTotal ? 16 : 14,
               fontWeight: isTotal ? FontWeight.w600 : FontWeight.normal,
             ),
@@ -500,7 +551,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           Text(
             value,
             style: TextStyle(
-              color: isTotal ? Colors.white : Colors.white70,
+              color: isTotal ? Colors.black87 : Colors.grey[700],
               fontSize: isTotal ? 16 : 14,
               fontWeight: isTotal ? FontWeight.w600 : FontWeight.normal,
             ),
@@ -637,10 +688,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1E2746),
+        backgroundColor: Colors.white,
         title: const Text(
           'Confirm Withdrawal',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: Colors.black87),
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -648,12 +699,12 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           children: [
             Text(
               'Amount: ${_btcFormat.format(amount)} BTC',
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(color: Colors.grey[700]),
             ),
             const SizedBox(height: 8),
             Text(
               'To: ${address.substring(0, 8)}...${address.substring(address.length - 8)}',
-              style: const TextStyle(color: Colors.white70),
+              style: TextStyle(color: Colors.grey[700]),
             ),
             const SizedBox(height: 16),
             const Text(
