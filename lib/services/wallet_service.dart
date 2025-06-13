@@ -9,48 +9,6 @@ class WalletService {
 
   WalletService(this._authService);
 
-  // Sample transactions for demonstration (until transaction API is provided)
-  static final List<Transaction> _sampleTransactions = [
-    Transaction(
-      id: 'tx_001',
-      walletId: 'wallet_001',
-      type: 'deposit',
-      amount: 0.001,
-      fee: 0.00001,
-      fromAddress: '3FRN9PWK47bHK3fy43nGjzTjNMXzqTWWcH',
-      description: 'Deposit from external wallet',
-      status: 'confirmed',
-      txHash: '3e4c5a2b8d7f1a9c6e8b2f4d1a7c9e5b3f8d2a6c4e1b7f9a5c3d8e2b4f6a1c9d',
-      createdAt: DateTime.now().subtract(const Duration(days: 2)),
-      updatedAt: DateTime.now().subtract(const Duration(days: 2)),
-    ),
-    Transaction(
-      id: 'tx_002',
-      walletId: 'wallet_001',
-      type: 'withdraw',
-      amount: 0.0005,
-      fee: 0.00002,
-      toAddress: '1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2',
-      description: 'Payment to merchant',
-      status: 'confirmed',
-      txHash: '7a2c4e6b8f1d3a5c9e2b4f6d8a1c3e5b7f9d2a4c6e8b1f3d5a7c9e2b4f6d8a1c',
-      createdAt: DateTime.now().subtract(const Duration(days: 5)),
-      updatedAt: DateTime.now().subtract(const Duration(days: 5)),
-    ),
-    Transaction(
-      id: 'tx_003',
-      walletId: 'wallet_001',
-      type: 'deposit',
-      amount: 0.00075,
-      fee: 0.00001,
-      fromAddress: '1QHsF1UE7Vxh6nAr3tWe2c4Bg7C1e2K2Jk',
-      description: 'Deposit from friend',
-      status: 'pending',
-      createdAt: DateTime.now().subtract(const Duration(hours: 2)),
-      updatedAt: DateTime.now().subtract(const Duration(hours: 2)),
-    ),
-  ];
-
   // Sample network fees
   static final List<NetworkFee> _sampleNetworkFees = [
     NetworkFee(
@@ -101,34 +59,42 @@ class WalletService {
     }
   }
 
-  // Get transaction history (using sample data until API is provided)
-  Future<List<Transaction>> getTransactions(String walletId) async {
+  // Get transaction history with pagination
+  Future<TransactionHistoryResponse> getTransactions({
+    int page = 1,
+    int limit = 10,
+  }) async {
     try {
-      // TODO: Replace with real API call when transaction endpoint is provided
-      /*
       final token = await _authService.getToken();
       if (token == null) throw Exception('No authentication token');
 
       final response = await http.get(
-        Uri.parse('${Config.baseApiUrl}/user/wallet/transactions'),
+        Uri.parse('${Config.baseApiUrl}/user/wallet/getTransactionHistory?limit=$limit&page=$page'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return (data['transactions'] as List)
-            .map((tx) => Transaction.fromJson(tx))
-            .toList();
+        final responseData = json.decode(response.body);
+        
+        if (responseData['success'] == true && responseData['data'] != null) {
+          return TransactionHistoryResponse.fromJson(responseData);
+        } else {
+          throw Exception(responseData['message'] ?? 'Failed to fetch transactions');
+        }
       } else {
-        throw Exception('Failed to fetch transactions');
+        throw Exception('Failed to fetch transactions: ${response.body}');
       }
-      */
-      
-      await Future.delayed(const Duration(milliseconds: 300)); // Simulate API delay
-      return _sampleTransactions;
     } catch (e) {
+      print('Error fetching transactions: $e');
       throw Exception('Failed to fetch transactions: $e');
     }
+  }
+
+  // Legacy method for backward compatibility - remove when all references are updated
+  @deprecated
+  Future<List<Transaction>> getTransactionsList(String walletId) async {
+    final response = await getTransactions(page: 1, limit: 50);
+    return response.transactions;
   }
 
   // Get network fees (using sample data until API is provided)

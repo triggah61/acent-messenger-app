@@ -8,6 +8,14 @@ class WalletProvider with ChangeNotifier {
   Wallet? _wallet;
   List<Transaction> _transactions = [];
   List<NetworkFee> _networkFees = [];
+  
+  // Transaction pagination state
+  TransactionPagination? _transactionPagination;
+  bool _isLoadingTransactions = false;
+  bool _isLoadingMoreTransactions = false;
+  bool _hasTransactionError = false;
+  String? _transactionError;
+
   bool _isLoading = false;
   String? _error;
 
@@ -19,6 +27,15 @@ class WalletProvider with ChangeNotifier {
   List<NetworkFee> get networkFees => _networkFees;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  
+  // Transaction pagination getters
+  TransactionPagination? get transactionPagination => _transactionPagination;
+  bool get isLoadingTransactions => _isLoadingTransactions;
+  bool get isLoadingMoreTransactions => _isLoadingMoreTransactions;
+  bool get hasTransactionError => _hasTransactionError;
+  String? get transactionError => _transactionError;
+  bool get canLoadMoreTransactions => 
+      _transactionPagination?.hasNextPage ?? false;
 
   // Clear error
   void clearError() {
@@ -27,32 +44,79 @@ class WalletProvider with ChangeNotifier {
   }
 
   // Fetch wallet data
-  Future<void> fetchWallet() async {
-    try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
+  Future<void> fetchWalletData() async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
 
+    try {
       _wallet = await _walletService.getWallet();
-      notifyListeners();
+      _error = null;
     } catch (e) {
       _error = e.toString();
-      notifyListeners();
+      print('Error fetching wallet: $e');
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
-  // Fetch transactions
-  Future<void> fetchTransactions() async {
+  // Fetch transactions with pagination
+  Future<void> fetchTransactions({bool refresh = false}) async {
+    if (refresh) {
+      _transactions.clear();
+      _transactionPagination = null;
+      _hasTransactionError = false;
+      _transactionError = null;
+    }
+
+    _isLoadingTransactions = refresh;
+    notifyListeners();
+
     try {
-      if (_wallet == null) return;
-      
-      _transactions = await _walletService.getTransactions(_wallet!.id);
-      notifyListeners();
+      final response = await _walletService.getTransactions(
+        page: 1,
+        limit: 10,
+      );
+
+      _transactions = response.transactions;
+      _transactionPagination = response.pagination;
+      _hasTransactionError = false;
+      _transactionError = null;
     } catch (e) {
-      _error = e.toString();
+      _hasTransactionError = true;
+      _transactionError = e.toString();
+      print('Error fetching transactions: $e');
+    } finally {
+      _isLoadingTransactions = false;
+      notifyListeners();
+    }
+  }
+
+  // Load more transactions (for pagination)
+  Future<void> loadMoreTransactions() async {
+    if (_isLoadingMoreTransactions || !canLoadMoreTransactions) return;
+
+    _isLoadingMoreTransactions = true;
+    notifyListeners();
+
+    try {
+      final nextPage = (_transactionPagination?.page ?? 0) + 1;
+      final response = await _walletService.getTransactions(
+        page: nextPage,
+        limit: 10,
+      );
+
+      _transactions.addAll(response.transactions);
+      _transactionPagination = response.pagination;
+      _hasTransactionError = false;
+      _transactionError = null;
+    } catch (e) {
+      _hasTransactionError = true;
+      _transactionError = e.toString();
+      print('Error loading more transactions: $e');
+    } finally {
+      _isLoadingMoreTransactions = false;
       notifyListeners();
     }
   }
@@ -61,14 +125,21 @@ class WalletProvider with ChangeNotifier {
   Future<void> fetchNetworkFees() async {
     try {
       _networkFees = await _walletService.getNetworkFees();
-      notifyListeners();
     } catch (e) {
-      _error = e.toString();
-      notifyListeners();
+      print('Error fetching network fees: $e');
     }
   }
 
-  // Create withdrawal transaction
+  // Refresh all wallet data
+  Future<void> refreshWalletData() async {
+    await Future.wait([
+      fetchWalletData(),
+      fetchTransactions(refresh: true),
+      fetchNetworkFees(),
+    ]);
+  }
+
+  // Create withdrawal
   Future<bool> createWithdrawal({
     required double amount,
     required String toAddress,
@@ -76,10 +147,6 @@ class WalletProvider with ChangeNotifier {
     String? description,
   }) async {
     try {
-      _isLoading = true;
-      _error = null;
-      notifyListeners();
-
       final success = await _walletService.createWithdrawal(
         amount: amount,
         toAddress: toAddress,
@@ -88,9 +155,8 @@ class WalletProvider with ChangeNotifier {
       );
 
       if (success) {
-        // Refresh wallet and transactions
-        await fetchWallet();
-        await fetchTransactions();
+        // Refresh wallet data after successful withdrawal
+        await refreshWalletData();
       }
 
       return success;
@@ -98,18 +164,6 @@ class WalletProvider with ChangeNotifier {
       _error = e.toString();
       notifyListeners();
       return false;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
     }
-  }
-
-  // Refresh all wallet data
-  Future<void> refreshWalletData() async {
-    await Future.wait([
-      fetchWallet(),
-      fetchTransactions(),
-      fetchNetworkFees(),
-    ]);
   }
 } 

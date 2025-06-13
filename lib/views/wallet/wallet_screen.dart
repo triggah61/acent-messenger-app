@@ -1,10 +1,9 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
-import '../../models/wallet.dart';
 import '../../providers/wallet_provider.dart';
 import '../../widgets/auth_middleware.dart';
+import '../../widgets/transaction_history.dart';
 import 'deposit_screen.dart';
 import 'withdraw_screen.dart';
 
@@ -62,7 +61,7 @@ class _WalletScreenState extends State<WalletScreen> {
                             const SizedBox(height: 20),
                             _buildActionButtons(),
                             const SizedBox(height: 30),
-                            _buildTransactionHistory(),
+                            const TransactionHistory(),
                           ],
                         ),
                       ),
@@ -259,116 +258,6 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
-  Widget _buildTransactionHistory() {
-    return Consumer<WalletProvider>(
-      builder: (context, walletProvider, child) {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Recent Transactions',
-              style: TextStyle(
-                color: Colors.black87,
-                fontSize: 20,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
-            const SizedBox(height: 16),
-            if (walletProvider.transactions.isEmpty)
-              _buildEmptyTransactions()
-            else
-              ...walletProvider.transactions.map((transaction) => 
-                _buildTransactionItem(transaction)
-              ).toList(),
-          ],
-        );
-      },
-    );
-  }
-
-  Widget _buildTransactionItem(Transaction transaction) {
-    final isDeposit = transaction.type == 'deposit';
-    final color = isDeposit ? Colors.green : Colors.red;
-    final icon = isDeposit ? Icons.arrow_downward : Icons.arrow_upward;
-    final sign = isDeposit ? '+' : '-';
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(25),
-            ),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  transaction.description ?? (isDeposit ? 'Deposit' : 'Withdrawal'),
-                  style: const TextStyle(
-                    color: Colors.black87,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  _formatDate(transaction.createdAt),
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$sign${_btcFormat.format(transaction.amount)} BTC',
-                style: TextStyle(
-                  color: color,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _getStatusColor(transaction.status).withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  transaction.status.toUpperCase(),
-                  style: TextStyle(
-                    color: _getStatusColor(transaction.status),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildLoadingCard() {
     return Container(
       width: double.infinity,
@@ -419,63 +308,6 @@ class _WalletScreenState extends State<WalletScreen> {
         ],
       ),
     );
-  }
-
-  Widget _buildEmptyTransactions() {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(32),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Column(
-        children: [
-          Icon(
-            Icons.receipt_long,
-            color: Colors.grey[400],
-            size: 48,
-          ),
-          const SizedBox(height: 16),
-          Text(
-            'No transactions yet',
-            style: TextStyle(
-              color: Colors.grey[600],
-              fontSize: 16,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'confirmed':
-        return Colors.green;
-      case 'pending':
-        return Colors.orange;
-      case 'failed':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  String _formatDate(DateTime date) {
-    final now = DateTime.now();
-    final difference = now.difference(date);
-
-    if (difference.inDays > 0) {
-      return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes} minute${difference.inMinutes > 1 ? 's' : ''} ago';
-    } else {
-      return 'Just now';
-    }
   }
 
   void _navigateToDeposit() {

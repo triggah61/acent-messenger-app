@@ -61,65 +61,172 @@ class Wallet {
 
 class Transaction {
   final String id;
-  final String walletId;
-  final String type; // 'deposit' or 'withdraw'
-  final double amount;
-  final double fee;
-  final String? toAddress;
-  final String? fromAddress;
-  final String? description;
-  final String status; // 'pending', 'confirmed', 'failed'
   final String? txHash;
+  final String type; // 'withdrawal', 'deposit'
+  final String direction; // 'sent', 'received'
+  final TransactionAmount amount;
+  final TransactionAmount fee;
+  final TransactionAmount adminFee;
+  final TransactionAmount netAmount;
+  final String? fromAddress;
+  final String? toAddress;
+  final String status; // 'processing', 'confirmed', 'failed'
+  final int confirmations;
+  final String? description;
+  final DateTime submittedAt;
+  final DateTime? confirmedAt;
   final DateTime createdAt;
-  final DateTime updatedAt;
 
   Transaction({
     required this.id,
-    required this.walletId,
+    this.txHash,
     required this.type,
+    required this.direction,
     required this.amount,
     required this.fee,
-    this.toAddress,
+    required this.adminFee,
+    required this.netAmount,
     this.fromAddress,
-    this.description,
+    this.toAddress,
     required this.status,
-    this.txHash,
+    required this.confirmations,
+    this.description,
+    required this.submittedAt,
+    this.confirmedAt,
     required this.createdAt,
-    required this.updatedAt,
   });
 
   factory Transaction.fromJson(Map<String, dynamic> json) {
     return Transaction(
-      id: json['_id'],
-      walletId: json['walletId'],
-      type: json['type'],
-      amount: (json['amount'] ?? 0.0).toDouble(),
-      fee: (json['fee'] ?? 0.0).toDouble(),
-      toAddress: json['toAddress'],
-      fromAddress: json['fromAddress'],
-      description: json['description'],
-      status: json['status'],
+      id: json['id'],
       txHash: json['txHash'],
+      type: json['type'],
+      direction: json['direction'],
+      amount: TransactionAmount.fromJson(json['amount']),
+      fee: TransactionAmount.fromJson(json['fee']),
+      adminFee: TransactionAmount.fromJson(json['adminFee']),
+      netAmount: TransactionAmount.fromJson(json['netAmount']),
+      fromAddress: json['fromAddress'],
+      toAddress: json['toAddress'],
+      status: json['status'],
+      confirmations: json['confirmations'] ?? 0,
+      description: json['description'],
+      submittedAt: DateTime.parse(json['submittedAt']),
+      confirmedAt: json['confirmedAt'] != null ? DateTime.parse(json['confirmedAt']) : null,
       createdAt: DateTime.parse(json['createdAt']),
-      updatedAt: DateTime.parse(json['updatedAt']),
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      '_id': id,
-      'walletId': walletId,
-      'type': type,
-      'amount': amount,
-      'fee': fee,
-      'toAddress': toAddress,
-      'fromAddress': fromAddress,
-      'description': description,
-      'status': status,
+      'id': id,
       'txHash': txHash,
+      'type': type,
+      'direction': direction,
+      'amount': amount.toJson(),
+      'fee': fee.toJson(),
+      'adminFee': adminFee.toJson(),
+      'netAmount': netAmount.toJson(),
+      'fromAddress': fromAddress,
+      'toAddress': toAddress,
+      'status': status,
+      'confirmations': confirmations,
+      'description': description,
+      'submittedAt': submittedAt.toIso8601String(),
+      'confirmedAt': confirmedAt?.toIso8601String(),
       'createdAt': createdAt.toIso8601String(),
-      'updatedAt': updatedAt.toIso8601String(),
     };
+  }
+
+  // Helper getter for backward compatibility
+  double get btcAmount => amount.btc.abs();
+  
+  // Helper getter to determine if it's a deposit or withdrawal
+  bool get isDeposit => direction == 'received';
+  bool get isWithdrawal => direction == 'sent';
+}
+
+class TransactionAmount {
+  final int satoshis;
+  final double btc;
+
+  TransactionAmount({
+    required this.satoshis,
+    required this.btc,
+  });
+
+  factory TransactionAmount.fromJson(Map<String, dynamic> json) {
+    return TransactionAmount(
+      satoshis: json['satoshis'] ?? 0,
+      btc: (json['btc'] ?? 0.0).toDouble(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'satoshis': satoshis,
+      'btc': btc,
+    };
+  }
+}
+
+class TransactionPagination {
+  final int page;
+  final int limit;
+  final int totalPages;
+  final int totalDocs;
+  final bool hasNextPage;
+  final bool hasPrevPage;
+
+  TransactionPagination({
+    required this.page,
+    required this.limit,
+    required this.totalPages,
+    required this.totalDocs,
+    required this.hasNextPage,
+    required this.hasPrevPage,
+  });
+
+  factory TransactionPagination.fromJson(Map<String, dynamic> json) {
+    return TransactionPagination(
+      page: json['page'] ?? 1,
+      limit: json['limit'] ?? 10,
+      totalPages: json['totalPages'] ?? 1,
+      totalDocs: json['totalDocs'] ?? 0,
+      hasNextPage: json['hasNextPage'] ?? false,
+      hasPrevPage: json['hasPrevPage'] ?? false,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'page': page,
+      'limit': limit,
+      'totalPages': totalPages,
+      'totalDocs': totalDocs,
+      'hasNextPage': hasNextPage,
+      'hasPrevPage': hasPrevPage,
+    };
+  }
+}
+
+class TransactionHistoryResponse {
+  final List<Transaction> transactions;
+  final TransactionPagination pagination;
+
+  TransactionHistoryResponse({
+    required this.transactions,
+    required this.pagination,
+  });
+
+  factory TransactionHistoryResponse.fromJson(Map<String, dynamic> json) {
+    final data = json['data'];
+    return TransactionHistoryResponse(
+      transactions: (data['transactions'] as List)
+          .map((tx) => Transaction.fromJson(tx))
+          .toList(),
+      pagination: TransactionPagination.fromJson(data['pagination']),
+    );
   }
 }
 
