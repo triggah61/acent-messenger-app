@@ -5,7 +5,9 @@ import 'views/splash/splash.dart';
 import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/group_provider.dart';
+import 'providers/wallet_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
+import 'services/wallet_service.dart';
 import 'providers/contacts_provider.dart';
 
 void main() {
@@ -30,6 +32,11 @@ void main() {
             Provider.of<AuthService>(context, listen: false),
           ),
         ),
+        ChangeNotifierProvider<WalletProvider>(
+          create: (context) => WalletProvider(
+            WalletService(Provider.of<AuthService>(context, listen: false)),
+          ),
+        ),
       ],
       child: const MyApp(),
     ),
@@ -43,33 +50,13 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     print("App - MyApp: Building app widget");
-    return MultiProvider(
-      providers: [
-        Provider<AuthService>(
-          create: (_) => AuthService(),
-        ),
-        ChangeNotifierProvider<AuthProvider>(
-          create: (_) => AuthProvider(),
-        ),
-        ChangeNotifierProvider<ChatProvider>(
-          create: (context) => ChatProvider(
-            Provider.of<AuthService>(context, listen: false),
-          ),
-        ),
-        ChangeNotifierProvider<GroupProvider>(
-          create: (context) => GroupProvider(
-            Provider.of<AuthService>(context, listen: false),
-          ),
-        ),
-      ],
-      child: MaterialApp(
-        debugShowCheckedModeBanner: false,
-        title: 'Chat App',
-        theme: ThemeData(
-          scaffoldBackgroundColor: AppColors.bgColor,
-        ),
-        home: const SplashScreen(),
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      title: 'Chat App',
+      theme: ThemeData(
+        scaffoldBackgroundColor: AppColors.bgColor,
       ),
+      home: const SplashScreen(),
     );
   }
 }

@@ -1,8 +1,8 @@
 import 'package:acent_messenger/views/calls/calls.dart';
 import 'package:acent_messenger/views/contacts/contacts.dart';
-import 'package:acent_messenger/views/search/search.dart';
 import 'package:acent_messenger/views/settings/settings.dart';
 import 'package:acent_messenger/views/status/status.dart';
+import 'package:acent_messenger/views/wallet/wallet_screen.dart';
 import 'package:flutter/material.dart';
 
 import '../views/chats/chat_screen.dart';
@@ -24,6 +24,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
     ContactsScreen(),
     CallsScreen(),
     StatusScreen(),
+    WalletScreen(),
     // SearchScreen(),
     SettingsScreen()
   ];
@@ -66,6 +67,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
             _buildBottomNavBarItem(Icons.contacts, 'Contacts'),  // Contacts Screen
             _buildBottomNavBarItem(Icons.call, 'Calls'),         // Calls Screen
             _buildBottomNavBarItem(Icons.update, 'Status'),      // Status Screen
+            _buildBottomNavBarItem(Icons.wallet, 'Wallet'),      // Wallet Screen
             // _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen
             _buildBottomNavBarItem(Icons.settings, 'Settings'),  // Settings Screen
           ],

@@ -1,0 +1,473 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:provider/provider.dart';
+import 'package:intl/intl.dart';
+import '../../models/wallet.dart';
+import '../../providers/wallet_provider.dart';
+import '../../widgets/auth_middleware.dart';
+import 'deposit_screen.dart';
+import 'withdraw_screen.dart';
+
+class WalletScreen extends StatefulWidget {
+  const WalletScreen({Key? key}) : super(key: key);
+
+  @override
+  State<WalletScreen> createState() => _WalletScreenState();
+}
+
+class _WalletScreenState extends State<WalletScreen> {
+  final NumberFormat _currencyFormat = NumberFormat('#,##0.00', 'en_US');
+  final NumberFormat _btcFormat = NumberFormat('#,##0.00000000', 'en_US');
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<WalletProvider>().refreshWalletData();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AuthMiddleware(
+      child: Scaffold(
+        backgroundColor: const Color(0xFF121829),
+        body: SafeArea(
+          child: RefreshIndicator(
+            onRefresh: () => context.read<WalletProvider>().refreshWalletData(),
+            child: SingleChildScrollView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              child: Padding(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildHeader(),
+                    const SizedBox(height: 20),
+                    _buildBalanceCard(),
+                    const SizedBox(height: 20),
+                    _buildActionButtons(),
+                    const SizedBox(height: 30),
+                    _buildTransactionHistory(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader() {
+    return const Row(
+      children: [
+        Expanded(
+          child: Center(
+            child: Text(
+              'Bitcoin Wallet',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildBalanceCard() {
+    return Consumer<WalletProvider>(
+      builder: (context, walletProvider, child) {
+        if (walletProvider.isLoading && walletProvider.wallet == null) {
+          return _buildLoadingCard();
+        }
+
+        if (walletProvider.error != null) {
+          return _buildErrorCard(walletProvider.error!);
+        }
+
+        final wallet = walletProvider.wallet;
+        if (wallet == null) {
+          return _buildErrorCard('Wallet not found');
+        }
+
+        return Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            gradient: const LinearGradient(
+              colors: [Colors.orangeAccent, Colors.deepOrangeAccent],
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+            ),
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.orangeAccent.withOpacity(0.3),
+                blurRadius: 15,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Row(
+                children: [
+                  Icon(
+                    Icons.account_balance_wallet,
+                    color: Colors.white,
+                    size: 28,
+                  ),
+                  SizedBox(width: 10),
+                  Text(
+                    'Total Balance',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 16,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '${_btcFormat.format(wallet.btcBalance)} BTC',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 32,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                '\$${_currencyFormat.format(wallet.usdBalance)} USD',
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 18,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(
+                      Icons.security,
+                      color: Colors.white,
+                      size: 16,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      wallet.address.substring(0, 8) + '...' + wallet.address.substring(wallet.address.length - 8),
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildActionButtons() {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildActionButton(
+            icon: Icons.arrow_downward,
+            label: 'Deposit',
+            color: Colors.green,
+            onTap: () => _navigateToDeposit(),
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _buildActionButton(
+            icon: Icons.arrow_upward,
+            label: 'Withdraw',
+            color: Colors.red,
+            onTap: () => _navigateToWithdraw(),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(15),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(icon, color: color, size: 24),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: color,
+                fontSize: 16,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTransactionHistory() {
+    return Consumer<WalletProvider>(
+      builder: (context, walletProvider, child) {
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Recent Transactions',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 20,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+            const SizedBox(height: 16),
+            if (walletProvider.transactions.isEmpty)
+              _buildEmptyTransactions()
+            else
+              ...walletProvider.transactions.map((transaction) => 
+                _buildTransactionItem(transaction)
+              ).toList(),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTransactionItem(Transaction transaction) {
+    final isDeposit = transaction.type == 'deposit';
+    final color = isDeposit ? Colors.green : Colors.red;
+    final icon = isDeposit ? Icons.arrow_downward : Icons.arrow_upward;
+    final sign = isDeposit ? '+' : '-';
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2746),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 50,
+            height: 50,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(25),
+            ),
+            child: Icon(icon, color: color, size: 24),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  transaction.description ?? (isDeposit ? 'Deposit' : 'Withdrawal'),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  _formatDate(transaction.createdAt),
+                  style: const TextStyle(
+                    color: Colors.white54,
+                    fontSize: 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                '$sign${_btcFormat.format(transaction.amount)} BTC',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: _getStatusColor(transaction.status).withOpacity(0.2),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  transaction.status.toUpperCase(),
+                  style: TextStyle(
+                    color: _getStatusColor(transaction.status),
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLoadingCard() {
+    return Container(
+      width: double.infinity,
+      height: 180,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2746),
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: const Center(
+        child: CircularProgressIndicator(
+          valueColor: AlwaysStoppedAnimation<Color>(Colors.orangeAccent),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildErrorCard(String error) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: Colors.red.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.red.withOpacity(0.3)),
+      ),
+      child: Column(
+        children: [
+          const Icon(Icons.error, color: Colors.red, size: 48),
+          const SizedBox(height: 16),
+          Text(
+            'Error loading wallet',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            error,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+            ),
+            textAlign: TextAlign.center,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmptyTransactions() {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(32),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2746),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Column(
+        children: [
+          Icon(
+            Icons.receipt_long,
+            color: Colors.white.withOpacity(0.3),
+            size: 48,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'No transactions yet',
+            style: TextStyle(
+              color: Colors.white.withOpacity(0.7),
+              fontSize: 16,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'confirmed':
+        return Colors.green;
+      case 'pending':
+        return Colors.orange;
+      case 'failed':
+        return Colors.red;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  String _formatDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays > 0) {
+      return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
+    } else if (difference.inHours > 0) {
+      return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
+    } else if (difference.inMinutes > 0) {
+      return '${difference.inMinutes} minute${difference.inMinutes > 1 ? 's' : ''} ago';
+    } else {
+      return 'Just now';
+    }
+  }
+
+  void _navigateToDeposit() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const DepositScreen()),
+    );
+  }
+
+  void _navigateToWithdraw() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const WithdrawScreen()),
+    );
+  }
+} 
