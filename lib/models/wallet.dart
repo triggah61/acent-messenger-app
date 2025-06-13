@@ -1,44 +1,61 @@
 class Wallet {
   final String id;
-  final String userId;
+  final String address;
+  final String label;
+  final DateTime createdAt;
+  final DateTime lastUsed;
+  final String network;
+  final int availableBalance; // in satoshis
   final double btcBalance;
   final double usdBalance;
-  final String address;
-  final DateTime createdAt;
-  final DateTime updatedAt;
+  final double platformFeePercentage;
 
   Wallet({
     required this.id,
-    required this.userId,
+    required this.address,
+    required this.label,
+    required this.createdAt,
+    required this.lastUsed,
+    required this.network,
+    required this.availableBalance,
     required this.btcBalance,
     required this.usdBalance,
-    required this.address,
-    required this.createdAt,
-    required this.updatedAt,
+    required this.platformFeePercentage,
   });
 
   factory Wallet.fromJson(Map<String, dynamic> json) {
     return Wallet(
       id: json['_id'],
-      userId: json['userId'],
+      address: json['address'] ?? '',
+      label: json['label'] ?? '',
+      createdAt: DateTime.parse(json['createdAt']),
+      lastUsed: DateTime.parse(json['lastUsed']),
+      network: json['network'] ?? '',
+      availableBalance: json['availableBalance'] ?? 0,
       btcBalance: (json['btcBalance'] ?? 0.0).toDouble(),
       usdBalance: (json['usdBalance'] ?? 0.0).toDouble(),
-      address: json['address'] ?? '',
-      createdAt: DateTime.parse(json['createdAt']),
-      updatedAt: DateTime.parse(json['updatedAt']),
+      platformFeePercentage: (json['platformFeePercentage'] ?? 0.0).toDouble(),
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       '_id': id,
-      'userId': userId,
+      'address': address,
+      'label': label,
+      'createdAt': createdAt.toIso8601String(),
+      'lastUsed': lastUsed.toIso8601String(),
+      'network': network,
+      'availableBalance': availableBalance,
       'btcBalance': btcBalance,
       'usdBalance': usdBalance,
-      'address': address,
-      'createdAt': createdAt.toIso8601String(),
-      'updatedAt': updatedAt.toIso8601String(),
+      'platformFeePercentage': platformFeePercentage,
     };
+  }
+
+  // Helper method to calculate platform fee for a given amount
+  double calculatePlatformFee(double amount) {
+    return amount * (platformFeePercentage / 100);
   }
 }
 

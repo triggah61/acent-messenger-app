@@ -205,8 +205,21 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               if (amount == null || amount <= 0) {
                 return 'Please enter a valid amount';
               }
-              if (amount > wallet.btcBalance) {
-                return 'Insufficient balance';
+              
+              // Calculate total cost including both fees
+              final platformFee = wallet.calculatePlatformFee(amount);
+              final networkFee = context.read<WalletProvider>().networkFees
+                  .firstWhere((fee) => fee.type == _selectedFeeType, 
+                      orElse: () => NetworkFee(
+                        type: NetworkFeeType.standard,
+                        fee: 0.00003,
+                        description: 'Standard',
+                        estimatedTime: 20,
+                      )).fee;
+              final totalCost = amount + platformFee + networkFee;
+              
+              if (totalCost > wallet.btcBalance) {
+                return 'Insufficient balance (including fees)';
               }
               return null;
             },
@@ -495,7 +508,12 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           description: 'Standard',
           estimatedTime: 20,
         ));
-    final total = amount + selectedFee.fee;
+    
+    // Calculate platform fee based on wallet's platform fee percentage
+    final platformFee = wallet.calculatePlatformFee(amount);
+    final networkFee = selectedFee.fee;
+    final totalFees = platformFee + networkFee;
+    final total = amount + totalFees;
 
     return Container(
       width: double.infinity,
@@ -518,17 +536,30 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           ),
           const SizedBox(height: 16),
           _buildSummaryRow('Amount', '${_btcFormat.format(amount)} BTC'),
-          _buildSummaryRow('Network Fee', '${_btcFormat.format(selectedFee.fee)} BTC'),
+          _buildSummaryRow('Platform Fee (${wallet.platformFeePercentage}%)', '${_btcFormat.format(platformFee)} BTC'),
+          _buildSummaryRow('Network Fee', '${_btcFormat.format(networkFee)} BTC'),
           Divider(color: Colors.grey[300]),
-          _buildSummaryRow('Total', '${_btcFormat.format(total)} BTC', isTotal: true),
+          _buildSummaryRow('Total to Deduct', '${_btcFormat.format(total)} BTC', isTotal: true),
           const SizedBox(height: 8),
           Text(
             'Remaining Balance: ${_btcFormat.format(wallet.btcBalance - total)} BTC',
             style: TextStyle(
-              color: Colors.grey[600],
+              color: total > wallet.btcBalance ? Colors.red : Colors.grey[600],
               fontSize: 12,
+              fontWeight: total > wallet.btcBalance ? FontWeight.w600 : FontWeight.normal,
             ),
           ),
+          if (total > wallet.btcBalance)
+            const SizedBox(height: 4),
+          if (total > wallet.btcBalance)
+            const Text(
+              'Insufficient balance',
+              style: TextStyle(
+                color: Colors.red,
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
         ],
       ),
     );
@@ -606,8 +637,31 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   void _setMaxAmount(double maxAmount) {
-    // Leave some balance for network fee
-    final maxWithdrawable = maxAmount - 0.00005; // Reserve for highest fee
+    // Calculate the maximum withdrawable amount considering both fees
+    final networkFee = context.read<WalletProvider>().networkFees
+        .firstWhere((fee) => fee.type == _selectedFeeType, 
+            orElse: () => NetworkFee(
+              type: NetworkFeeType.standard,
+              fee: 0.00003,
+              description: 'Standard',
+              estimatedTime: 20,
+            )).fee;
+            
+    // Use an iterative approach to find the max amount considering platform fee
+    double maxWithdrawable = 0.0;
+    double testAmount = maxAmount;
+    
+    for (int i = 0; i < 10; i++) { // Limit iterations to prevent infinite loop
+      final platformFee = testAmount * (context.read<WalletProvider>().wallet?.platformFeePercentage ?? 1.0) / 100;
+      final totalCost = testAmount + platformFee + networkFee;
+      
+      if (totalCost <= maxAmount) {
+        maxWithdrawable = testAmount;
+        break;
+      }
+      testAmount = testAmount * 0.95; // Reduce by 5% each iteration
+    }
+    
     if (maxWithdrawable > 0) {
       _amountController.text = _btcFormat.format(maxWithdrawable);
     }
@@ -685,6 +739,18 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Future<bool?> _showConfirmationDialog(double amount, String address) {
+    final wallet = context.read<WalletProvider>().wallet!;
+    final platformFee = wallet.calculatePlatformFee(amount);
+    final networkFee = context.read<WalletProvider>().networkFees
+        .firstWhere((fee) => fee.type == _selectedFeeType, 
+            orElse: () => NetworkFee(
+              type: NetworkFeeType.standard,
+              fee: 0.00003,
+              description: 'Standard',
+              estimatedTime: 20,
+            )).fee;
+    final totalCost = amount + platformFee + networkFee;
+
     return showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -700,6 +766,24 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             Text(
               'Amount: ${_btcFormat.format(amount)} BTC',
               style: TextStyle(color: Colors.grey[700]),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Platform Fee: ${_btcFormat.format(platformFee)} BTC',
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Network Fee: ${_btcFormat.format(networkFee)} BTC',
+              style: TextStyle(color: Colors.grey[700]),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Total Cost: ${_btcFormat.format(totalCost)} BTC',
+              style: const TextStyle(
+                color: Colors.black87,
+                fontWeight: FontWeight.w600,
+              ),
             ),
             const SizedBox(height: 8),
             Text(

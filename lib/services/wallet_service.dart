@@ -1,4 +1,7 @@
+import 'dart:convert';
+import 'package:http/http.dart' as http;
 import '../models/wallet.dart';
+import '../constants/config.dart';
 import 'auth_service.dart';
 
 class WalletService {
@@ -6,18 +9,7 @@ class WalletService {
 
   WalletService(this._authService);
 
-  // Sample wallet data for demonstration
-  static final Wallet _sampleWallet = Wallet(
-    id: 'wallet_001',
-    userId: 'user_001',
-    btcBalance: 0.00152435,
-    usdBalance: 42.58,
-    address: '1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa',
-    createdAt: DateTime.now().subtract(const Duration(days: 30)),
-    updatedAt: DateTime.now(),
-  );
-
-  // Sample transactions for demonstration
+  // Sample transactions for demonstration (until transaction API is provided)
   static final List<Transaction> _sampleTransactions = [
     Transaction(
       id: 'tx_001',
@@ -81,46 +73,44 @@ class WalletService {
     ),
   ];
 
-  // Get wallet information
+  // Get wallet information from API
   Future<Wallet> getWallet() async {
     try {
-      // For demonstration, return sample wallet
-      // In real implementation, make API call
-      /*
       final token = await _authService.getToken();
       if (token == null) throw Exception('No authentication token');
 
       final response = await http.get(
-        Uri.parse('${Config.baseApiUrl}/wallet'),
+        Uri.parse('${Config.baseApiUrl}/user/wallet/walletInformation'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
       if (response.statusCode == 200) {
-        final data = json.decode(response.body);
-        return Wallet.fromJson(data);
+        final responseData = json.decode(response.body);
+        
+        if (responseData['success'] == true && responseData['data'] != null) {
+          return Wallet.fromJson(responseData['data']);
+        } else {
+          throw Exception(responseData['message'] ?? 'Failed to fetch wallet');
+        }
       } else {
-        throw Exception('Failed to fetch wallet');
+        throw Exception('Failed to fetch wallet: ${response.body}');
       }
-      */
-      
-      await Future.delayed(const Duration(milliseconds: 500)); // Simulate API delay
-      return _sampleWallet;
     } catch (e) {
+      print('Error fetching wallet: $e');
       throw Exception('Failed to fetch wallet: $e');
     }
   }
 
-  // Get transaction history
+  // Get transaction history (using sample data until API is provided)
   Future<List<Transaction>> getTransactions(String walletId) async {
     try {
-      // For demonstration, return sample transactions
-      // In real implementation, make API call
+      // TODO: Replace with real API call when transaction endpoint is provided
       /*
       final token = await _authService.getToken();
       if (token == null) throw Exception('No authentication token');
 
       final response = await http.get(
-        Uri.parse('${Config.baseApiUrl}/wallet/$walletId/transactions'),
+        Uri.parse('${Config.baseApiUrl}/user/wallet/transactions'),
         headers: {'Authorization': 'Bearer $token'},
       );
 
@@ -141,11 +131,10 @@ class WalletService {
     }
   }
 
-  // Get network fees
+  // Get network fees (using sample data until API is provided)
   Future<List<NetworkFee>> getNetworkFees() async {
     try {
-      // For demonstration, return sample network fees
-      // In real implementation, make API call to get current network fees
+      // TODO: Replace with real API call when network fees endpoint is provided
       /*
       final response = await http.get(
         Uri.parse('${Config.baseApiUrl}/wallet/network-fees'),
@@ -176,8 +165,7 @@ class WalletService {
     String? description,
   }) async {
     try {
-      // For demonstration, simulate successful withdrawal
-      // In real implementation, make API call
+      // TODO: Replace with real API call when withdrawal endpoint is provided
       /*
       final token = await _authService.getToken();
       if (token == null) throw Exception('No authentication token');
@@ -208,7 +196,6 @@ class WalletService {
       // Validate inputs
       if (amount <= 0) throw Exception('Amount must be greater than 0');
       if (toAddress.isEmpty) throw Exception('Destination address is required');
-      if (amount > _sampleWallet.btcBalance) throw Exception('Insufficient balance');
       
       return true;
     } catch (e) {
@@ -222,5 +209,24 @@ class WalletService {
       return 'bitcoin:$address?amount=$amount';
     }
     return 'bitcoin:$address';
+  }
+
+  // Calculate total withdrawal cost (amount + platform fee + network fee)
+  Map<String, double> calculateWithdrawalCost({
+    required double amount,
+    required double platformFeePercentage,
+    required double networkFee,
+  }) {
+    final platformFee = amount * (platformFeePercentage / 100);
+    final totalFees = platformFee + networkFee;
+    final totalCost = amount + totalFees;
+
+    return {
+      'amount': amount,
+      'platformFee': platformFee,
+      'networkFee': networkFee,
+      'totalFees': totalFees,
+      'totalCost': totalCost,
+    };
   }
 } 
