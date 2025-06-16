@@ -164,19 +164,15 @@ class WalletService {
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        
-        if (responseData['success'] == true) {
-          return true;
-        } else {
-          throw Exception(responseData['message'] ?? 'Failed to create withdrawal');
-        }
+        return responseData['success'] == true;
       } else {
         final errorData = json.decode(response.body);
-        throw Exception(errorData['message'] ?? 'Failed to create withdrawal: ${response.body}');
+
+        throw Exception(errorData['message'] ?? 'Failed to create withdrawals: ${response.body}');
       }
     } catch (e) {
       print('Error creating withdrawal: $e');
-      throw Exception('Failed to create withdrawal: $e');
+      throw Exception('Failed to create withdrawalh: $e');
     }
   }
 

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'dart:async';
 import '../../models/wallet.dart';
 import '../../providers/wallet_provider.dart';
+import '../../widgets/qr_scanner_screen.dart';
 
 class WithdrawScreen extends StatefulWidget {
   const WithdrawScreen({Key? key}) : super(key: key);
@@ -470,12 +471,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               suffixIcon: IconButton(
                 icon: Icon(Icons.qr_code_scanner, color: Colors.grey[600]),
                 onPressed: () {
-                  // QR scanner functionality can be added here
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('QR Scanner not implemented'),
-                    ),
-                  );
+                  _openQRScanner(context);
                 },
               ),
             ),
@@ -673,36 +669,6 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       case NetworkFeeType.high:
         return 'Fast';
     }
-  }
-
-  void _setMaxAmount(double maxAmount) {
-    // Calculate the maximum withdrawable amount considering both fees
-    final selectedFee = context.read<WalletProvider>().getFeeByType(_selectedFeeType);
-    final networkFee = selectedFee?.totalBtcFee ?? 0.00005; // fallback fee
-            
-    // Use an iterative approach to find the max amount considering platform fee
-    double maxWithdrawable = 0.0;
-    double testAmount = maxAmount;
-    
-    for (int i = 0; i < 10; i++) { // Limit iterations to prevent infinite loop
-      final platformFee = testAmount * (context.read<WalletProvider>().wallet?.platformFeePercentage ?? 1.0) / 100;
-      final totalCost = testAmount + platformFee + networkFee;
-      
-      if (totalCost <= maxAmount) {
-        maxWithdrawable = testAmount;
-        break;
-      }
-      testAmount = testAmount * 0.95; // Reduce by 5% each iteration
-    }
-    
-    if (maxWithdrawable > 0) {
-      _amountController.text = _btcFormat.format(maxWithdrawable);
-    }
-  }
-
-  void _setPercentageAmount(double balance, double percentage) {
-    final amount = balance * percentage;
-    _amountController.text = _btcFormat.format(amount);
   }
 
   Future<void> _handleWithdraw() async {
@@ -1004,6 +970,39 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         context.read<WalletProvider>().estimateFeesForAmount(amount);
       } else {
         context.read<WalletProvider>().clearFeeEstimation();
+      }
+    });
+  }
+
+  void _openQRScanner(BuildContext context) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => const QRScannerScreen(),
+      ),
+    ).then((result) {
+      if (result != null && result is String) {
+        _addressController.text = result;
+        // Show success message
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle, color: Colors.white),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text('Bitcoin address scanned successfully!'),
+                ),
+              ],
+            ),
+            backgroundColor: Colors.green,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            duration: const Duration(seconds: 2),
+          ),
+        );
       }
     });
   }

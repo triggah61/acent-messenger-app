@@ -47,5 +47,7 @@
 	<true/>
 	<key>NSContactsUsageDescription</key>
 	<string>We need access to your contacts to help you connect with your friends and family on our platform.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>We need access to your camera to scan QR codes for Bitcoin addresses.</string>
 </dict>
 </plist>
