@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:qr_code_scanner/qr_code_scanner.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
 
 class QRScannerScreen extends StatefulWidget {
   const QRScannerScreen({Key? key}) : super(key: key);
@@ -10,148 +9,185 @@ class QRScannerScreen extends StatefulWidget {
 }
 
 class _QRScannerScreenState extends State<QRScannerScreen> {
-  final GlobalKey qrKey = GlobalKey(debugLabel: 'QR');
-  QRViewController? controller;
-  bool _isScanning = true;
-  bool _flashOn = false;
+  MobileScannerController controller = MobileScannerController();
+  bool isFlashOn = false;
+  bool hasScanned = false;
 
   @override
   void initState() {
     super.initState();
-    _requestCameraPermission();
-  }
-
-  Future<void> _requestCameraPermission() async {
-    final status = await Permission.camera.request();
-    if (status != PermissionStatus.granted) {
-      if (mounted) {
-        _showPermissionDeniedDialog();
-      }
-    }
-  }
-
-  void _showPermissionDeniedDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Camera Permission Required'),
-        content: const Text(
-          'Camera access is required to scan QR codes. Please grant camera permission in settings.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              openAppSettings();
-            },
-            child: const Text('Settings'),
-          ),
-        ],
-      ),
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.black,
-      body: SafeArea(
-        child: Stack(
-          children: [
-            // QR Scanner View
-            QRView(
-              key: qrKey,
-              onQRViewCreated: _onQRViewCreated,
-              overlay: QrScannerOverlayShape(
-                borderColor: Colors.white,
-                borderRadius: 10,
-                borderLength: 30,
-                borderWidth: 10,
-                cutOutSize: 250,
-              ),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.close, color: Colors.white),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: const Text(
+          'Scan QR Code',
+          style: TextStyle(color: Colors.white),
+        ),
+        actions: [
+          IconButton(
+            icon: Icon(
+              isFlashOn ? Icons.flash_on : Icons.flash_off,
+              color: Colors.white,
             ),
-            
-            // Top bar with back button and title
-            Positioned(
-              top: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      Colors.black.withOpacity(0.8),
-                      Colors.transparent,
-                    ],
+            onPressed: () {
+              controller.toggleTorch();
+              setState(() {
+                isFlashOn = !isFlashOn;
+              });
+            },
+          ),
+        ],
+      ),
+      body: Stack(
+        children: [
+          MobileScanner(
+            controller: controller,
+            onDetect: (BarcodeCapture capture) {
+              if (!hasScanned && capture.barcodes.isNotEmpty) {
+                hasScanned = true;
+                final String code = capture.barcodes.first.rawValue ?? '';
+                final extractedAddress = _extractBitcoinAddress(code);
+                
+                if (extractedAddress.isNotEmpty) {
+                  Navigator.pop(context, extractedAddress);
+                } else {
+                  // Show error and allow scanning again
+                  _showErrorDialog(code);
+                  setState(() {
+                    hasScanned = false;
+                  });
+                }
+              }
+            },
+          ),
+          // Overlay with scanning area
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.5),
+            ),
+            child: Stack(
+              children: [
+                // Dark overlay with transparent center
+                ColorFiltered(
+                  colorFilter: ColorFilter.mode(
+                    Colors.black.withOpacity(0.6),
+                    BlendMode.srcOut,
                   ),
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.arrow_back, color: Colors.white),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                    const SizedBox(width: 16),
-                    const Expanded(
-                      child: Text(
-                        'Scan Bitcoin Address',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
+                  child: Stack(
+                    children: [
+                      Container(
+                        decoration: const BoxDecoration(
+                          color: Colors.black,
+                          backgroundBlendMode: BlendMode.dstOut,
                         ),
                       ),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        _flashOn ? Icons.flash_on : Icons.flash_off,
-                        color: Colors.white,
+                      Center(
+                        child: Container(
+                          height: 250,
+                          width: 250,
+                          decoration: BoxDecoration(
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
                       ),
-                      onPressed: _toggleFlash,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            
-            // Bottom instruction text
-            Positioned(
-              bottom: 0,
-              left: 0,
-              right: 0,
-              child: Container(
-                padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.bottomCenter,
-                    end: Alignment.topCenter,
-                    colors: [
-                      Colors.black.withOpacity(0.8),
-                      Colors.transparent,
                     ],
                   ),
                 ),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.qr_code_scanner,
-                      color: Colors.white,
-                      size: 48,
+                // Scanning frame
+                Center(
+                  child: Container(
+                    height: 250,
+                    width: 250,
+                    decoration: BoxDecoration(
+                      border: Border.all(
+                        color: Colors.white,
+                        width: 2,
+                      ),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Position the QR code within the frame',
+                    child: Stack(
+                      children: [
+                        // Corner decorations
+                        Positioned(
+                          top: 0,
+                          left: 0,
+                          child: Container(
+                            width: 20,
+                            height: 20,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.only(
+                                topLeft: Radius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: Container(
+                            width: 20,
+                            height: 20,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.only(
+                                topRight: Radius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          left: 0,
+                          child: Container(
+                            width: 20,
+                            height: 20,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.only(
+                                bottomLeft: Radius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          bottom: 0,
+                          right: 0,
+                          child: Container(
+                            width: 20,
+                            height: 20,
+                            decoration: const BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.only(
+                                bottomRight: Radius.circular(12),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // Instructions
+                Positioned(
+                  bottom: 100,
+                  left: 0,
+                  right: 0,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 32),
+                    child: const Text(
+                      'Position the QR code within the frame to scan',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 16,
@@ -159,156 +195,126 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                       ),
                       textAlign: TextAlign.center,
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Scanning for Bitcoin addresses...',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 14,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _onQRViewCreated(QRViewController controller) {
-    this.controller = controller;
-    controller.scannedDataStream.listen((scanData) {
-      if (_isScanning && scanData.code != null) {
-        _handleScannedData(scanData.code!);
-      }
-    });
-  }
-
-  void _handleScannedData(String data) {
-    setState(() {
-      _isScanning = false;
-    });
-
-    // Extract Bitcoin address from various QR code formats
-    String? bitcoinAddress = _extractBitcoinAddress(data);
-    
-    if (bitcoinAddress != null) {
-      // Valid Bitcoin address found
-      Navigator.pop(context, bitcoinAddress);
-    } else {
-      // Invalid QR code
-      _showInvalidQRDialog(data);
-    }
-  }
-
-  String? _extractBitcoinAddress(String data) {
-    // Handle different QR code formats:
-    // 1. Plain address: "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
-    // 2. Bitcoin URI: "bitcoin:1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa"
-    // 3. Bitcoin URI with amount: "bitcoin:1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa?amount=0.001"
-    
-    String address = data.trim();
-    
-    // Remove bitcoin: prefix if present
-    if (address.toLowerCase().startsWith('bitcoin:')) {
-      address = address.substring(8);
-    }
-    
-    // Remove query parameters if present
-    if (address.contains('?')) {
-      address = address.split('?')[0];
-    }
-    
-    // Basic Bitcoin address validation
-    if (_isValidBitcoinAddress(address)) {
-      return address;
-    }
-    
-    return null;
-  }
-
-  bool _isValidBitcoinAddress(String address) {
-    // Basic validation for Bitcoin addresses
-    // Legacy addresses (P2PKH): start with 1, length 26-35
-    // Script addresses (P2SH): start with 3, length 26-35
-    // Bech32 addresses (P2WPKH/P2WSH): start with bc1, length varies
-    // Testnet addresses: start with m, n, 2, tb1
-    
-    if (address.isEmpty) return false;
-    
-    // Check length
-    if (address.length < 26 || address.length > 62) return false;
-    
-    // Check format
-    final RegExp bitcoinRegex = RegExp(r'^[13][a-km-zA-HJ-NP-Z1-9]{25,34}$|^bc1[a-z0-9]{39,59}$|^[mn2][a-km-zA-HJ-NP-Z1-9]{25,34}$|^tb1[a-z0-9]{39,59}$');
-    
-    return bitcoinRegex.hasMatch(address);
-  }
-
-  void _showInvalidQRDialog(String scannedData) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Invalid QR Code'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('The scanned QR code does not contain a valid Bitcoin address.'),
-            const SizedBox(height: 16),
-            const Text('Scanned data:', style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: Colors.grey[100],
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: Text(
-                scannedData,
-                style: const TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              setState(() {
-                _isScanning = true;
-              });
-            },
-            child: const Text('Scan Again'),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              Navigator.pop(context);
-            },
-            child: const Text('Cancel'),
           ),
         ],
       ),
     );
   }
 
-  void _toggleFlash() {
-    controller?.toggleFlash();
-    setState(() {
-      _flashOn = !_flashOn;
-    });
+  String _extractBitcoinAddress(String qrData) {
+    if (qrData.isEmpty) return '';
+    
+    // Clean the data
+    String cleanData = qrData.trim();
+    
+    // Handle Bitcoin URI format (bitcoin:address?amount=...)
+    if (cleanData.toLowerCase().startsWith('bitcoin:')) {
+      final uri = Uri.tryParse(cleanData);
+      if (uri != null) {
+        // Extract address from the path
+        String address = uri.path;
+        if (address.isNotEmpty) {
+          return address;
+        }
+      }
+      
+      // Fallback: extract address manually
+      final addressMatch = RegExp(r'bitcoin:([a-zA-Z0-9]+)').firstMatch(cleanData);
+      if (addressMatch != null) {
+        return addressMatch.group(1) ?? '';
+      }
+    }
+    
+    // Validate if it's a direct Bitcoin address
+    if (_isValidBitcoinAddress(cleanData)) {
+      return cleanData;
+    }
+    
+    return '';
+  }
+
+  bool _isValidBitcoinAddress(String address) {
+    if (address.isEmpty) return false;
+    
+    // Basic Bitcoin address validation
+    // Legacy addresses (P2PKH) start with '1'
+    // Script addresses (P2SH) start with '3'
+    // Bech32 addresses (P2WPKH/P2WSH) start with 'bc1'
+    final bitcoinAddressRegex = RegExp(
+      r'^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59})$'
+    );
+    
+    return bitcoinAddressRegex.hasMatch(address);
+  }
+
+  void _showErrorDialog(String scannedData) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: Colors.white,
+        title: const Row(
+          children: [
+            Icon(Icons.error, color: Colors.red),
+            SizedBox(width: 8),
+            Text(
+              'Invalid QR Code',
+              style: TextStyle(color: Colors.black87),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'The scanned QR code does not contain a valid Bitcoin address.',
+              style: TextStyle(color: Colors.black87),
+            ),
+            const SizedBox(height: 12),
+            if (scannedData.isNotEmpty) ...[
+              const Text(
+                'Scanned content:',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: Colors.grey[100],
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  scannedData,
+                  style: const TextStyle(
+                    color: Colors.black87,
+                    fontFamily: 'monospace',
+                    fontSize: 12,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Try Again'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
-    controller?.dispose();
+    controller.dispose();
     super.dispose();
   }
 } 

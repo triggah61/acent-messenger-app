@@ -6,6 +6,13 @@ import '../../models/wallet.dart';
 import '../../providers/wallet_provider.dart';
 import '../../widgets/qr_scanner_screen.dart';
 
+class ValidationResult {
+  final bool isValid;
+  final String errorMessage;
+  
+  ValidationResult(this.isValid, this.errorMessage);
+}
+
 class WithdrawScreen extends StatefulWidget {
   const WithdrawScreen({Key? key}) : super(key: key);
 
@@ -36,6 +43,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     
     // Listen to amount changes for fee estimation
     _amountController.addListener(_onAmountChanged);
+    
+    // Listen to form changes for validation
+    _amountController.addListener(_onFormChanged);
+    _addressController.addListener(_onFormChanged);
   }
 
   @override
@@ -628,36 +639,152 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Widget _buildWithdrawButton(WalletProvider walletProvider) {
-    return SizedBox(
-      width: double.infinity,
-      child: ElevatedButton(
-        onPressed: _isLoading || walletProvider.isLoading ? null : _handleWithdraw,
-        style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.red,
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+    final validationResult = _validateWithdrawal(walletProvider);
+    final isButtonEnabled = validationResult.isValid && !_isLoading && !walletProvider.isLoading;
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        if (!validationResult.isValid && validationResult.errorMessage.isNotEmpty)
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.all(12),
+            margin: const EdgeInsets.only(bottom: 16),
+            decoration: BoxDecoration(
+              color: Colors.red[50],
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.red[200]!),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.warning, color: Colors.red[600], size: 20),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    validationResult.errorMessage,
+                    style: TextStyle(
+                      color: Colors.red[700],
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        SizedBox(
+          width: double.infinity,
+          child: ElevatedButton(
+            onPressed: isButtonEnabled ? _handleWithdraw : null,
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isButtonEnabled ? Colors.red : Colors.grey[400],
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(vertical: 16),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+              elevation: isButtonEnabled ? 2 : 0,
+            ),
+            child: _isLoading || walletProvider.isLoading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
+                : Text(
+                    isButtonEnabled ? 'Confirm Withdrawal' : 'Cannot Withdraw',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: isButtonEnabled ? Colors.white : Colors.grey[600],
+                    ),
+                  ),
           ),
         ),
-        child: _isLoading || walletProvider.isLoading
-            ? const SizedBox(
-                width: 20,
-                height: 20,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2,
-                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                ),
-              )
-            : const Text(
-                'Confirm Withdrawal',
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-      ),
+      ],
     );
+  }
+
+  ValidationResult _validateWithdrawal(WalletProvider walletProvider) {
+    final wallet = walletProvider.wallet;
+    if (wallet == null) {
+      return ValidationResult(false, 'Wallet not available');
+    }
+
+    // Check if amount is entered
+    final amountText = _amountController.text.trim();
+    if (amountText.isEmpty) {
+      return ValidationResult(false, 'Please enter an amount to withdraw');
+    }
+
+    // Parse amount
+    final amount = double.tryParse(amountText);
+    if (amount == null || amount <= 0) {
+      return ValidationResult(false, 'Please enter a valid amount greater than 0');
+    }
+
+    // Check if address is entered
+    final address = _addressController.text.trim();
+    if (address.isEmpty) {
+      return ValidationResult(false, 'Please enter a destination Bitcoin address');
+    }
+
+    // Check if address is valid (basic validation)
+    if (!_isValidBitcoinAddressBasic(address)) {
+      return ValidationResult(false, 'Please enter a valid Bitcoin address');
+    }
+
+    // Check if fees are loaded
+    final selectedFee = walletProvider.getFeeByType(_selectedFeeType);
+    if (selectedFee == null) {
+      return ValidationResult(false, 'Loading fees... Please wait');
+    }
+
+    // Check if there's a fee loading error
+    if (walletProvider.feeError != null) {
+      return ValidationResult(false, 'Unable to load network fees. Please try again');
+    }
+
+    // Calculate total cost including fees
+    final totalCost = amount + selectedFee.totalBtcFee;
+    
+    // Check balance
+    if (totalCost > wallet.btcBalance) {
+      final shortfall = totalCost - wallet.btcBalance;
+      return ValidationResult(
+        false, 
+        'Insufficient balance. You need ${_btcFormat.format(shortfall)} BTC more (including fees)'
+      );
+    }
+
+    // Check minimum withdrawal amount (if any)
+    const minWithdrawal = 0.00001; // 1000 satoshis
+    if (amount < minWithdrawal) {
+      return ValidationResult(
+        false,
+        'Minimum withdrawal amount is ${_btcFormat.format(minWithdrawal)} BTC'
+      );
+    }
+
+    return ValidationResult(true, '');
+  }
+
+  bool _isValidBitcoinAddressBasic(String address) {
+    if (address.isEmpty) return false;
+    
+    // Basic Bitcoin address validation
+    // Legacy addresses (P2PKH) start with '1'
+    // Script addresses (P2SH) start with '3'  
+    // Bech32 addresses (P2WPKH/P2WSH) start with 'bc1'
+    // Testnet addresses start with 'm', 'n', '2', 'tb1'
+    final bitcoinAddressRegex = RegExp(
+      r'^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59}|[mn2][a-km-zA-HJ-NP-Z1-9]{25,34}|tb1[a-z0-9]{39,59})$'
+    );
+    
+    return bitcoinAddressRegex.hasMatch(address);
   }
 
   String _getFeeTypeTitle(NetworkFeeType type) {
@@ -1030,6 +1157,11 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     });
   }
 
+  void _onFormChanged() {
+    // Trigger UI update to refresh button state and validation
+    setState(() {});
+  }
+
   void _openQRScanner(BuildContext context) {
     Navigator.push(
       context,
@@ -1067,7 +1199,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   void dispose() {
     _debounceTimer?.cancel();
     _amountController.removeListener(_onAmountChanged);
+    _amountController.removeListener(_onFormChanged);
     _amountController.dispose();
+    _addressController.removeListener(_onFormChanged);
     _addressController.dispose();
     _descriptionController.dispose();
     super.dispose();
