@@ -378,7 +378,7 @@ class _ConversationsState extends State<Conversations> {
     Navigator.push(
       context,
       MaterialPageRoute(
-          builder: (context) =>
+          builder: (context) => 
               CreatePollScreen()), // Replace RecordScreen with your actual record widget/route
     );
   }
@@ -469,9 +469,7 @@ class _ConversationsState extends State<Conversations> {
                     ? NetworkImage(Config.getPhotoUrl(widget.session!.photo!))
                     : null,
                 child: widget.session?.photo == null
-                    ? Text(
-                        widget.session?.title.substring(0, 1).toUpperCase() ??
-                            '')
+                    ? Text(_getSessionInitials(widget.session?.title))
                     : null,
               ),
               const SizedBox(width: 8),
@@ -813,6 +811,26 @@ class _ConversationsState extends State<Conversations> {
       ),
     );
   }
+
+  String _getSessionInitials(String? title) {
+    if (title == null || title.trim().isEmpty) {
+      return '?';
+    }
+    
+    // Split by spaces and filter out empty strings
+    final words = title.trim().split(' ').where((word) => word.isNotEmpty).toList();
+    
+    if (words.isEmpty) {
+      return '?';
+    } else if (words.length == 1) {
+      return words[0].isNotEmpty ? words[0][0].toUpperCase() : '?';
+    } else {
+      // Take first letter of first two words
+      String first = words[0].isNotEmpty ? words[0][0].toUpperCase() : '';
+      String second = words[1].isNotEmpty ? words[1][0].toUpperCase() : '';
+      return '$first$second';
+    }
+  }
 }
 
 class _AttachmentButton extends StatelessWidget {
@@ -937,9 +955,7 @@ class MessageBubble extends StatelessWidget {
                                 ? NetworkImage(senderImageUrl!)
                                 : null,
                             child: senderImageUrl == null
-                                ? Text(
-                                    senderName?.substring(0, 1).toUpperCase() ??
-                                        '')
+                                ? Text(_getSenderInitials(senderName))
                                 : null,
                           )),
                     if (replyTo != null)
@@ -1190,6 +1206,26 @@ class MessageBubble extends StatelessWidget {
         return '😭';
       default:
         return '👍';
+    }
+  }
+
+  String _getSenderInitials(String? name) {
+    if (name == null || name.trim().isEmpty) {
+      return '?';
+    }
+    
+    // Split by spaces and filter out empty strings
+    final words = name.trim().split(' ').where((word) => word.isNotEmpty).toList();
+    
+    if (words.isEmpty) {
+      return '?';
+    } else if (words.length == 1) {
+      return words[0].isNotEmpty ? words[0][0].toUpperCase() : '?';
+    } else {
+      // Take first letter of first two words
+      String first = words[0].isNotEmpty ? words[0][0].toUpperCase() : '';
+      String second = words[1].isNotEmpty ? words[1][0].toUpperCase() : '';
+      return '$first$second';
     }
   }
 }

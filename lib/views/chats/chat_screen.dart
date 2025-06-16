@@ -1,5 +1,4 @@
 import 'package:acent_messenger/services/auth_service.dart';
-import 'package:acent_messenger/services/socket_service.dart';
 import 'package:acent_messenger/views/status/status.dart';
 import 'package:acent_messenger/widgets/auth_middleware.dart';
 import 'package:flutter/material.dart';
@@ -11,10 +10,7 @@ import 'package:acent_messenger/constants/config.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'package:http/http.dart' as http;
 import 'dart:convert';
-import '../addfriend/addfriend.dart';
-import '../creategroups/creategroups.dart';
 import '../consversations/chatdetailsscreen.dart';
-import '../search/search.dart';
 import '../../services/chat_service.dart';
 
 // Contact model for API response
@@ -305,7 +301,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ? NetworkImage(Config.getPhotoUrl(contact.photo!))
                 : null,
             child: contact.photo == null
-                ? Text(contact.firstName.substring(0, 1).toUpperCase())
+                ? Text(_getInitials(contact.firstName))
                 : null,
           ),
           const SizedBox(height: 8),
@@ -348,6 +344,13 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+
+  String _getInitials(String? name) {
+    if (name == null || name.trim().isEmpty) {
+      return '?';
+    }
+    return name.trim().substring(0, 1).toUpperCase();
+  }
 }
 
 class _ChatSessionTile extends StatelessWidget {
@@ -366,7 +369,7 @@ class _ChatSessionTile extends StatelessWidget {
             ? NetworkImage(Config.getPhotoUrl(session.photo!))
             : null,
         child: session.photo == null
-            ? Text(session.title.substring(0, 1).toUpperCase())
+            ? Text(_getSessionInitials(session.title))
             : null,
       ),
       title: Text(session.title),
@@ -394,5 +397,12 @@ class _ChatSessionTile extends StatelessWidget {
         );
       },
     );
+  }
+  
+  String _getSessionInitials(String? title) {
+    if (title == null || title.trim().isEmpty) {
+      return '?';
+    }
+    return title.trim().substring(0, 1).toUpperCase();
   }
 }

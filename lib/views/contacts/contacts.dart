@@ -1,9 +1,7 @@
 import 'package:acent_messenger/services/auth_service.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:acent_messenger/constants/config.dart';
-import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../widgets/auth_middleware.dart';
 import 'package:provider/provider.dart';
@@ -255,7 +253,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
               backgroundImage: imageUrl.startsWith('data:')
                   ? MemoryImage(base64Decode(imageUrl.split(',')[1]))
                   : NetworkImage(imageUrl) as ImageProvider,
-              child: imageUrl.isEmpty ? Text(name.substring(0, 1).toUpperCase()) : null,
+              child: imageUrl.isEmpty ? Text(_getInitials(name)) : null,
             ),
             const SizedBox(width: 16),
             Expanded(
@@ -283,5 +281,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
         ),
       ),
     );
+  }
+  
+  String _getInitials(String? name) {
+    if (name == null || name.trim().isEmpty) {
+      return '?';
+    }
+    return name.trim().substring(0, 1).toUpperCase();
   }
 }
