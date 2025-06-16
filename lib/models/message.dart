@@ -27,18 +27,22 @@ class Message {
 
   factory Message.fromJson(Map<String, dynamic> json) {
     return Message(
-      id: json['_id'],
-      chatSession: json['chatSession'],
-      sender: Sender.fromJson(json['sender']),
-      content: json['content'],
-      attachments: (json['attachments'] as List)
+      id: json['_id'] ?? '',
+      chatSession: json['chatSession'] ?? '',
+      sender: Sender.fromJson(json['sender'] ?? {}),
+      content: json['content'] ?? '',
+      attachments: (json['attachments'] as List? ?? [])
           .map((attachment) => Attachment.fromJson(attachment))
           .toList(),
-      status: json['status'],
+      status: json['status'] ?? 'sent',
       deletedFor: List<String>.from(json['deletedFor'] ?? []),
       replyTo: json['replyTo'] != null ? ReplyTo.fromJson(json['replyTo']) : null,
-      createdAt: DateTime.parse(json['createdAt']),
-      updatedAt: DateTime.parse(json['updatedAt']),
+      createdAt: json['createdAt'] != null 
+          ? DateTime.parse(json['createdAt']) 
+          : DateTime.now(),
+      updatedAt: json['updatedAt'] != null 
+          ? DateTime.parse(json['updatedAt']) 
+          : DateTime.now(),
       reactions: json['reactions'] != null
           ? (json['reactions'] as List)
               .map((reaction) => MessageReaction.fromJson(reaction))
@@ -67,11 +71,11 @@ class Sender {
 
   factory Sender.fromJson(Map<String, dynamic> json) {
     return Sender(
-      id: json['_id'],
-      firstName: json['firstName'],
-      lastName: json['lastName'],
-      dialCode: json['dialCode'],
-      phone: json['phone'],
+      id: json['_id'] ?? '',
+      firstName: json['firstName'] ?? '',
+      lastName: json['lastName'] ?? '',
+      dialCode: json['dialCode'] ?? '',
+      phone: json['phone'] ?? '',
       photo: json['photo'],
     );
   }
@@ -88,7 +92,7 @@ class ReplyTo {
 
   factory ReplyTo.fromJson(Map<String, dynamic> json) {
     return ReplyTo(
-      id: json['_id'],
+      id: json['_id'] ?? '',
       content: json['content'],
     );
   }
@@ -117,14 +121,18 @@ class Attachment {
 
   factory Attachment.fromJson(Map<String, dynamic> json) {
     return Attachment(
-      id: json['_id'],
-      user: json['user'],
+      id: json['_id'] ?? '',
+      user: json['user'] ?? '',
       type: json['type'],
-      url: json['url'],
-      name: json['name'],
-      size: json['size'],
-      createdAt: DateTime.parse(json['createdAt']),
-      updatedAt: DateTime.parse(json['updatedAt']),
+      url: json['url'] ?? '',
+      name: json['name'] ?? '',
+      size: json['size'] ?? 0,
+      createdAt: json['createdAt'] != null 
+          ? DateTime.parse(json['createdAt']) 
+          : DateTime.now(),
+      updatedAt: json['updatedAt'] != null 
+          ? DateTime.parse(json['updatedAt']) 
+          : DateTime.now(),
     );
   }
 }
@@ -140,8 +148,8 @@ class MessageReaction {
 
   factory MessageReaction.fromJson(Map<String, dynamic> json) {
     return MessageReaction(
-      reaction: json['reaction'],
-      users: (json['users'] as List)
+      reaction: json['reaction'] ?? '',
+      users: (json['users'] as List? ?? [])
           .map((user) => ReactionUser.fromJson(user))
           .toList(),
     );
@@ -165,11 +173,13 @@ class ReactionUser {
 
   factory ReactionUser.fromJson(Map<String, dynamic> json) {
     return ReactionUser(
-      id: json['_id'],
-      firstName: json['firstName'],
-      lastName: json['lastName'],
-      reaction: json['reaction'],
-      reactedAt: DateTime.parse(json['reactedAt']),
+      id: json['_id'] ?? '',
+      firstName: json['firstName'] ?? '',
+      lastName: json['lastName'] ?? '',
+      reaction: json['reaction'] ?? '',
+      reactedAt: json['reactedAt'] != null 
+          ? DateTime.parse(json['reactedAt']) 
+          : DateTime.now(),
     );
   }
 }

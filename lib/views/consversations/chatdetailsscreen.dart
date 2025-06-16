@@ -173,29 +173,62 @@ class _ConversationsState extends State<Conversations> {
         },
       );
 
+      print('Message loading response status: ${response.statusCode}');
+      print('Message loading response body: ${response.body}');
+
       if (response.statusCode == 200) {
-        final data = json.decode(response.body)['data'];
-        final List<Message> newMessages = (data['docs'] as List)
-            .map((message) => Message.fromJson(message))
-            .toList();
+        final responseData = json.decode(response.body);
+        
+        // Check if response has the expected structure
+        if (responseData['data'] == null) {
+          throw Exception('Invalid response structure: missing data field');
+        }
+        
+        final data = responseData['data'];
+        
+        // Check if docs field exists
+        if (data['docs'] == null) {
+          throw Exception('Invalid response structure: missing docs field');
+        }
+        
+        final List<Message> newMessages = [];
+        
+        // Safely parse each message with error handling
+        for (var messageJson in (data['docs'] as List)) {
+          try {
+            final message = Message.fromJson(messageJson);
+            newMessages.add(message);
+          } catch (e) {
+            print('Error parsing message: $e');
+            print('Message JSON: $messageJson');
+            // Continue with other messages instead of failing completely
+          }
+        }
 
         setState(() {
           _messages.addAll(newMessages);
-          // _messages.reverse();
           _hasMore = data['hasNextPage'] ?? false;
           _currentPage++;
           _isLoading = false;
         });
       } else {
-        throw Exception('Failed to load messages');
+        throw Exception('Failed to load messages: HTTP ${response.statusCode}');
       }
     } catch (e) {
+      print('Error in _loadMessages: $e');
       setState(() {
         _isLoading = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to load messages: ${e.toString()}')),
-      );
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to load messages: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
     }
   }
 
@@ -257,7 +290,8 @@ class _ConversationsState extends State<Conversations> {
           context.read<ChatProvider>().fetchSessions(refresh: true);
         }
       } else {
-        throw Exception('Failed to send message: $responseBody');
+        final errorData = json.decode(responseBody);
+        throw Exception("Failed to send message: ${errorData['message']}");
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1116,7 +1150,7 @@ class MessageBubble extends StatelessWidget {
             Flexible(
               child: ListView.builder(
                 shrinkWrap: true,
-                itemCount: reaction.users?.length,
+                itemCount: reaction.users.length,
                 itemBuilder: (context, index) {
                   final user = reaction.users[index];
                   return ListTile(

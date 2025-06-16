@@ -28,16 +28,18 @@ class ChatSession {
 
   factory ChatSession.fromJson(Map<String, dynamic> json) {
     return ChatSession(
-      id: json['_id'],
-      title: json['title'],
-      type: json['type'],
+      id: json['_id'] ?? '',
+      title: json['title'] ?? '',
+      type: json['type'] ?? 'direct',
       lastMessage: json['lastMessage'] != null ? LastMessage.fromJson(json['lastMessage']) : null,
       createdBy: json['createdBy'],
       otherUser: json['otherUser'] != null ? Profile.fromJson(json['otherUser']) : null,
-      status: json['status'],
-      recipients: (json['receipients'] as List).map((r) => Recipient.fromJson(r)).toList(),
+      status: json['status'] ?? 'active',
+      recipients: (json['receipients'] as List? ?? []).map((r) => Recipient.fromJson(r)).toList(),
       photo: json['photo'],
-      createdAt: DateTime.parse(json['createdAt']),
+      createdAt: json['createdAt'] != null 
+          ? DateTime.parse(json['createdAt']) 
+          : DateTime.now(),
     );
   }
 }
@@ -63,13 +65,15 @@ class LastMessage {
 
   factory LastMessage.fromJson(Map<String, dynamic> json) {
     return LastMessage(
-      id: json['_id'],
-      sender: json['sender'],
-      content: json['content'],
-      attachments: json['attachments'],
-      status: json['status'],
+      id: json['_id'] ?? '',
+      sender: json['sender'] ?? '',
+      content: json['content'] ?? '',
+      attachments: json['attachments'] ?? [],
+      status: json['status'] ?? 'sent',
       // replyTo: json['replyTo'],
-      createdAt: DateTime.parse(json['createdAt']),
+      createdAt: json['createdAt'] != null 
+          ? DateTime.parse(json['createdAt']) 
+          : DateTime.now(),
     );
   }
 }
@@ -91,11 +95,11 @@ class Recipient {
 
   factory Recipient.fromJson(Map<String, dynamic> json) {
     return Recipient(
-      user: Sender.fromJson(json['user']),
-      role: json['role'],
-      isMute: json['isMute'],
-      status: json['status'],
-      id: json['_id'],
+      user: Sender.fromJson(json['user'] ?? {}),
+      role: json['role'] ?? 'member',
+      isMute: json['isMute'] ?? false,
+      status: json['status'] ?? 'active',
+      id: json['_id'] ?? '',
     );
   }
 } 
