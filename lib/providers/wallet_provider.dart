@@ -205,6 +205,9 @@ class WalletProvider with ChangeNotifier {
     required NetworkFeeType feeType,
     String? description,
   }) async {
+    _error = null; // Clear previous errors
+    notifyListeners();
+    
     try {
       final success = await _walletService.createWithdrawal(
         amount: amount,
@@ -214,13 +217,24 @@ class WalletProvider with ChangeNotifier {
       );
 
       if (success) {
+        // Clear any previous errors on success
+        _error = null;
         // Refresh wallet data after successful withdrawal
         await refreshWalletData();
+        return true;
+      } else {
+        _error = 'Transaction failed. Please try again.';
+        notifyListeners();
+        return false;
       }
-
-      return success;
     } catch (e) {
-      _error = e.toString();
+      // Extract clean error message
+      String errorMessage = e.toString();
+      if (errorMessage.startsWith('Exception: ')) {
+        errorMessage = errorMessage.substring(11); // Remove 'Exception: ' prefix
+      }
+      
+      _error = errorMessage;
       notifyListeners();
       return false;
     }

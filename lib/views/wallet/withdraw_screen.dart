@@ -704,18 +704,43 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                 content: Row(
                   children: [
                     const Icon(Icons.check_circle, color: Colors.white),
-                    const SizedBox(width: 8),
-                    const Expanded(
-                      child: Text('Withdrawal submitted successfully!'),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Withdrawal Submitted!',
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Your Bitcoin withdrawal of ${_btcFormat.format(amount)} BTC has been submitted successfully.',
+                            style: const TextStyle(fontSize: 14),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-                backgroundColor: Colors.green,
+                backgroundColor: Colors.green[600],
                 behavior: SnackBarBehavior.floating,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                duration: const Duration(seconds: 3),
+                duration: const Duration(seconds: 5),
+                margin: const EdgeInsets.all(16),
+                action: SnackBarAction(
+                  label: 'View History',
+                  textColor: Colors.white,
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                ),
               ),
             );
             
@@ -750,23 +775,54 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       }
     } catch (e) {
       if (mounted) {
+        // Extract the actual error message from the exception
+        String errorMessage = e.toString();
+        if (errorMessage.startsWith('Exception: ')) {
+          errorMessage = errorMessage.substring(11); // Remove 'Exception: ' prefix
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.error, color: Colors.white),
-                const SizedBox(width: 8),
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 12),
                 Expanded(
-                  child: Text('Error: ${e.toString()}'),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Withdrawal Failed',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 16,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        errorMessage,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
-            backgroundColor: Colors.red,
+            backgroundColor: Colors.red[600],
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(12),
             ),
-            duration: const Duration(seconds: 4),
+            duration: const Duration(seconds: 6),
+            margin: const EdgeInsets.all(16),
+            action: SnackBarAction(
+              label: 'Dismiss',
+              textColor: Colors.white,
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              },
+            ),
           ),
         );
       }

@@ -132,7 +132,7 @@ class WalletService {
   }) async {
     try {
       final token = await _authService.getToken();
-      if (token == null) throw Exception('No authentication token');
+      if (token == null) throw Exception('Authentication required. Please log in again.');
 
       // Convert NetworkFeeType to API string
       String priority;
@@ -158,21 +158,74 @@ class WalletService {
           'toAddress': toAddress,
           'amount': amount,
           'priority': priority,
-          'descripton': description ?? '', // Note: API uses 'descripton' (typo in API)
+          'description': description ?? '',
         }),
       );
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        return responseData['success'] == true;
+        
+        if (responseData['success'] == true) {
+          return true;
+        } else {
+          // API returned success: false
+          String errorMessage = responseData['message'] ?? 'Transaction failed';
+          throw Exception(_getCustomErrorMessage(errorMessage));
+        }
       } else {
-        final errorData = json.decode(response.body);
-
-        throw Exception(errorData['message'] ?? 'Failed to create withdrawals: ${response.body}');
+       final errorData = json.decode(response.body);
+        print("errorData: $errorData");
+        String errorMessage = errorData['message'] ?? 'Transaction failed';
+        throw Exception(_getCustomErrorMessage(errorMessage));
       }
     } catch (e) {
       print('Error creating withdrawal: $e');
-      throw Exception('Failed to create withdrawalh: $e');
+      
+      // If it's already a formatted exception, re-throw it
+      if (e.toString().startsWith('Exception: ')) {
+        rethrow;
+      }
+      
+      // Handle network/connection errors
+      if (e.toString().contains('SocketException') || 
+          e.toString().contains('TimeoutException') ||
+          e.toString().contains('Connection')) {
+        throw Exception('Network connection failed. Please check your internet connection.');
+      }
+      
+      // Generic error fallback
+      throw Exception('Transaction failed. Please try agains.');
+    }
+  }
+
+  // Helper method to provide custom error messages
+  String _getCustomErrorMessage(String apiMessage) {
+    // Convert API error messages to user-friendly messages
+    final lowerMessage = apiMessage.toLowerCase();
+    
+    if (lowerMessage.contains('insufficient') && lowerMessage.contains('balance')) {
+      return 'Insufficient balance. Please check your available funds.';
+    } else if (lowerMessage.contains('invalid') && lowerMessage.contains('address')) {
+      return 'Invalid Bitcoin address. Please check the destination address.';
+    } else if (lowerMessage.contains('minimum') && lowerMessage.contains('amount')) {
+      return 'Amount is below minimum withdrawal limit.';
+    } else if (lowerMessage.contains('maximum') && lowerMessage.contains('amount')) {
+      return 'Amount exceeds maximum withdrawal limit.';
+    } else if (lowerMessage.contains('fee') && lowerMessage.contains('high')) {
+      return 'Network fees are currently high. Please try again later.';
+    } else if (lowerMessage.contains('pending') || lowerMessage.contains('processing')) {
+      return 'You have a pending transaction. Please wait for it to complete.';
+    } else if (lowerMessage.contains('limit') && lowerMessage.contains('exceeded')) {
+      return 'Daily withdrawal limit exceeded. Please try again tomorrow.';
+    } else if (lowerMessage.contains('maintenance')) {
+      return 'Wallet is under maintenance. Please try again later.';
+    } else if (lowerMessage.contains('blocked') || lowerMessage.contains('suspended')) {
+      return 'Your account has restrictions. Please contact support.';
+    } else if (lowerMessage.contains('rate') && lowerMessage.contains('limit')) {
+      return 'Too many transactions. Please wait a moment and try again.';
+    } else {
+      // Return the original message if no custom mapping found
+      return apiMessage;
     }
   }
 
