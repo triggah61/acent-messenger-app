@@ -9,25 +9,25 @@ class WalletService {
 
   WalletService(this._authService);
 
-  // Sample network fees
+  // Sample network fees (fallback when API is unavailable)
   static final List<NetworkFee> _sampleNetworkFees = [
     NetworkFee(
-      type: NetworkFeeType.slow,
-      fee: 0.00001,
-      description: 'Low priority - 60-120 minutes',
-      estimatedTime: 90,
+      type: NetworkFeeType.low,
+      networkFee: FeeAmount(satoshis: 1130, btc: 0.0000113),
+      platformFee: FeeAmount(satoshis: 1000, btc: 0.00001),
+      estimatedTime: '60-120 minutes',
     ),
     NetworkFee(
-      type: NetworkFeeType.standard,
-      fee: 0.00003,
-      description: 'Standard priority - 15-30 minutes',
-      estimatedTime: 20,
+      type: NetworkFeeType.medium,
+      networkFee: FeeAmount(satoshis: 3390, btc: 0.0000339),
+      platformFee: FeeAmount(satoshis: 1000, btc: 0.00001),
+      estimatedTime: '10-30 minutes',
     ),
     NetworkFee(
-      type: NetworkFeeType.fast,
-      fee: 0.00005,
-      description: 'High priority - 5-15 minutes',
-      estimatedTime: 10,
+      type: NetworkFeeType.high,
+      networkFee: FeeAmount(satoshis: 6780, btc: 0.0000678),
+      platformFee: FeeAmount(satoshis: 1000, btc: 0.00001),
+      estimatedTime: '5-15 minutes',
     ),
   ];
 
@@ -131,40 +131,51 @@ class WalletService {
     String? description,
   }) async {
     try {
-      // TODO: Replace with real API call when withdrawal endpoint is provided
-      /*
       final token = await _authService.getToken();
       if (token == null) throw Exception('No authentication token');
 
+      // Convert NetworkFeeType to API string
+      String priority;
+      switch (feeType) {
+        case NetworkFeeType.low:
+          priority = 'low';
+          break;
+        case NetworkFeeType.medium:
+          priority = 'medium';
+          break;
+        case NetworkFeeType.high:
+          priority = 'high';
+          break;
+      }
+
       final response = await http.post(
-        Uri.parse('${Config.baseApiUrl}/wallet/withdraw'),
+        Uri.parse('${Config.baseApiUrl}/user/wallet/sendTransaction'),
         headers: {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
         body: json.encode({
-          'amount': amount,
           'toAddress': toAddress,
-          'feeType': feeType.toString().split('.').last,
-          'description': description,
+          'amount': amount,
+          'priority': priority,
+          'descripton': description ?? '', // Note: API uses 'descripton' (typo in API)
         }),
       );
 
       if (response.statusCode == 200) {
-        return true;
+        final responseData = json.decode(response.body);
+        
+        if (responseData['success'] == true) {
+          return true;
+        } else {
+          throw Exception(responseData['message'] ?? 'Failed to create withdrawal');
+        }
       } else {
-        throw Exception('Failed to create withdrawal');
+        final errorData = json.decode(response.body);
+        throw Exception(errorData['message'] ?? 'Failed to create withdrawal: ${response.body}');
       }
-      */
-      
-      await Future.delayed(const Duration(seconds: 1)); // Simulate API delay
-      
-      // Validate inputs
-      if (amount <= 0) throw Exception('Amount must be greater than 0');
-      if (toAddress.isEmpty) throw Exception('Destination address is required');
-      
-      return true;
     } catch (e) {
+      print('Error creating withdrawal: $e');
       throw Exception('Failed to create withdrawal: $e');
     }
   }
@@ -194,5 +205,37 @@ class WalletService {
       'totalFees': totalFees,
       'totalCost': totalCost,
     };
+  }
+
+  // Estimate transaction fees based on amount
+  Future<FeeEstimationResponse> estimateTransactionFee(double amount) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) throw Exception('No authentication token');
+
+      final response = await http.post(
+        Uri.parse('${Config.baseApiUrl}/user/wallet/estimateTransactionFee'),
+        headers: {
+          'Authorization': 'Bearer $token',
+          'Content-Type': 'application/json',
+        },
+        body: json.encode({'amount': amount}),
+      );
+
+      if (response.statusCode == 200) {
+        final responseData = json.decode(response.body);
+        
+        if (responseData['success'] == true && responseData['data'] != null) {
+          return FeeEstimationResponse.fromJson(responseData);
+        } else {
+          throw Exception(responseData['message'] ?? 'Failed to estimate fees');
+        }
+      } else {
+        throw Exception('Failed to estimate fees: ${response.body}');
+      }
+    } catch (e) {
+      print('Error estimating fees: $e');
+      throw Exception('Failed to estimate fees: $e');
+    }
   }
 } 

@@ -317,10 +317,16 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
-  void _navigateToWithdraw() {
-    Navigator.push(
+  void _navigateToWithdraw() async {
+    await Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const WithdrawScreen()),
     );
+    
+    // Refresh wallet data when returning from withdrawal screen
+    // This ensures transaction history is updated if withdrawal was successful
+    if (mounted) {
+      context.read<WalletProvider>().refreshWalletData();
+    }
   }
 } 

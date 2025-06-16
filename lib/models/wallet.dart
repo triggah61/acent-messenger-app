@@ -231,42 +231,132 @@ class TransactionHistoryResponse {
 }
 
 enum NetworkFeeType {
-  slow,
-  standard,
-  fast,
+  low,
+  medium,
+  high,
+}
+
+class FeeAmount {
+  final int satoshis;
+  final double btc;
+
+  FeeAmount({
+    required this.satoshis,
+    required this.btc,
+  });
+
+  factory FeeAmount.fromJson(Map<String, dynamic> json) {
+    return FeeAmount(
+      satoshis: json['satoshis'] ?? 0,
+      btc: (json['btc'] ?? 0.0).toDouble(),
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'satoshis': satoshis,
+      'btc': btc,
+    };
+  }
 }
 
 class NetworkFee {
   final NetworkFeeType type;
-  final double fee;
-  final String description;
-  final int estimatedTime; // in minutes
+  final FeeAmount networkFee;
+  final FeeAmount platformFee;
+  final String estimatedTime;
 
   NetworkFee({
     required this.type,
-    required this.fee,
-    required this.description,
+    required this.networkFee,
+    required this.platformFee,
     required this.estimatedTime,
   });
 
-  factory NetworkFee.fromJson(Map<String, dynamic> json) {
+  factory NetworkFee.fromJson(NetworkFeeType type, Map<String, dynamic> json, String estimatedTime) {
     return NetworkFee(
-      type: NetworkFeeType.values.firstWhere(
-        (e) => e.toString().split('.').last == json['type'],
-        orElse: () => NetworkFeeType.standard,
-      ),
-      fee: (json['fee'] ?? 0.0).toDouble(),
-      description: json['description'] ?? '',
-      estimatedTime: json['estimatedTime'] ?? 30,
+      type: type,
+      networkFee: FeeAmount.fromJson(json['network']),
+      platformFee: FeeAmount.fromJson(json['platform']),
+      estimatedTime: estimatedTime,
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
       'type': type.toString().split('.').last,
-      'fee': fee,
-      'description': description,
+      'network': networkFee.toJson(),
+      'platform': platformFee.toJson(),
       'estimatedTime': estimatedTime,
     };
   }
+
+  // Helper getters
+  double get totalBtcFee => networkFee.btc + platformFee.btc;
+  int get totalSatoshis => networkFee.satoshis + platformFee.satoshis;
+  
+  // Legacy compatibility
+  double get fee => totalBtcFee;
+  String get description => _getDescription();
+  int get estimatedTimeMinutes => _parseEstimatedTime();
+
+  String _getDescription() {
+    switch (type) {
+      case NetworkFeeType.low:
+        return 'Low priority - $estimatedTime';
+      case NetworkFeeType.medium:
+        return 'Standard priority - $estimatedTime';
+      case NetworkFeeType.high:
+        return 'High priority - $estimatedTime';
+    }
+  }
+
+  int _parseEstimatedTime() {
+    // Extract average time from string like "60-120 minutes"
+    final parts = estimatedTime.split('-');
+    if (parts.length >= 2) {
+      final minTime = int.tryParse(parts[0]) ?? 30;
+      final maxTime = int.tryParse(parts[1].split(' ')[0]) ?? 60;
+      return ((minTime + maxTime) / 2).round();
+    }
+    return 30; // Default fallback
+  }
+}
+
+class FeeEstimationResponse {
+  final Map<NetworkFeeType, NetworkFee> fees;
+
+  FeeEstimationResponse({required this.fees});
+
+  factory FeeEstimationResponse.fromJson(Map<String, dynamic> json) {
+    final data = json['data'];
+    final feesData = data['fees'] as Map<String, dynamic>;
+    final estimatedTimes = data['estimatedConfirmationTime'] as Map<String, dynamic>;
+
+    final fees = <NetworkFeeType, NetworkFee>{};
+    
+    fees[NetworkFeeType.low] = NetworkFee.fromJson(
+      NetworkFeeType.low,
+      feesData['low'],
+      estimatedTimes['low'] ?? '60-120 minutes',
+    );
+    
+    fees[NetworkFeeType.medium] = NetworkFee.fromJson(
+      NetworkFeeType.medium,
+      feesData['medium'],
+      estimatedTimes['medium'] ?? '10-30 minutes',
+    );
+    
+    fees[NetworkFeeType.high] = NetworkFee.fromJson(
+      NetworkFeeType.high,
+      feesData['high'],
+      estimatedTimes['high'] ?? '5-15 minutes',
+    );
+
+    return FeeEstimationResponse(fees: fees);
+  }
+
+  List<NetworkFee> get feeList => fees.values.toList();
+  
+  NetworkFee? getFee(NetworkFeeType type) => fees[type];
 } 

@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
+import 'dart:async';
 import '../../models/wallet.dart';
 import '../../providers/wallet_provider.dart';
 
@@ -18,9 +18,13 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
   
-  NetworkFeeType _selectedFeeType = NetworkFeeType.standard;
+  NetworkFeeType _selectedFeeType = NetworkFeeType.medium;
   bool _isLoading = false;
   final NumberFormat _btcFormat = NumberFormat('#,##0.00000000', 'en_US');
+  
+  // Debouncing for fee estimation
+  Timer? _debounceTimer;
+  static const Duration _debounceDuration = Duration(milliseconds: 800);
 
   @override
   void initState() {
@@ -28,6 +32,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<WalletProvider>().fetchNetworkFees();
     });
+    
+    // Listen to amount changes for fee estimation
+    _amountController.addListener(_onAmountChanged);
   }
 
   @override
@@ -207,16 +214,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               }
               
               // Calculate total cost including both fees
-              final platformFee = wallet.calculatePlatformFee(amount);
-              final networkFee = context.read<WalletProvider>().networkFees
-                  .firstWhere((fee) => fee.type == _selectedFeeType, 
-                      orElse: () => NetworkFee(
-                        type: NetworkFeeType.standard,
-                        fee: 0.00003,
-                        description: 'Standard',
-                        estimatedTime: 20,
-                      )).fee;
-              final totalCost = amount + platformFee + networkFee;
+              final selectedFee = context.read<WalletProvider>().getFeeByType(_selectedFeeType);
+              final totalCost = amount + (selectedFee?.totalBtcFee ?? 0.0);
               
               if (totalCost > wallet.btcBalance) {
                 return 'Insufficient balance (including fees)';
@@ -225,47 +224,49 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             },
           ),
           const SizedBox(height: 8),
-          Row(
-            children: [
-              TextButton(
-                onPressed: () => _setMaxAmount(wallet.btcBalance),
-                child: const Text(
-                  'Max',
-                  style: TextStyle(color: Colors.blueAccent),
-                ),
-              ),
-              const SizedBox(width: 16),
-              TextButton(
-                onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.25),
-                child: const Text(
-                  '25%',
-                  style: TextStyle(color: Colors.blueAccent),
-                ),
-              ),
-              const SizedBox(width: 16),
-              TextButton(
-                onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.5),
-                child: const Text(
-                  '50%',
-                  style: TextStyle(color: Colors.blueAccent),
-                ),
-              ),
-              const SizedBox(width: 16),
-              TextButton(
-                onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.75),
-                child: const Text(
-                  '75%',
-                  style: TextStyle(color: Colors.blueAccent),
-                ),
-              ),
-            ],
-          ),
+          // Row(
+          //   children: [
+          //     TextButton(
+          //       onPressed: () => _setMaxAmount(wallet.btcBalance),
+          //       child: const Text(
+          //         'Max',
+          //         style: TextStyle(color: Colors.blueAccent),
+          //       ),
+          //     ),
+          //     const SizedBox(width: 16),
+          //     TextButton(
+          //       onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.25),
+          //       child: const Text(
+          //         '25%',
+          //         style: TextStyle(color: Colors.blueAccent),
+          //       ),
+          //     ),
+          //     const SizedBox(width: 16),
+          //     TextButton(
+          //       onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.5),
+          //       child: const Text(
+          //         '50%',
+          //         style: TextStyle(color: Colors.blueAccent),
+          //       ),
+          //     ),
+          //     const SizedBox(width: 16),
+          //     TextButton(
+          //       onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.75),
+          //       child: const Text(
+          //         '75%',
+          //         style: TextStyle(color: Colors.blueAccent),
+          //       ),
+          //     ),
+          //   ],
+          // ),
         ],
       ),
     );
   }
 
   Widget _buildNetworkFeeSection(WalletProvider walletProvider) {
+    final fees = walletProvider.estimatedFees;
+    
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -277,16 +278,41 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Network Fee',
-            style: TextStyle(
-              color: Colors.black87,
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-            ),
+          Row(
+            children: [
+              const Text(
+                'Network Fee',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              if (walletProvider.isLoadingFees) ...[
+                const SizedBox(width: 8),
+                const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                  ),
+                ),
+              ],
+            ],
           ),
+          if (walletProvider.feeError != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              'Error loading fees: ${walletProvider.feeError}',
+              style: TextStyle(
+                color: Colors.red[600],
+                fontSize: 12,
+              ),
+            ),
+          ],
           const SizedBox(height: 16),
-          ...walletProvider.networkFees.map((fee) => _buildFeeOption(fee)),
+          ...fees.map((fee) => _buildFeeOption(fee)),
         ],
       ),
     );
@@ -353,13 +379,32 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                           fontWeight: FontWeight.w500,
                         ),
                       ),
-                      Text(
-                        '${_btcFormat.format(fee.fee)} BTC',
-                        style: TextStyle(
-                          color: isSelected ? Colors.black87 : Colors.grey[700],
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            '${_btcFormat.format(fee.totalBtcFee)} BTC',
+                            style: TextStyle(
+                              color: isSelected ? Colors.black87 : Colors.grey[700],
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          Text(
+                            'Network: ${_btcFormat.format(fee.networkFee.btc)} BTC',
+                            style: TextStyle(
+                              color: isSelected ? Colors.grey[600] : Colors.grey[500],
+                              fontSize: 10,
+                            ),
+                          ),
+                          Text(
+                            'Platform: ${_btcFormat.format(fee.platformFee.btc)} BTC',
+                            style: TextStyle(
+                              color: isSelected ? Colors.grey[600] : Colors.grey[500],
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
@@ -438,9 +483,6 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               if (value == null || value.isEmpty) {
                 return 'Please enter a destination address';
               }
-              if (value.length < 26 || value.length > 35) {
-                return 'Please enter a valid Bitcoin address';
-              }
               return null;
             },
           ),
@@ -501,18 +543,15 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
   Widget _buildSummaryCard(Wallet wallet, WalletProvider walletProvider) {
     final amount = double.tryParse(_amountController.text) ?? 0.0;
-    final selectedFee = walletProvider.networkFees
-        .firstWhere((fee) => fee.type == _selectedFeeType, orElse: () => NetworkFee(
-          type: NetworkFeeType.standard,
-          fee: 0.00003,
-          description: 'Standard',
-          estimatedTime: 20,
-        ));
+    final selectedFee = walletProvider.getFeeByType(_selectedFeeType);
     
-    // Calculate platform fee based on wallet's platform fee percentage
-    final platformFee = wallet.calculatePlatformFee(amount);
-    final networkFee = selectedFee.fee;
-    final totalFees = platformFee + networkFee;
+    if (selectedFee == null) {
+      return const SizedBox.shrink();
+    }
+    
+    final networkFee = selectedFee.networkFee.btc;
+    final platformFee = selectedFee.platformFee.btc;
+    final totalFees = selectedFee.totalBtcFee;
     final total = amount + totalFees;
 
     return Container(
@@ -536,7 +575,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           ),
           const SizedBox(height: 16),
           _buildSummaryRow('Amount', '${_btcFormat.format(amount)} BTC'),
-          _buildSummaryRow('Platform Fee (${wallet.platformFeePercentage}%)', '${_btcFormat.format(platformFee)} BTC'),
+          _buildSummaryRow('Platform Fee', '${_btcFormat.format(platformFee)} BTC'),
           _buildSummaryRow('Network Fee', '${_btcFormat.format(networkFee)} BTC'),
           Divider(color: Colors.grey[300]),
           _buildSummaryRow('Total to Deduct', '${_btcFormat.format(total)} BTC', isTotal: true),
@@ -627,25 +666,19 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
   String _getFeeTypeTitle(NetworkFeeType type) {
     switch (type) {
-      case NetworkFeeType.slow:
-        return 'Slow';
-      case NetworkFeeType.standard:
+      case NetworkFeeType.low:
+        return 'Low';
+      case NetworkFeeType.medium:
         return 'Standard';
-      case NetworkFeeType.fast:
+      case NetworkFeeType.high:
         return 'Fast';
     }
   }
 
   void _setMaxAmount(double maxAmount) {
     // Calculate the maximum withdrawable amount considering both fees
-    final networkFee = context.read<WalletProvider>().networkFees
-        .firstWhere((fee) => fee.type == _selectedFeeType, 
-            orElse: () => NetworkFee(
-              type: NetworkFeeType.standard,
-              fee: 0.00003,
-              description: 'Standard',
-              estimatedTime: 20,
-            )).fee;
+    final selectedFee = context.read<WalletProvider>().getFeeByType(_selectedFeeType);
+    final networkFee = selectedFee?.totalBtcFee ?? 0.00005; // fallback fee
             
     // Use an iterative approach to find the max amount considering platform fee
     double maxWithdrawable = 0.0;
@@ -699,22 +732,51 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
         if (success) {
           if (mounted) {
+            // Show success message
             ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Withdrawal initiated successfully'),
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.check_circle, color: Colors.white),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('Withdrawal submitted successfully!'),
+                    ),
+                  ],
+                ),
                 backgroundColor: Colors.green,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                duration: const Duration(seconds: 3),
               ),
             );
+            
+            // Navigate back to wallet screen (which will auto-refresh)
             Navigator.pop(context);
           }
         } else {
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Text(
-                  context.read<WalletProvider>().error ?? 'Withdrawal failed',
+                content: Row(
+                  children: [
+                    const Icon(Icons.error, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        context.read<WalletProvider>().error ?? 'Withdrawal failed',
+                      ),
+                    ),
+                  ],
                 ),
                 backgroundColor: Colors.red,
+                behavior: SnackBarBehavior.floating,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                duration: const Duration(seconds: 4),
               ),
             );
           }
@@ -724,8 +786,21 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error: $e'),
+            content: Row(
+              children: [
+                const Icon(Icons.error, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Error: ${e.toString()}'),
+                ),
+              ],
+            ),
             backgroundColor: Colors.red,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
+            ),
+            duration: const Duration(seconds: 4),
           ),
         );
       }
@@ -739,63 +814,132 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Future<bool?> _showConfirmationDialog(double amount, String address) {
-    final wallet = context.read<WalletProvider>().wallet!;
-    final platformFee = wallet.calculatePlatformFee(amount);
-    final networkFee = context.read<WalletProvider>().networkFees
-        .firstWhere((fee) => fee.type == _selectedFeeType, 
-            orElse: () => NetworkFee(
-              type: NetworkFeeType.standard,
-              fee: 0.00003,
-              description: 'Standard',
-              estimatedTime: 20,
-            )).fee;
-    final totalCost = amount + platformFee + networkFee;
+    final selectedFee = context.read<WalletProvider>().getFeeByType(_selectedFeeType);
+    
+    if (selectedFee == null) {
+      return Future.value(false);
+    }
+    
+    final platformFee = selectedFee.platformFee.btc;
+    final networkFee = selectedFee.networkFee.btc;
+    final totalCost = amount + selectedFee.totalBtcFee;
+    final description = _descriptionController.text.trim();
 
     return showDialog<bool>(
       context: context,
+      barrierDismissible: false,
       builder: (context) => AlertDialog(
         backgroundColor: Colors.white,
-        title: const Text(
-          'Confirm Withdrawal',
-          style: TextStyle(color: Colors.black87),
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.orange, size: 24),
+            SizedBox(width: 8),
+            Text(
+              'Confirm Withdrawal',
+              style: TextStyle(
+                color: Colors.black87,
+                fontSize: 18,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Amount: ${_btcFormat.format(amount)} BTC',
-              style: TextStyle(color: Colors.grey[700]),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Platform Fee: ${_btcFormat.format(platformFee)} BTC',
-              style: TextStyle(color: Colors.grey[700]),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Network Fee: ${_btcFormat.format(networkFee)} BTC',
-              style: TextStyle(color: Colors.grey[700]),
-            ),
-            const SizedBox(height: 4),
-            Text(
-              'Total Cost: ${_btcFormat.format(totalCost)} BTC',
-              style: const TextStyle(
-                color: Colors.black87,
-                fontWeight: FontWeight.w600,
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey[50],
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.grey[200]!),
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'To: ${address.substring(0, 8)}...${address.substring(address.length - 8)}',
-              style: TextStyle(color: Colors.grey[700]),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildConfirmationRow('Amount:', '${_btcFormat.format(amount)} BTC'),
+                  const SizedBox(height: 8),
+                  _buildConfirmationRow('Platform Fee:', '${_btcFormat.format(platformFee)} BTC'),
+                  const SizedBox(height: 8),
+                  _buildConfirmationRow('Network Fee:', '${_btcFormat.format(networkFee)} BTC'),
+                  const SizedBox(height: 8),
+                  _buildConfirmationRow('Priority:', _getFeeTypeTitle(_selectedFeeType)),
+                  const Divider(),
+                  _buildConfirmationRow(
+                    'Total Cost:',
+                    '${_btcFormat.format(totalCost)} BTC',
+                    isTotal: true,
+                  ),
+                ],
+              ),
             ),
             const SizedBox(height: 16),
             const Text(
-              'This transaction cannot be reversed. Please verify the address carefully.',
+              'Destination:',
               style: TextStyle(
-                color: Colors.orange,
-                fontSize: 12,
+                color: Colors.black87,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.grey[100],
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                address,
+                style: const TextStyle(
+                  color: Colors.black87,
+                  fontSize: 12,
+                  fontFamily: 'monospace',
+                ),
+              ),
+            ),
+            if (description.isNotEmpty) ...[
+              const SizedBox(height: 12),
+              const Text(
+                'Description:',
+                style: TextStyle(
+                  color: Colors.black87,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                description,
+                style: TextStyle(
+                  color: Colors.grey[700],
+                  fontSize: 14,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info, color: Colors.orange, size: 16),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'This transaction cannot be reversed. Please verify the address carefully.',
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
           ],
@@ -803,22 +947,71 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.grey),
+            ),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
-            child: const Text('Confirm'),
+            child: const Text(
+              'Confirm Withdrawal',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),
     );
   }
 
+  Widget _buildConfirmationRow(String label, String value, {bool isTotal = false}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: isTotal ? Colors.black87 : Colors.grey[700],
+            fontSize: isTotal ? 14 : 13,
+            fontWeight: isTotal ? FontWeight.w600 : FontWeight.normal,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: isTotal ? Colors.black87 : Colors.grey[700],
+            fontSize: isTotal ? 14 : 13,
+            fontWeight: isTotal ? FontWeight.w600 : FontWeight.w500,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _onAmountChanged() {
+    _debounceTimer?.cancel();
+    _debounceTimer = Timer(_debounceDuration, () {
+      final amount = double.tryParse(_amountController.text);
+      if (amount != null && amount > 0) {
+        context.read<WalletProvider>().estimateFeesForAmount(amount);
+      } else {
+        context.read<WalletProvider>().clearFeeEstimation();
+      }
+    });
+  }
+
   @override
   void dispose() {
+    _debounceTimer?.cancel();
+    _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
     _addressController.dispose();
     _descriptionController.dispose();

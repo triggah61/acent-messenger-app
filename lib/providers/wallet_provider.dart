@@ -9,6 +9,12 @@ class WalletProvider with ChangeNotifier {
   List<Transaction> _transactions = [];
   List<NetworkFee> _networkFees = [];
   
+  // Fee estimation state
+  FeeEstimationResponse? _feeEstimation;
+  bool _isLoadingFees = false;
+  String? _feeError;
+  double? _lastFeeAmount; // Track the last amount for which fees were estimated
+  
   // Transaction pagination state
   TransactionPagination? _transactionPagination;
   bool _isLoadingTransactions = false;
@@ -27,6 +33,13 @@ class WalletProvider with ChangeNotifier {
   List<NetworkFee> get networkFees => _networkFees;
   bool get isLoading => _isLoading;
   String? get error => _error;
+  
+  // Fee estimation getters
+  FeeEstimationResponse? get feeEstimation => _feeEstimation;
+  bool get isLoadingFees => _isLoadingFees;
+  String? get feeError => _feeError;
+  double? get lastFeeAmount => _lastFeeAmount;
+  List<NetworkFee> get estimatedFees => _feeEstimation?.feeList ?? _networkFees;
   
   // Transaction pagination getters
   TransactionPagination? get transactionPagination => _transactionPagination;
@@ -121,12 +134,58 @@ class WalletProvider with ChangeNotifier {
     }
   }
 
-  // Fetch network fees
+  // Fetch network fees (fallback)
   Future<void> fetchNetworkFees() async {
     try {
       _networkFees = await _walletService.getNetworkFees();
     } catch (e) {
       print('Error fetching network fees: $e');
+    }
+  }
+
+  // Estimate fees for a specific amount
+  Future<void> estimateFeesForAmount(double amount) async {
+    // Don't fetch if amount is 0 or same as last request
+    if (amount <= 0 || amount == _lastFeeAmount) return;
+
+    _isLoadingFees = true;
+    _feeError = null;
+    _lastFeeAmount = amount;
+    notifyListeners();
+
+    try {
+      _feeEstimation = await _walletService.estimateTransactionFee(amount);
+      _feeError = null;
+    } catch (e) {
+      _feeError = e.toString();
+      _feeEstimation = null;
+      print('Error estimating fees: $e');
+    } finally {
+      _isLoadingFees = false;
+      notifyListeners();
+    }
+  }
+
+  // Clear fee estimation (when amount is cleared)
+  void clearFeeEstimation() {
+    _feeEstimation = null;
+    _feeError = null;
+    _lastFeeAmount = null;
+    _isLoadingFees = false;
+    notifyListeners();
+  }
+
+  // Get specific fee by type from current estimation
+  NetworkFee? getFeeByType(NetworkFeeType type) {
+    if (_feeEstimation != null) {
+      return _feeEstimation!.getFee(type);
+    }
+    
+    // Fallback to default fees
+    try {
+      return _networkFees.firstWhere((fee) => fee.type == type);
+    } catch (e) {
+      return null;
     }
   }
 
