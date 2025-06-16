@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../models/wallet.dart';
 import '../providers/wallet_provider.dart';
+import 'transaction_details_modal.dart';
 
 class TransactionHistory extends StatefulWidget {
   const TransactionHistory({Key? key}) : super(key: key);
@@ -107,99 +108,108 @@ class _TransactionHistoryState extends State<TransactionHistory> {
     final icon = isDeposit ? Icons.arrow_downward : Icons.arrow_upward;
     final sign = isDeposit ? '+' : '-';
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.grey[50],
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.grey[200]!),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 50,
-            height: 50,
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(25),
+    return GestureDetector(
+      onTap: () => _showTransactionDetails(transaction),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.grey[50],
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey[200]!),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 50,
+              height: 50,
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(25),
+              ),
+              child: Icon(icon, color: color, size: 24),
             ),
-            child: Icon(icon, color: color, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    _getTransactionTitle(transaction),
+                    style: const TextStyle(
+                      color: Colors.black87,
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    _formatDate(transaction.submittedAt),
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 14,
+                    ),
+                  ),
+                  if (transaction.confirmations > 0) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      '${transaction.confirmations} confirmation${transaction.confirmations > 1 ? 's' : ''}',
+                      style: TextStyle(
+                        color: Colors.green[600],
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  _getTransactionTitle(transaction),
-                  style: const TextStyle(
-                    color: Colors.black87,
+                  '$sign${_btcFormat.format(transaction.btcAmount)} BTC',
+                  style: TextStyle(
+                    color: color,
                     fontSize: 16,
-                    fontWeight: FontWeight.w500,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
                 const SizedBox(height: 4),
-                Text(
-                  _formatDate(transaction.submittedAt),
-                  style: TextStyle(
-                    color: Colors.grey[600],
-                    fontSize: 14,
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: _getStatusColor(transaction.status).withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Text(
+                    transaction.status.toUpperCase(),
+                    style: TextStyle(
+                      color: _getStatusColor(transaction.status),
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-                if (transaction.confirmations > 0) ...[
+                if (transaction.fee.btc > 0) ...[
                   const SizedBox(height: 2),
                   Text(
-                    '${transaction.confirmations} confirmation${transaction.confirmations > 1 ? 's' : ''}',
+                    'Fee: ${_btcFormat.format(transaction.fee.btc)} BTC',
                     style: TextStyle(
-                      color: Colors.green[600],
-                      fontSize: 12,
+                      color: Colors.grey[500],
+                      fontSize: 10,
                     ),
                   ),
                 ],
               ],
             ),
-          ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$sign${_btcFormat.format(transaction.btcAmount)} BTC',
-                style: TextStyle(
-                  color: color,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(
-                  color: _getStatusColor(transaction.status).withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Text(
-                  transaction.status.toUpperCase(),
-                  style: TextStyle(
-                    color: _getStatusColor(transaction.status),
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              if (transaction.fee.btc > 0) ...[
-                const SizedBox(height: 2),
-                Text(
-                  'Fee: ${_btcFormat.format(transaction.fee.btc)} BTC',
-                  style: TextStyle(
-                    color: Colors.grey[500],
-                    fontSize: 10,
-                  ),
-                ),
-              ],
-            ],
-          ),
-        ],
+            const SizedBox(width: 8),
+            Icon(
+              Icons.chevron_right,
+              color: Colors.grey[400],
+              size: 20,
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -336,5 +346,9 @@ class _TransactionHistoryState extends State<TransactionHistory> {
     } else {
       return 'Just now';
     }
+  }
+
+  void _showTransactionDetails(Transaction transaction) {
+    TransactionDetailsModal.show(context, transaction);
   }
 } 
