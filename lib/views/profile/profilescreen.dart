@@ -8,7 +8,6 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:io';
 import 'package:image_picker/image_picker.dart';
-import 'package:permission_handler/permission_handler.dart';
 import 'package:acent_messenger/views/authentication/login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -27,7 +26,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late TextEditingController _firstNameController;
   late TextEditingController _lastNameController;
   String _gender = 'Male';
-  DateTime _birthday = DateTime(1997, 1, 12);
+  DateTime? _birthday;
   final ImagePicker _picker = ImagePicker();
 
   @override
@@ -36,6 +35,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final profile = Provider.of<AuthProvider>(context, listen: false).profile;
     _firstNameController = TextEditingController(text: profile?.firstName ?? '');
     _lastNameController = TextEditingController(text: profile?.lastName ?? '');
+    
+    _gender = profile?.gender ?? 'Male';
+    
+    if (profile?.dob != null) {
+      try {
+        _birthday = DateTime.parse(profile!.dob!);
+      } catch (e) {
+        _birthday = null;
+      }
+    } else {
+      _birthday = null;
+    }
   }
 
   @override
@@ -64,22 +75,26 @@ class _ProfileScreenState extends State<ProfileScreen> {
         throw Exception('Not authenticated');
       }
 
+      final requestBody = {
+        'firstName': _firstNameController.text,
+        'lastName': _lastNameController.text,
+        'gender': _gender,
+      };
+
+      if (_birthday != null) {
+        requestBody['dob'] = DateFormat('yyyy-MM-dd').format(_birthday!);
+      }
+
       final response = await http.post(
         Uri.parse('${Config.baseApiUrl}/profile/updateProfile'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token'
         },
-        body: jsonEncode({
-          'firstName': _firstNameController.text,
-          'lastName': _lastNameController.text,
-          'gender': _gender,
-          'birthday': DateFormat('yyyy-MM-dd').format(_birthday),
-        }),
+        body: jsonEncode(requestBody),
       );
 
       if (response.statusCode == 200) {
-        // Refresh profile data
         await Provider.of<AuthProvider>(context, listen: false).fetchProfile();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -110,103 +125,118 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final profile = Provider.of<AuthProvider>(context, listen: false).profile;
     _firstNameController.text = profile?.firstName ?? '';
     _lastNameController.text = profile?.lastName ?? '';
+    
+    _gender = profile?.gender ?? 'Male';
+    if (profile?.dob != null) {
+      try {
+        _birthday = DateTime.parse(profile!.dob!);
+      } catch (e) {
+        _birthday = null;
+      }
+    } else {
+      _birthday = null;
+    }
 
     await showDialog(
       context: context,
       builder: (BuildContext context) {
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(16.0),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  'Edit Profile',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                _buildTextField(
-                  label: 'First Name',
-                  controller: _firstNameController,
-                  icon: Icons.person,
-                ),
-                _buildTextField(
-                  label: 'Last Name',
-                  controller: _lastNameController,
-                  icon: Icons.person,
-                ),
-                _buildTextField(
-                  label: 'Phone Number',
-                  initialValue: '${profile?.dialCode ?? ''} ${profile?.phone ?? ''}',
-                  icon: Icons.phone,
-                  keyboardType: TextInputType.phone,
-                  readOnly: true,
-                ),
-                _buildDropdownField(
-                  label: 'Gender',
-                  value: _gender,
-                  icon: Icons.wc,
-                  items: ['Male', 'Female', 'Other'],
-                  onChanged: (value) {
-                    if (value != null) {
-                      setState(() {
-                        _gender = value;
-                      });
-                    }
-                  },
-                ),
-                _buildDateField(
-                  label: 'Birthday',
-                  value: _birthday,
-                  icon: Icons.calendar_today,
-                  onDateSelected: (date) {
-                    setState(() {
-                      _birthday = date;
-                    });
-                  },
-                ),
-                const SizedBox(height: 20),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(16.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(context),
-                      child: const Text(
-                        'Cancel',
-                        style: TextStyle(fontSize: 16),
-                      ),
+                    Text(
+                      'Edit Profile',
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
                     ),
-                    ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blue,
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 24,
-                          vertical: 12,
+                    const SizedBox(height: 10),
+                    _buildTextField(
+                      label: 'First Name',
+                      controller: _firstNameController,
+                      icon: Icons.person,
+                    ),
+                    _buildTextField(
+                      label: 'Last Name',
+                      controller: _lastNameController,
+                      icon: Icons.person,
+                    ),
+                    _buildTextField(
+                      label: 'Phone Number',
+                      initialValue: '${profile?.dialCode ?? ''} ${profile?.phone ?? ''}',
+                      icon: Icons.phone,
+                      keyboardType: TextInputType.phone,
+                      readOnly: true,
+                    ),
+                    _buildDropdownField(
+                      label: 'Gender',
+                      value: _gender,
+                      icon: Icons.wc,
+                      items: ['Male', 'Female', 'Other'],
+                      onChanged: (value) {
+                        if (value != null) {
+                          setDialogState(() {
+                            _gender = value;
+                          });
+                        }
+                      },
+                    ),
+                    _buildDateField(
+                      label: 'Date of Birth',
+                      value: _birthday,
+                      icon: Icons.calendar_today,
+                      onDateSelected: (date) {
+                        setDialogState(() {
+                          _birthday = date;
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                      children: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text(
+                            'Cancel',
+                            style: TextStyle(fontSize: 16),
+                          ),
                         ),
-                      ),
-                      onPressed: _isLoading ? null : _updateProfile,
-                      child: _isLoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                              ),
-                            )
-                          : const Text(
-                              'Save',
-                              style: TextStyle(fontSize: 16, color: Colors.white),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.blue,
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 24,
+                              vertical: 12,
                             ),
+                          ),
+                          onPressed: _isLoading ? null : _updateProfile,
+                          child: _isLoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  ),
+                                )
+                              : const Text(
+                                  'Save',
+                                  style: TextStyle(fontSize: 16, color: Colors.white),
+                                ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
-            ),
-          ),
+              ),
+            );
+          }
         );
       },
     );
@@ -224,18 +254,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
         throw Exception('Not authenticated');
       }
 
-      // Create multipart request
       var request = http.MultipartRequest(
         'POST',
         Uri.parse('${Config.baseApiUrl}/profile/uploadPhoto'),
       );
 
-      // Add authorization header
       request.headers.addAll({
         'Authorization': 'Bearer $token',
       });
 
-      // Add file to request
       request.files.add(
         await http.MultipartFile.fromPath(
           'photo',
@@ -243,12 +270,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       );
 
-      // Send request
       final streamedResponse = await request.send();
       final response = await http.Response.fromStream(streamedResponse);
 
       if (response.statusCode == 200) {
-        // Refresh profile data to get updated photo URL
         await Provider.of<AuthProvider>(context, listen: false).fetchProfile();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -278,8 +303,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     try {
       final XFile? image = await _picker.pickImage(
         source: ImageSource.gallery,
-        imageQuality: 80, // Compress image
-        maxWidth: 1024, // Limit image size
+        imageQuality: 80,
+        maxWidth: 1024,
         maxHeight: 1024,
       );
 
@@ -295,7 +320,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
-  // Reusable Input Fields
   Widget _buildTextField({
     required String label,
     String? initialValue,
@@ -346,9 +370,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildDateField({
     required String label,
-    required DateTime value,
+    required DateTime? value,
     required IconData icon,
-    required Function(DateTime) onDateSelected,
+    required Function(DateTime?) onDateSelected,
   }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
@@ -357,15 +381,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
           labelText: label,
           prefixIcon: Icon(icon),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          suffixIcon: value != null ? IconButton(
+            icon: Icon(Icons.clear),
+            onPressed: () {
+              onDateSelected(null);
+            },
+          ) : null,
         ),
         readOnly: true,
         controller: TextEditingController(
-          text: DateFormat('dd/MM/yyyy').format(value),
+          text: value != null ? DateFormat('dd/MM/yyyy').format(value) : 'Select date',
         ),
         onTap: () async {
           DateTime? pickedDate = await showDatePicker(
             context: context,
-            initialDate: value,
+            initialDate: value ?? DateTime.now(),
             firstDate: DateTime(1900),
             lastDate: DateTime.now(),
           );
@@ -390,7 +420,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         borderRadius: BorderRadius.circular(10),
         boxShadow: [
           BoxShadow(
-            color: Colors.grey.withOpacity(0.1),
+            color: Colors.grey.withValues(alpha: 0.1),
             spreadRadius: 1,
             blurRadius: 2,
             offset: const Offset(0, 1),
@@ -442,6 +472,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           profile.lastName,
         ].where((name) => name != null && name.isNotEmpty).join(' ');
 
+        final displayGender = profile.gender ?? 'Not specified';
+        final displayBirthday = profile.dob != null 
+            ? (() {
+                try {
+                  final date = DateTime.parse(profile.dob!);
+                  return DateFormat('dd MMMM yyyy').format(date);
+                } catch (e) {
+                  return '-';
+                }
+              })()
+            : '-';
+
         return Scaffold(
           backgroundColor: Colors.grey[100],
           appBar: AppBar(
@@ -479,7 +521,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         '${(profile.firstName?.substring(0, 1).toUpperCase() ?? "")}'
                             '${(profile.lastName?.substring(0, 1).toUpperCase() ?? "")}',
                         style: const TextStyle(
-                            fontSize: 36), // Slightly smaller to fit 2 letters
+                            fontSize: 36),
                       )
                           : null,
                     ),
@@ -514,12 +556,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                     _buildProfileInfo(
                       label: 'Gender',
-                      value: _gender,
+                      value: displayGender,
                       icon: Icons.wc,
                     ),
                     _buildProfileInfo(
                       label: 'Date of Birth',
-                      value: DateFormat('dd MMMM yyyy').format(_birthday),
+                      value: displayBirthday,
                       icon: Icons.calendar_today,
                     ),
                     _buildProfileInfo(
@@ -535,7 +577,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   padding: const EdgeInsets.symmetric(horizontal: 16),
                   child: ElevatedButton(
                     onPressed: () async {
-                      // Show confirmation dialog
                       final shouldLogout = await showDialog<bool>(
                         context: context,
                         builder: (context) => AlertDialog(
