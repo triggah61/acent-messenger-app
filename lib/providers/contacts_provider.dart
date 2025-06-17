@@ -14,6 +14,7 @@ class BackendContact {
   final String dialCode;
   final String phone;
   final String? photo;
+  final String searchedPhone;
 
   BackendContact({
     required this.id,
@@ -23,17 +24,31 @@ class BackendContact {
     required this.dialCode,
     required this.phone,
     this.photo,
+    required this.searchedPhone,
   });
 
   factory BackendContact.fromJson(Map<String, dynamic> json) {
+    // Handle MongoDB ObjectId format
+    String id = '';
+    if (json['_id'] != null) {
+      if (json['_id'] is Map<String, dynamic> && json['_id']['\$oid'] != null) {
+        // Handle ObjectId format: {"$oid": "64abc123..."}
+        id = json['_id']['\$oid'].toString();
+      } else {
+        // Handle string format or other formats
+        id = json['_id'].toString();
+      }
+    }
+    
     return BackendContact(
-      id: json['_id'],
-      firstName: json['firstName'],
-      lastName: json['lastName'],
-      username: json['username'],
-      dialCode: json['dialCode'],
-      phone: json['phone'],
-      photo: json['photo'],
+      id: id,
+      firstName: json['firstName']?.toString() ?? '',
+      lastName: json['lastName']?.toString() ?? '',
+      username: json['username']?.toString(),
+      dialCode: json['dialCode']?.toString() ?? '',
+      phone: json['phone']?.toString() ?? '',
+      photo: json['photo']?.toString(),
+      searchedPhone: json['searchedPhone']?.toString() ?? '',
     );
   }
 }
@@ -59,16 +74,21 @@ class FormattedContact {
     this.dialCode,
   });
 
-  factory FormattedContact.fromPhoneContact(Contact contact, bool isExisting, {BackendContact? backendContact}) {
+  factory FormattedContact.fromPhoneContact(
+    Contact contact, 
+    bool isExisting, 
+    {BackendContact? backendContact, String? matchedPhoneNumber}
+  ) {
     // Split the display name into first and last name
     final nameParts = contact.displayName.split(' ');
     final firstName = nameParts.isNotEmpty ? nameParts.first : '';
     final lastName = nameParts.length > 1 ? nameParts.sublist(1).join(' ') : '';
 
-    // Get the first phone number if available
-    final number = contact.phones.isNotEmpty 
-        ? contact.phones.first.number.replaceAll(RegExp(r'[^0-9+]'), '')
-        : '';
+    // Use the matched phone number if provided, otherwise use the first available
+    final number = matchedPhoneNumber ?? 
+        (contact.phones.isNotEmpty 
+            ? contact.phones.first.number.replaceAll(RegExp(r'[^0-9+]'), '')
+            : '');
 
     // Convert photo to base64 if available
     String? photoBase64;
@@ -147,8 +167,6 @@ class ContactsProvider with ChangeNotifier {
 
       // Check existing contacts with backend
       final existingContacts = await _checkExistingContacts(phoneNumbers);
-      
-      print('Existing contacts from backend: $existingContacts');
 
       // Format contacts
       final formattedContacts = contacts.map((contact) {
@@ -157,27 +175,21 @@ class ContactsProvider with ChangeNotifier {
             .where((number) => number.isNotEmpty)
             .toList();
 
-        print('Processing contact: ${contact.displayName}');
-        print('Phone numbers: $contactNumbers');
-
-        // Find matching backend contact
+        // Find matching backend contact using searchedPhone field
         BackendContact? matchingBackendContact;
+        String? matchedNumber;
         for (var number in contactNumbers) {
-          try {
-            matchingBackendContact = existingContacts.firstWhere(
-              (backendContact) {
-                final fullNumber = '${backendContact.dialCode}${backendContact.phone}';
-                final matches = fullNumber == number || fullNumber.replaceAll('+', '') == number.replaceAll('+', '');
-                if (matches) {
-                  print('Found match for $number: ${backendContact.firstName} ${backendContact.lastName}');
-                }
-                return matches;
-              },
-            );
-            if (matchingBackendContact != null) break;
-          } catch (e) {
-            // No matching contact found, continue to next number
-            continue;
+          // Check each backend contact for this number
+          for (var backendContact in existingContacts) {
+            if (backendContact.searchedPhone == number) {
+              matchingBackendContact = backendContact;
+              matchedNumber = number;
+              break;
+            }
+          }
+          
+          if (matchingBackendContact != null) {
+            break;
           }
         }
 
@@ -186,8 +198,9 @@ class ContactsProvider with ChangeNotifier {
           contact, 
           isExisting,
           backendContact: matchingBackendContact,
+          matchedPhoneNumber: matchedNumber,
         );
-        print('Formatted contact: $formattedContact');
+        
         return formattedContact;
       }).toList();
 
@@ -215,7 +228,6 @@ class ContactsProvider with ChangeNotifier {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        print('Backend response: $data');
         
         // Handle both array and map responses
         List<dynamic> contactsJson;
@@ -227,7 +239,16 @@ class ContactsProvider with ChangeNotifier {
           contactsJson = [];
         }
         
-        return contactsJson.map((json) => BackendContact.fromJson(json)).toList();
+        return contactsJson.map((json) {
+          try {
+            return BackendContact.fromJson(json);
+          } catch (e) {
+            print('❌ Error parsing backend contact: $e');
+            print('   JSON: $json');
+            // Return null for invalid contacts, will be filtered out
+            return null;
+          }
+        }).where((contact) => contact != null).cast<BackendContact>().toList();
       }
       return [];
     } catch (e) {
