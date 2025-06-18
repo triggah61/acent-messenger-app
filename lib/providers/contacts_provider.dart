@@ -256,4 +256,12 @@ class ContactsProvider with ChangeNotifier {
       return [];
     }
   }
+
+  // Clear all contacts data (for logout)
+  void clearAllData() {
+    _formattedContacts.clear();
+    _isLoading = false;
+    _permissionDenied = false;
+    notifyListeners();
+  }
 } 

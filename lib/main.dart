@@ -50,6 +50,24 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     print("App - MyApp: Building app widget");
+    
+    // Setup clear data callbacks after providers are available
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      final chatProvider = Provider.of<ChatProvider>(context, listen: false);
+      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
+      final groupProvider = Provider.of<GroupProvider>(context, listen: false);
+      final contactsProvider = Provider.of<ContactsProvider>(context, listen: false);
+      
+      // Set callback to clear all data when logout is called
+      authProvider.setClearAllDataCallback(() {
+        chatProvider.clearAllData();
+        walletProvider.clearAllData();
+        groupProvider.clearAllData();
+        contactsProvider.clearAllData();
+      });
+    });
+    
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Chat App',

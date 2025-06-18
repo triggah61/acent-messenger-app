@@ -8,6 +8,7 @@ import '../../commonwidgets/botttommnavigationbar.dart';
 import '../../widgets/custombtn.dart';
 import '../../widgets/detailstext1.dart';
 import '../../providers/auth_provider.dart';
+import '../splash/splash.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
   final String phone;
@@ -148,9 +149,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
               .handleLoginSuccess(data['data']['token']);
 
           if (mounted) {
+            // Let the splash screen handle the navigation based on profile completion
             Navigator.pushReplacement(
               context,
-              _createRoute(const BottomNavBarScreen()),
+              _createRoute(const SplashScreen()),
             );
           }
         }

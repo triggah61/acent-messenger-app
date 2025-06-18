@@ -198,6 +198,25 @@ class WalletProvider with ChangeNotifier {
     ]);
   }
 
+  // Clear all wallet data (for logout)
+  void clearAllData() {
+    _wallet = null;
+    _transactions.clear();
+    _networkFees.clear();
+    _feeEstimation = null;
+    _transactionPagination = null;
+    _isLoading = false;
+    _isLoadingFees = false;
+    _isLoadingTransactions = false;
+    _isLoadingMoreTransactions = false;
+    _hasTransactionError = false;
+    _error = null;
+    _feeError = null;
+    _transactionError = null;
+    _lastFeeAmount = null;
+    notifyListeners();
+  }
+
   // Create withdrawal
   Future<bool> createWithdrawal({
     required double amount,

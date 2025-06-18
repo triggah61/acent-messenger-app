@@ -119,4 +119,15 @@ class GroupProvider with ChangeNotifier {
     print("GroupProvider - refreshSessions: Starting refresh");
     await fetchSessions(refresh: true);
   }
+
+  // Clear all group data (for logout)
+  void clearAllData() {
+    _sessions.clear();
+    _isLoading = false;
+    _hasMore = true;
+    _currentPage = 1;
+    // Disconnect socket to prevent old data from coming through
+    _socketService.disconnect();
+    notifyListeners();
+  }
 } 

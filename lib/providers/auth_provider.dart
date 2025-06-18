@@ -14,6 +14,9 @@ class AuthProvider with ChangeNotifier {
   bool _isInitialized = false;
   String? _token;
   String? _userId;
+  
+  // Callback to clear data from other providers
+  Function()? _clearAllDataCallback;
 
   Profile? get profile => _profile;
   bool get isLoading => _isLoading;
@@ -22,6 +25,10 @@ class AuthProvider with ChangeNotifier {
   String? get token => _token;
   String? get userId => _userId;
   
+  // Set callback to clear data from other providers
+  void setClearAllDataCallback(Function() callback) {
+    _clearAllDataCallback = callback;
+  }
 
   Future<String?> getUserId() async {
     if (_userId != null) return _userId;
@@ -94,9 +101,19 @@ class AuthProvider with ChangeNotifier {
     _isInitialized = false;
     _token = null;
     _userId = null;
+    
+    // Clear secure storage
     final storage = const FlutterSecureStorage();
     await storage.delete(key: 'token');
     await storage.delete(key: 'userId');
+    await storage.delete(key: 'jwt_token');
+    await storage.delete(key: 'phone_number');
+    
+    // Clear data from all other providers
+    if (_clearAllDataCallback != null) {
+      _clearAllDataCallback!();
+    }
+    
     notifyListeners();
   }
 
