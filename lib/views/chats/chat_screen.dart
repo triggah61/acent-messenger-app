@@ -116,13 +116,13 @@ class _HomeScreenState extends State<HomeScreen> {
       
       // Show success message
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Messages refreshed successfully'),
-            backgroundColor: Colors.green,
-            duration: Duration(seconds: 2),
-          ),
-        );
+        // ScaffoldMessenger.of(context).showSnackBar(
+        //   const SnackBar(
+        //     content: Text('Messages refreshed successfully'),
+        //     backgroundColor: Colors.green,
+        //     duration: Duration(seconds: 2),
+        //   ),
+        // );
       }
     } catch (e) {
       // Show error message
@@ -257,38 +257,69 @@ class _HomeScreenState extends State<HomeScreen> {
                           topRight: Radius.circular(30),
                         ),
                       ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Consumer<ChatProvider>(
-                          builder: (context, chatProvider, child) {
-                            print("HomeScreen - build: Consumer rebuilding. Sessions: " +
-                                "${chatProvider.sessions.length}, Loading: ${chatProvider.isLoading}");
+                      child: RefreshIndicator(
+                        onRefresh: _refreshData,
+                        child: Padding(
+                          padding: const EdgeInsets.all(24.0),
+                          child: Consumer<ChatProvider>(
+                            builder: (context, chatProvider, child) {
+                              print("HomeScreen - build: Consumer rebuilding. Sessions: " +
+                                  "${chatProvider.sessions.length}, Loading: ${chatProvider.isLoading}");
 
-                            if (chatProvider.sessions.isEmpty &&
-                                chatProvider.isLoading) {
-                              print(
-                                  "HomeScreen - build: Showing loading indicator");
-                              return const Center(
-                                  child: CircularProgressIndicator());
-                            }
-
-                            if (chatProvider.sessions.isEmpty) {
-                              print(
-                                  "HomeScreen - build: No sessions to display");
-                              return const Center(
-                                  child: Text('No conversations yet'));
-                            }
-
-                            print(
-                                "HomeScreen - build: Building session list with ${chatProvider.sessions.length} items");
-                            return RefreshIndicator(
-                              onRefresh: () {
+                              if (chatProvider.sessions.isEmpty &&
+                                  chatProvider.isLoading) {
                                 print(
-                                    "HomeScreen - build: Refreshing sessions and contacts");
-                                return _refreshData();
-                              },
-                              child: ListView.builder(
+                                    "HomeScreen - build: Showing loading indicator");
+                                return const Center(
+                                    child: CircularProgressIndicator());
+                              }
+
+                              if (chatProvider.sessions.isEmpty) {
+                                print(
+                                    "HomeScreen - build: No sessions to display");
+                                return ListView(
+                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  children: [
+                                    Container(
+                                      height: MediaQuery.of(context).size.height * 0.4,
+                                      child: Center(
+                                        child: Column(
+                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          children: [
+                                            Icon(
+                                              Icons.chat_bubble_outline,
+                                              size: 64,
+                                              color: Colors.grey[400],
+                                            ),
+                                            const SizedBox(height: 16),
+                                            Text(
+                                              'No conversations yet',
+                                              style: TextStyle(
+                                                color: Colors.grey[600],
+                                                fontSize: 16,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              'Pull down to refresh',
+                                              style: TextStyle(
+                                                color: Colors.grey[500],
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                );
+                              }
+
+                              print(
+                                  "HomeScreen - build: Building session list with ${chatProvider.sessions.length} items");
+                              return ListView.builder(
                                 controller: _scrollController,
+                                physics: const AlwaysScrollableScrollPhysics(),
                                 itemCount: chatProvider.sessions.length +
                                     (chatProvider.hasMore ? 1 : 0),
                                 itemBuilder: (context, index) {
@@ -308,9 +339,9 @@ class _HomeScreenState extends State<HomeScreen> {
                                       "HomeScreen - build: Building session tile for ${session.title}");
                                   return _ChatSessionTile(session: session);
                                 },
-                              ),
-                            );
-                          },
+                              );
+                            },
+                          ),
                         ),
                       ),
                     ),
