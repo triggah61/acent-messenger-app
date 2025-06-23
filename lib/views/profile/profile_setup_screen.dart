@@ -22,6 +22,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   
   late TextEditingController _firstNameController;
   late TextEditingController _lastNameController;
+  late TextEditingController _usernameController;
   String _gender = 'Male';
   DateTime _birthday = DateTime(2000, 1, 1);
 
@@ -31,12 +32,14 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
     final profile = Provider.of<AuthProvider>(context, listen: false).profile;
     _firstNameController = TextEditingController(text: profile?.firstName ?? '');
     _lastNameController = TextEditingController(text: profile?.lastName ?? '');
+    _usernameController = TextEditingController(text: profile?.username ?? '');
   }
 
   @override
   void dispose() {
     _firstNameController.dispose();
     _lastNameController.dispose();
+    _usernameController.dispose();
     super.dispose();
   }
 
@@ -65,8 +68,9 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
         body: jsonEncode({
           'firstName': _firstNameController.text,
           'lastName': _lastNameController.text,
+          'username': _usernameController.text,
           'gender': _gender,
-          'birthday': DateFormat('yyyy-MM-dd').format(_birthday),
+          'dob': DateFormat('yyyy-MM-dd').format(_birthday),
         }),
       );
 
@@ -234,6 +238,23 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 validator: (value) {
                   if (value == null || value.isEmpty) {
                     return 'Please enter your last name';
+                  }
+                  return null;
+                },
+              ),
+              _buildTextField(
+                label: 'Username',
+                controller: _usernameController,
+                icon: Icons.alternate_email,
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return 'Please enter a username';
+                  }
+                  if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(value)) {
+                    return 'Username can only contain letters, numbers, and underscores';
+                  }
+                  if (value.length < 3) {
+                    return 'Username must be at least 3 characters long';
                   }
                   return null;
                 },

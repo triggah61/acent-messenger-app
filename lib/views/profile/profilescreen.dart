@@ -25,6 +25,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   bool _isUploadingPhoto = false;
   late TextEditingController _firstNameController;
   late TextEditingController _lastNameController;
+  late TextEditingController _usernameController;
   String _gender = 'Male';
   DateTime? _birthday;
   final ImagePicker _picker = ImagePicker();
@@ -35,6 +36,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final profile = Provider.of<AuthProvider>(context, listen: false).profile;
     _firstNameController = TextEditingController(text: profile?.firstName ?? '');
     _lastNameController = TextEditingController(text: profile?.lastName ?? '');
+    _usernameController = TextEditingController(text: profile?.username ?? '');
     
     _gender = profile?.gender ?? 'Male';
     
@@ -53,6 +55,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   void dispose() {
     _firstNameController.dispose();
     _lastNameController.dispose();
+    _usernameController.dispose();
     super.dispose();
   }
 
@@ -60,6 +63,28 @@ class _ProfileScreenState extends State<ProfileScreen> {
     if (_firstNameController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter your first name')),
+      );
+      return;
+    }
+
+    if (_usernameController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter a username')),
+      );
+      return;
+    }
+
+    // Basic username validation
+    if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(_usernameController.text)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username can only contain letters, numbers, and underscores')),
+      );
+      return;
+    }
+
+    if (_usernameController.text.length < 3) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Username must be at least 3 characters long')),
       );
       return;
     }
@@ -78,6 +103,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
       final requestBody = {
         'firstName': _firstNameController.text,
         'lastName': _lastNameController.text,
+        'username': _usernameController.text,
         'gender': _gender,
       };
 
@@ -125,6 +151,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     final profile = Provider.of<AuthProvider>(context, listen: false).profile;
     _firstNameController.text = profile?.firstName ?? '';
     _lastNameController.text = profile?.lastName ?? '';
+    _usernameController.text = profile?.username ?? '';
     
     _gender = profile?.gender ?? 'Male';
     if (profile?.dob != null) {
@@ -165,6 +192,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       label: 'Last Name',
                       controller: _lastNameController,
                       icon: Icons.person,
+                    ),
+                    _buildTextField(
+                      label: 'Username',
+                      controller: _usernameController,
+                      icon: Icons.alternate_email,
                     ),
                     _buildTextField(
                       label: 'Phone Number',
@@ -554,6 +586,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       value: '${profile.dialCode ?? ''} ${profile.phone}',
                       icon: Icons.phone,
                     ),
+                    if (profile.username != null && profile.username!.isNotEmpty)
+                      _buildProfileInfo(
+                        label: 'Username',
+                        value: '@${profile.username}',
+                        icon: Icons.alternate_email,
+                      ),
                     _buildProfileInfo(
                       label: 'Gender',
                       value: displayGender,

@@ -101,6 +101,13 @@ class _UserInformationScreenState extends State<UserInformationScreen> {
             fullName,
             style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w600, color: Color(0xFF343A40)),
           ),
+          if (profile?.username != null && profile!.username!.isNotEmpty) ...[
+            const SizedBox(height: 4),
+            Text(
+              '@${profile.username}',
+              style: const TextStyle(fontSize: 16, color: Colors.blue, fontWeight: FontWeight.w500),
+            ),
+          ],
           const SizedBox(height: 8),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -112,10 +119,8 @@ class _UserInformationScreenState extends State<UserInformationScreen> {
               IconButton(
                 icon: const Icon(Icons.copy, size: 20, color: Colors.grey),
                 onPressed: () {
-                  if (fullPhone != null) {
-                    Clipboard.setData(ClipboardData(text: fullPhone));
-                  }
-                },
+                  Clipboard.setData(ClipboardData(text: fullPhone));
+                                },
               ),
             ],
           ),

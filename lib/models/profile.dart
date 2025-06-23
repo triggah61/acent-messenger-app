@@ -4,6 +4,7 @@ class Profile {
   final String? dialCode;
   final String? firstName;
   final String? lastName;
+  final String? username;
   final String? status;
   final String? photo;
   final String? gender;
@@ -15,6 +16,7 @@ class Profile {
     this.dialCode,
     this.firstName,
     this.lastName,
+    this.username,
     this.status,
     this.photo,
     this.gender,
@@ -28,6 +30,7 @@ class Profile {
       dialCode: json['dialCode'],
       firstName: json['firstName'],
       lastName: json['lastName'],
+      username: json['username'],
       status: json['status'],
       photo: json['photo'],
       gender: json['gender'],
@@ -42,6 +45,7 @@ class Profile {
       'dialCode': dialCode,
       'firstName': firstName,
       'lastName': lastName,
+      'username': username,
       'status': status,
       'photo': photo,
       'gender': gender,
