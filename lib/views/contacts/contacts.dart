@@ -54,7 +54,7 @@ class ContactsScreen extends StatefulWidget {
 class _ContactsScreenState extends State<ContactsScreen> {
   final ChatService _chatService = ChatService(AuthService());
   final AuthService _authService = AuthService();
-  
+
   // Search related state
   bool _isSearching = false;
   final TextEditingController _searchController = TextEditingController();
@@ -68,7 +68,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     super.initState();
     // Load contacts when screen initializes
     Future.microtask(() => context.read<ContactsProvider>().loadContacts());
-    
+
     // Listen to search input changes
     _searchController.addListener(_performSearch);
   }
@@ -84,7 +84,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
   void _performSearch() {
     final provider = context.read<ContactsProvider>();
     final query = _searchController.text.toLowerCase().trim();
-    
+
     if (query.isEmpty) {
       setState(() {
         _filteredContacts = _sortContacts(provider.formattedContacts);
@@ -102,12 +102,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
           final fullName = '$firstName $lastName'.trim();
           final number = contact.number?.toLowerCase() ?? '';
           final username = contact.username?.toLowerCase() ?? '';
-          
+
           return firstName.contains(query) ||
-                 lastName.contains(query) ||
-                 fullName.contains(query) ||
-                 number.contains(query) ||
-                 username.contains(query);
+              lastName.contains(query) ||
+              fullName.contains(query) ||
+              number.contains(query) ||
+              username.contains(query);
         }).toList(),
       );
     });
@@ -154,12 +154,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
-        final List<dynamic> results = data is List ? data : (data['users'] ?? []);
-        
+        final List<dynamic> results =
+            data is List ? data : (data['users'] ?? []);
+
         setState(() {
-          _globalSearchResults = results
-              .map((json) => GlobalContact.fromJson(json))
-              .toList();
+          _globalSearchResults =
+              results.map((json) => GlobalContact.fromJson(json)).toList();
         });
       } else {
         setState(() {
@@ -180,19 +180,21 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
   List<FormattedContact> _sortContacts(List<FormattedContact> contacts) {
     final sortedContacts = List<FormattedContact>.from(contacts);
-    
+
     sortedContacts.sort((a, b) {
       // First sort by existing users (registered users first)
       if (a.isExisting && !b.isExisting) return -1;
       if (!a.isExisting && b.isExisting) return 1;
-      
+
       // Then sort alphabetically by name
-      final nameA = '${a.firstName ?? ''} ${a.lastName ?? ''}'.trim().toLowerCase();
-      final nameB = '${b.firstName ?? ''} ${b.lastName ?? ''}'.trim().toLowerCase();
-      
+      final nameA =
+          '${a.firstName ?? ''} ${a.lastName ?? ''}'.trim().toLowerCase();
+      final nameB =
+          '${b.firstName ?? ''} ${b.lastName ?? ''}'.trim().toLowerCase();
+
       return nameA.compareTo(nameB);
     });
-    
+
     return sortedContacts;
   }
 
@@ -219,12 +221,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
       try {
         // Show loading indicator
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Opening chat...'),
-              duration: Duration(seconds: 1),
-            ),
-          );
+          // ScaffoldMessenger.of(context).showSnackBar(
+          //   const SnackBar(
+          //     content: Text('Opening chat...'),
+          //     duration: Duration(seconds: 1),
+          //   ),
+          // );
         }
 
         // Find or create chat session
@@ -270,12 +272,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
     try {
       // Show loading indicator
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Opening chat...'),
-            duration: Duration(seconds: 1),
-          ),
-        );
+        // ScaffoldMessenger.of(context).showSnackBar(
+        //   const SnackBar(
+        //     content: Text('Opening chat...'),
+        //     duration: Duration(seconds: 1),
+        //   ),
+        // );
       }
 
       // Find or create chat session for global contact
@@ -328,7 +330,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     onPressed: _toggleSearch,
                   ),
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 style: const TextStyle(color: Colors.black),
               ),
@@ -356,7 +359,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
 
       // Trigger contacts reload from ContactsProvider
       await context.read<ContactsProvider>().loadContacts();
-      
+
       // Show success message
       if (mounted) {
         // ScaffoldMessenger.of(context).showSnackBar(
@@ -400,7 +403,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
             // Local Search Results
             if (hasLocalResults) ...[
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                 child: Text(
                   'My Contacts (${_filteredContacts.length})',
                   style: TextStyle(
@@ -418,9 +422,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 itemBuilder: (context, index) {
                   final contact = _filteredContacts[index];
                   return _buildContactItem(
-                    name: '${contact.firstName ?? ''} ${contact.lastName ?? ''}'.trim(),
+                    name: '${contact.firstName ?? ''} ${contact.lastName ?? ''}'
+                        .trim(),
                     username: contact.username,
-                    status: contact.isExisting ? 'Send Message' : 'Send Invitation',
+                    status:
+                        contact.isExisting ? 'Send Message' : 'Send Invitation',
                     imageUrl: contact.photo != null && contact.isExisting
                         ? Config.getPhotoUrl(contact.photo)
                         : contact.photo != null
@@ -437,7 +443,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
             if (_isGlobalSearchLoading) ...[
               if (hasLocalResults) const SizedBox(height: 16),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                 child: Text(
                   'Global Search',
                   style: TextStyle(
@@ -454,7 +461,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
             ] else if (hasGlobalResults) ...[
               if (hasLocalResults) const SizedBox(height: 16),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
                 child: Text(
                   'Global Search (${_globalSearchResults.length})',
                   style: TextStyle(
@@ -480,7 +488,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
             ],
 
             // No Results Message
-            if (!hasLocalResults && !hasGlobalResults && !_isGlobalSearchLoading) ...[
+            if (!hasLocalResults &&
+                !hasGlobalResults &&
+                !_isGlobalSearchLoading) ...[
               Container(
                 height: MediaQuery.of(context).size.height * 0.5,
                 child: Center(
@@ -528,11 +538,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return Consumer<ContactsProvider>(
       builder: (context, contactsProvider, child) {
         // Initialize filtered contacts if empty
-        if (_filteredContacts.isEmpty && contactsProvider.formattedContacts.isNotEmpty) {
+        if (_filteredContacts.isEmpty &&
+            contactsProvider.formattedContacts.isNotEmpty) {
           _filteredContacts = _sortContacts(contactsProvider.formattedContacts);
         }
 
-        final contactsToShow = _sortContacts(contactsProvider.formattedContacts);
+        final contactsToShow =
+            _sortContacts(contactsProvider.formattedContacts);
 
         return RefreshIndicator(
           onRefresh: _refreshContacts,
@@ -581,9 +593,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     itemBuilder: (context, index) {
                       final contact = contactsToShow[index];
                       return _buildContactItem(
-                        name: '${contact.firstName ?? ''} ${contact.lastName ?? ''}'.trim(),
+                        name:
+                            '${contact.firstName ?? ''} ${contact.lastName ?? ''}'
+                                .trim(),
                         username: contact.username,
-                        status: contact.isExisting ? 'Send Message' : 'Send Invitation',
+                        status: contact.isExisting
+                            ? 'Send Message'
+                            : 'Send Invitation',
                         imageUrl: contact.photo != null && contact.isExisting
                             ? Config.getPhotoUrl(contact.photo)
                             : contact.photo != null
@@ -729,7 +745,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  if (username != null && username.isNotEmpty && isExisting) ...[
+                  if (username != null &&
+                      username.isNotEmpty &&
+                      isExisting) ...[
                     Text(
                       '@$username',
                       style: TextStyle(
@@ -764,7 +782,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
     required VoidCallback onTap,
   }) {
     final name = '${contact.firstName} ${contact.lastName}'.trim();
-    final imageUrl = contact.photo != null ? Config.getPhotoUrl(contact.photo!) : '';
+    final imageUrl =
+        contact.photo != null ? Config.getPhotoUrl(contact.photo!) : '';
 
     return InkWell(
       onTap: onTap,
@@ -791,7 +810,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
                       fontWeight: FontWeight.w500,
                     ),
                   ),
-                  if (contact.username != null && contact.username!.isNotEmpty) ...[
+                  if (contact.username != null &&
+                      contact.username!.isNotEmpty) ...[
                     Text(
                       '@${contact.username}',
                       style: TextStyle(
@@ -820,7 +840,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
       ),
     );
   }
-  
+
   String _getInitials(String? name) {
     if (name == null || name.trim().isEmpty) {
       return '?';
