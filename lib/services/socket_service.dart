@@ -7,7 +7,7 @@ class SocketService {
   static SocketService? _instance;
   IO.Socket? _socket;
   final AuthService _authService = AuthService();
-  final Map<String, Function(dynamic)> _listeners = {};
+  final Map<String, List<Function(dynamic)>> _listeners = {};
 
   // Singleton pattern
   static SocketService get instance {
@@ -49,6 +49,42 @@ class SocketService {
     });
   }
 
+  // Helper method to add a listener for an event
+  Function(dynamic) _addListener(String event, Function(dynamic) callback) {
+    if (!_listeners.containsKey(event)) {
+      _listeners[event] = [];
+      
+      // Set up the socket listener for this event type (only once per event type)
+      _socket?.on(event, (data) {
+        // Call all registered callbacks for this event
+        final listeners = List<Function(dynamic)>.from(_listeners[event] ?? []);
+        for (var listener in listeners) {
+          try {
+            listener(data);
+          } catch (e) {
+            print('Error in socket listener for event $event: $e');
+          }
+        }
+      });
+    }
+    
+    _listeners[event]!.add(callback);
+    return callback; // Return the callback so it can be used for removal
+  }
+
+  // Helper method to remove a specific listener
+  void _removeListener(String event, Function(dynamic) callback) {
+    if (_listeners.containsKey(event)) {
+      _listeners[event]!.remove(callback);
+      
+      // If no more listeners for this event, remove the socket listener
+      if (_listeners[event]!.isEmpty) {
+        _socket?.off(event);
+        _listeners.remove(event);
+      }
+    }
+  }
+
   // Join a chat session
   void joinChatSession(String chatSessionId) {
     _socket?.emit('join_chat', chatSessionId);
@@ -59,71 +95,85 @@ class SocketService {
     _socket?.emit('leave_chat', chatSessionId);
   }
 
-  // Listen for new messages
-  void onNewMessage(Function(Message) callback) {
+  // Listen for new messages - now returns the callback for removal
+  Function(dynamic) onNewMessage(Function(Message) callback) {
     final listener = (data) {
       print('new_message: $data');
-      final message = Message.fromJson(data);
-      callback(message);
+      try {
+        final message = Message.fromJson(data);
+        callback(message);
+      } catch (e) {
+        print('Error parsing message in onNewMessage: $e');
+      }
     };
-    _socket?.on('new_message', listener);
-    _listeners['new_message'] = listener;
+    
+    return _addListener('new_message', listener);
   }
 
-  void onNewSession(Function(List<dynamic>) callback) {
+  // Listen for new sessions - now returns the callback for removal
+  Function(dynamic) onNewSession(Function(List<dynamic>) callback) {
     final listener = (data) {
-      callback(data);
+      try {
+        callback(data);
+      } catch (e) {
+        print('Error in onNewSession callback: $e');
+      }
     };
-    _socket?.on('new_chat_session', listener);
-    _listeners['new_chat_session'] = listener;
+    
+    return _addListener('new_chat_session', listener);
   }
 
-  void removeNewSessionListener() {
-    if (_listeners.containsKey('new_chat_session')) {
-      _socket?.off('new_chat_session', _listeners['new_chat_session']);
-      _listeners.remove('new_chat_session');
+  // Remove a specific new message listener
+  void removeNewMessageListener(Function(dynamic)? callback) {
+    if (callback != null) {
+      _removeListener('new_message', callback);
     }
   }
 
-  // Remove new message listener
-  void removeNewMessageListener() {
-    if (_listeners.containsKey('new_message')) {
-      _socket?.off('new_message', _listeners['new_message']);
-      _listeners.remove('new_message');
+  // Remove a specific new session listener
+  void removeNewSessionListener(Function(dynamic)? callback) {
+    if (callback != null) {
+      _removeListener('new_chat_session', callback);
     }
   }
 
-  // Listen for typing events
-  void onTyping(Function(String userId, bool isTyping) callback) {
+  // Listen for typing events - now returns the callback for removal
+  Function(dynamic) onTyping(Function(String userId, bool isTyping) callback) {
     final listener = (data) {
-      callback(data['userId'], data['isTyping']);
+      try {
+        callback(data['userId'], data['isTyping']);
+      } catch (e) {
+        print('Error in onTyping callback: $e');
+      }
     };
-    _socket?.on('typing', listener);
-    _listeners['typing'] = listener;
+    
+    return _addListener('typing', listener);
   }
 
-  // Remove typing listener
-  void removeTypingListener() {
-    if (_listeners.containsKey('typing')) {
-      _socket?.off('typing', _listeners['typing']);
-      _listeners.remove('typing');
+  // Remove a specific typing listener
+  void removeTypingListener(Function(dynamic)? callback) {
+    if (callback != null) {
+      _removeListener('typing', callback);
     }
   }
 
-  // Listen for reaction updates
-  void onMessageReactionsUpdated(Function(Map<String, dynamic>) callback) {
+  // Listen for reaction updates - now returns the callback for removal
+  Function(dynamic) onMessageReactionsUpdated(Function(Map<String, dynamic>) callback) {
     final listener = (data) {
-      callback(data);
+      try {
+        callback(data);
+      } catch (e) {
+        print('Error in onMessageReactionsUpdated callback: $e');
+      }
     };
-    _socket?.on('message_reactions_updated', listener);
-    _listeners['message_reactions_updated'] = listener;
+    
+    return _addListener('message_reactions_updated', listener);
   }
 
-  // Remove reaction updates listener
-  void removeReactionUpdatesListener() {
-    if (_listeners.containsKey('message_reactions_updated')) {
-      _socket?.off('message_reactions_updated', _listeners['message_reactions_updated']);
-      _listeners.remove('message_reactions_updated');
+  // Remove a specific reaction updates listener
+  void removeReactionUpdatesListener(Function(dynamic)? callback) {
+    if (callback != null) {
+      _removeListener('message_reactions_updated', callback);
     }
   }
 
@@ -135,13 +185,11 @@ class SocketService {
     });
   }
 
-
-
   // Disconnect socket
   void disconnect() {
     // Remove all listeners
-    _listeners.forEach((event, listener) {
-      _socket?.off(event, listener);
+    _listeners.forEach((event, listeners) {
+      _socket?.off(event);
     });
     _listeners.clear();
     

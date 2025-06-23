@@ -15,6 +15,9 @@ class GroupProvider with ChangeNotifier {
   int _currentPage = 1;
   static const int _limit = 10;
 
+  // Store listener reference for proper cleanup
+  Function(dynamic)? _newSessionListener;
+
   GroupProvider(this._authService) {
     _initializeSocket();
   }
@@ -26,14 +29,14 @@ class GroupProvider with ChangeNotifier {
 
   @override
   void dispose() {
-    _socketService.removeNewSessionListener();
+    _socketService.removeNewSessionListener(_newSessionListener);
     super.dispose();
   }
 
   Future<void> _initializeSocket() async {
     try {
       await _socketService.initializeSocket();
-      _socketService.onNewSession((data) {
+      _newSessionListener = _socketService.onNewSession((data) {
         print("ChatProvider - _initializeSocket: New session event received");
         print(data);
         fetchSessions(refresh: true);
@@ -117,7 +120,13 @@ class GroupProvider with ChangeNotifier {
 
   Future<void> refreshSessions() async {
     print("GroupProvider - refreshSessions: Starting refresh");
-    await fetchSessions(refresh: true);
+    try {
+      await fetchSessions(refresh: true);
+      print("GroupProvider - refreshSessions: Refresh completed successfully");
+    } catch (e) {
+      print("GroupProvider - refreshSessions: Error during refresh - $e");
+      rethrow;
+    }
   }
 
   // Clear all group data (for logout)

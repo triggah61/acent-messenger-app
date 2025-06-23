@@ -1,0 +1,3 @@
+# This is a placeholder file for notification.mp3
+# In production, this would be replaced with an actual MP3 audio file
+# For now, we'll rely on system sounds in the AudioService 

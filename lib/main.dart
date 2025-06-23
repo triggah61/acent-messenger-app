@@ -6,6 +6,7 @@ import 'providers/auth_provider.dart';
 import 'providers/chat_provider.dart';
 import 'providers/group_provider.dart';
 import 'providers/wallet_provider.dart';
+import 'providers/global_event_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
 import 'services/wallet_service.dart';
 import 'providers/contacts_provider.dart';
@@ -21,6 +22,9 @@ void main() {
         ),
         ChangeNotifierProvider<AuthProvider>(
           create: (_) => AuthProvider(),
+        ),
+        ChangeNotifierProvider<GlobalEventProvider>(
+          create: (_) => GlobalEventProvider(),
         ),
         ChangeNotifierProvider<ChatProvider>(
           create: (context) => ChatProvider(
@@ -43,13 +47,18 @@ void main() {
   );
 }
 
-class MyApp extends StatelessWidget {
+class MyApp extends StatefulWidget {
   const MyApp({Key? key}) : super(key: key);
 
-  // This widget is the root of your application.
   @override
-  Widget build(BuildContext context) {
-    print("App - MyApp: Building app widget");
+  State<MyApp> createState() => _MyAppState();
+}
+
+class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
     
     // Setup clear data callbacks after providers are available
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -58,6 +67,7 @@ class MyApp extends StatelessWidget {
       final walletProvider = Provider.of<WalletProvider>(context, listen: false);
       final groupProvider = Provider.of<GroupProvider>(context, listen: false);
       final contactsProvider = Provider.of<ContactsProvider>(context, listen: false);
+      final globalEventProvider = Provider.of<GlobalEventProvider>(context, listen: false);
       
       // Set callback to clear all data when logout is called
       authProvider.setClearAllDataCallback(() {
@@ -65,8 +75,88 @@ class MyApp extends StatelessWidget {
         walletProvider.clearAllData();
         groupProvider.clearAllData();
         contactsProvider.clearAllData();
+        globalEventProvider.disconnectGlobalEvents();
       });
+      
+      // Set callback to initialize global events when user logs in
+      authProvider.setInitializeGlobalEventsCallback((String userId) {
+        globalEventProvider.ensureInitialized(userId);
+      });
+      
+      // Set callbacks for refreshing session lists when new messages arrive
+      globalEventProvider.setRefreshSessionsCallbacks(
+        refreshChatSessions: () {
+          try {
+            debugPrint('Main: Chat sessions refresh callback triggered');
+            return chatProvider.refreshSessions();
+          } catch (e) {
+            debugPrint('Main: Error in chat sessions refresh callback: $e');
+          }
+        },
+        refreshGroupSessions: () {
+          try {
+            debugPrint('Main: Group sessions refresh callback triggered');
+            return groupProvider.refreshSessions();
+          } catch (e) {
+            debugPrint('Main: Error in group sessions refresh callback: $e');
+          }
+        },
+      );
+      debugPrint('Main: Session refresh callbacks have been set');
     });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final globalEventProvider = Provider.of<GlobalEventProvider>(context, listen: false);
+    
+    debugPrint('App lifecycle state changed: $state');
+    
+    switch (state) {
+      case AppLifecycleState.resumed:
+        debugPrint('App resumed - checking global events connection');
+        // App came to foreground - ensure global events are connected
+        if (authProvider.isAuthenticated && authProvider.profile?.id != null) {
+          globalEventProvider.handleAppResume();
+          authProvider.updateUserStatus('online');
+        }
+        break;
+      case AppLifecycleState.paused:
+        debugPrint('App paused - updating user status to away');
+        // App went to background - update status but keep connection
+        if (authProvider.isAuthenticated) {
+          authProvider.updateUserStatus('away');
+        }
+        break;
+      case AppLifecycleState.detached:
+        debugPrint('App detached - updating user status to offline');
+        // App is being terminated - update status to offline
+        if (authProvider.isAuthenticated) {
+          authProvider.updateUserStatus('offline');
+        }
+        break;
+      case AppLifecycleState.inactive:
+        // App is inactive (e.g., during a phone call)
+        break;
+      case AppLifecycleState.hidden:
+        // App is hidden but still running
+        break;
+    }
+  }
+
+  // This widget is the root of your application.
+  @override
+  Widget build(BuildContext context) {
+    print("App - MyApp: Building app widget");
     
     return MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -122,7 +212,7 @@ class _MyHomePageState extends State<MyHomePage> {
     return Scaffold(
       appBar: AppBar(
         // TRY THIS: Try changing the color here to a specific color (to
-        // Colors.amber, perhaps?) and trigger a hot reload to see the AppBar
+        // Colors.amber, for example) and trigger a hot reload to see the AppBar
         // change color while the other colors stay the same.
         backgroundColor: Theme.of(context).colorScheme.inversePrimary,
         // Here we take the value from the MyHomePage object that was created by
@@ -135,7 +225,7 @@ class _MyHomePageState extends State<MyHomePage> {
         child: Column(
           // Column is also a layout widget. It takes a list of children and
           // arranges them vertically. By default, it sizes itself to fit its
-          // children horizontally, and tries to be as tall as its parent.
+          // children horizontally, and tries to be as tall as the parent.
           //
           // Column has various properties to control how it sizes itself and
           // how it positions its children. Here we use mainAxisAlignment to
@@ -148,7 +238,9 @@ class _MyHomePageState extends State<MyHomePage> {
           // wireframe for each widget.
           mainAxisAlignment: MainAxisAlignment.center,
           children: <Widget>[
-            const Text('You have pushed the button this many times:'),
+            const Text(
+              'You have pushed the button this many times:',
+            ),
             Text(
               '$_counter',
               style: Theme.of(context).textTheme.headlineMedium,

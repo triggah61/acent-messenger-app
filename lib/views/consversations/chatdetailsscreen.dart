@@ -3,6 +3,7 @@ import 'package:acent_messenger/models/chat_session.dart';
 import 'package:acent_messenger/models/message.dart';
 import 'package:acent_messenger/providers/chat_provider.dart';
 import 'package:acent_messenger/providers/group_provider.dart';
+import 'package:acent_messenger/providers/global_event_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
 import 'package:acent_messenger/services/socket_service.dart';
 import 'package:acent_messenger/views/contacts/contacts.dart';
@@ -52,9 +53,22 @@ class _ConversationsState extends State<Conversations> {
   final ScrollController _scrollController = ScrollController();
   final int _limit = 20;
 
+  // Store listener references for proper cleanup
+  Function(dynamic)? _newMessageListener;
+  Function(dynamic)? _typingListener;
+  Function(dynamic)? _reactionUpdatesListener;
+
   @override
   void initState() {
     super.initState();
+    
+    // Set current active session for global event handling
+    if (widget.session?.id != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        context.read<GlobalEventProvider>().setCurrentActiveSession(widget.session!.id);
+      });
+    }
+    
     _initializeSocket();
     _loadMessages();
     _scrollController.addListener(_scrollListener);
@@ -66,7 +80,7 @@ class _ConversationsState extends State<Conversations> {
       _socketService.joinChatSession(widget.session?.id ?? '');
 
       // Listen for new messages
-      _socketService.onNewMessage((message) {
+      _newMessageListener = _socketService.onNewMessage((message) {
         if (mounted) {
           setState(() {
             _messages.insert(0, message);
@@ -75,7 +89,7 @@ class _ConversationsState extends State<Conversations> {
       });
 
       // Listen for typing events
-      _socketService.onTyping((userId, isTyping) {
+      _typingListener = _socketService.onTyping((userId, isTyping) {
         if (mounted && userId != context.read<AuthProvider>().userId) {
           setState(() {
             _isTyping = isTyping;
@@ -84,7 +98,7 @@ class _ConversationsState extends State<Conversations> {
       });
 
       // Listen for reaction updates
-      _socketService.onMessageReactionsUpdated((data) {
+      _reactionUpdatesListener = _socketService.onMessageReactionsUpdated((data) {
         if (mounted) {
           _updateMessageReactions(data['messageId'], data['reactions']);
         }
@@ -95,6 +109,8 @@ class _ConversationsState extends State<Conversations> {
   }
 
   void _updateMessageReactions(String messageId, List<dynamic> reactions) {
+    if (!mounted) return;
+    
     setState(() {
       final messageIndex = _messages.indexWhere((m) => m.id == messageId);
       if (messageIndex != -1) {
@@ -133,10 +149,13 @@ class _ConversationsState extends State<Conversations> {
 
   @override
   void dispose() {
+    // Clear current active session
+    context.read<GlobalEventProvider>().clearCurrentActiveSession();
+    
     _typingTimer?.cancel();
-    _socketService.removeNewMessageListener();
-    _socketService.removeTypingListener();
-    _socketService.removeReactionUpdatesListener();
+    _socketService.removeNewMessageListener(_newMessageListener);
+    _socketService.removeTypingListener(_typingListener);
+    _socketService.removeReactionUpdatesListener(_reactionUpdatesListener);
     _socketService.leaveChatSession(widget.session?.id ?? '');
     _messageController.dispose();
     _scrollController.dispose();

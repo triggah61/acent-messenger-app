@@ -5,10 +5,12 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/profile.dart';
 import '../services/auth_service.dart';
+import '../services/global_socket_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
+  final GlobalSocketService _globalSocketService = GlobalSocketService.instance;
   Profile? _profile;
   bool _isLoading = true; // Start with loading true
   bool _isInitialized = false;
@@ -17,6 +19,9 @@ class AuthProvider with ChangeNotifier {
   
   // Callback to clear data from other providers
   Function()? _clearAllDataCallback;
+  
+  // Global events callback
+  Function(String)? _initializeGlobalEventsCallback;
 
   Profile? get profile => _profile;
   bool get isLoading => _isLoading;
@@ -28,6 +33,11 @@ class AuthProvider with ChangeNotifier {
   // Set callback to clear data from other providers
   void setClearAllDataCallback(Function() callback) {
     _clearAllDataCallback = callback;
+  }
+  
+  // Set callback to initialize global events
+  void setInitializeGlobalEventsCallback(Function(String) callback) {
+    _initializeGlobalEventsCallback = callback;
   }
 
   Future<String?> getUserId() async {
@@ -46,6 +56,15 @@ class AuthProvider with ChangeNotifier {
       await _authService.storage.write(key: 'jwt_token', value: token);
       _token = token;
       await fetchProfile();
+      
+      // Initialize global events after successful login
+      if (_profile?.id != null && _initializeGlobalEventsCallback != null) {
+        debugPrint('AuthProvider: Initializing global events for user ${_profile!.id}');
+        _initializeGlobalEventsCallback!(_profile!.id);
+        
+        // Update user status to online
+        _globalSocketService.updateUserStatus('online');
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -78,6 +97,15 @@ class AuthProvider with ChangeNotifier {
           _profile = Profile.fromJson(data['data']);
           _isInitialized = true;
           print(" AuthMiddleware: Profile fetched: ${_profile?.toJson()}");
+          
+          // Ensure global events are initialized if callback is set and we have a profile
+          if (_profile?.id != null && _initializeGlobalEventsCallback != null) {
+            debugPrint('AuthProvider: Ensuring global events for user ${_profile!.id}');
+            _initializeGlobalEventsCallback!(_profile!.id);
+            
+            // Update user status to online
+            _globalSocketService.updateUserStatus('online');
+          }
         } else {
           _profile = null;
           await _authService.logout(); // Clear invalid token
@@ -96,6 +124,14 @@ class AuthProvider with ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // Update user status to offline before logout
+    if (_profile?.id != null) {
+      _globalSocketService.updateUserStatus('offline');
+    }
+    
+    // Disconnect global socket
+    await _globalSocketService.disconnectGlobalSocket();
+    
     await _authService.logout();
     _profile = null;
     _isInitialized = false;
@@ -156,5 +192,17 @@ class AuthProvider with ChangeNotifier {
     final storage = const FlutterSecureStorage();
     await storage.write(key: 'userId', value: userId);
     notifyListeners();
+  }
+  
+  // Update user status manually
+  void updateUserStatus(String status) {
+    if (_profile?.id != null) {
+      _globalSocketService.updateUserStatus(status);
+    }
+  }
+  
+  // Get global socket connection info
+  Map<String, dynamic> getGlobalSocketInfo() {
+    return _globalSocketService.getConnectionInfo();
   }
 }
