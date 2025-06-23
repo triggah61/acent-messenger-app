@@ -106,6 +106,38 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _refreshData() async {
+    try {
+      // Fetch both chat sessions and contacts concurrently
+      await Future.wait([
+        context.read<ChatProvider>().refreshSessions(),
+        _fetchContacts(),
+      ]);
+      
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Messages refreshed successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to refresh: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   void _onScroll() {
     if (_scrollController.position.pixels >=
         _scrollController.position.maxScrollExtent - 200) {
@@ -252,8 +284,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             return RefreshIndicator(
                               onRefresh: () {
                                 print(
-                                    "HomeScreen - build: Refreshing sessions");
-                                return chatProvider.refreshSessions();
+                                    "HomeScreen - build: Refreshing sessions and contacts");
+                                return _refreshData();
                               },
                               child: ListView.builder(
                                 controller: _scrollController,

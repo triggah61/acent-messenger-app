@@ -1,17 +1,12 @@
 import 'package:acent_messenger/constants/config.dart';
 import 'package:flutter/material.dart';
-import 'package:acent_messenger/views/authentication/signup_sreeen.dart';
 import 'package:country_code_picker/country_code_picker.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../../constants/colors.dart';
-import '../../commonwidgets/botttommnavigationbar.dart';
 import '../../widgets/custombtn.dart';
-import '../../widgets/customtextfield.dart';
 import '../../widgets/detailstext1.dart';
-import 'AuthWidgets/auth_tab.dart';
-import 'forgot_password.dart';
 import 'otp_verification_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -27,7 +22,7 @@ class _LoginScreenState extends State<LoginScreen>
   bool _isLoading = false;
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
-  
+
   String _selectedCountryCode = '+1'; // Default country code
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -65,10 +60,16 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   Future<void> _handleLogin() async {
+    // Enhanced input validation
     if (_phoneController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter your phone number')),
-      );
+      _showErrorMessage('Please enter your phone number');
+      return;
+    }
+
+    // Validate phone number format (basic validation)
+    final phoneNumber = _phoneController.text.trim();
+    if (phoneNumber.length < 5) {
+      _showErrorMessage('Please enter a valid phone number');
       return;
     }
 
@@ -82,19 +83,66 @@ class _LoginScreenState extends State<LoginScreen>
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({
           'dialCode': _selectedCountryCode,
-          'phone': _phoneController.text,
+          'phone': phoneNumber,
         }),
       );
 
+      final responseBody = jsonDecode(response.body);
+
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['data']['traceId'] != null) {
+        await _handleResponse(response);
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+        _showErrorMessage(responseBody['message'].toString());
+        if (mounted) {
+          setState(() {
+            _isLoading = false;
+          });
+        }
+        return;
+      }
+    } on http.ClientException catch (e) {
+      _showErrorMessage('Network error: Please check your internet connection');
+    } on FormatException catch (e) {
+      _showErrorMessage('Invalid response from server');
+    } catch (e) {
+      print('Login error: $e'); // For debugging
+      _showErrorMessage('An unexpected error occurred. Please try again.');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+
+  Future<void> _handleResponse(http.Response response) async {
+    try {
+      // Parse response body safely
+      Map<String, dynamic> data;
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map<String, dynamic>) {
+          data = decoded;
+        } else {
+          throw FormatException('Invalid JSON response format');
+        }
+      } catch (e) {
+        throw FormatException('Invalid JSON response');
+      }
+
+      if (response.statusCode == 200) {
+        // Success case
+        if (data['data'] != null && data['data']['traceId'] != null) {
           if (mounted) {
             Navigator.push(
               context,
               MaterialPageRoute(
                 builder: (context) => OtpVerificationScreen(
-                  phone: _phoneController.text,
+                  phone: _phoneController.text.trim(),
                   dialCode: _selectedCountryCode,
                   traceId: data['data']['traceId'],
                 ),
@@ -102,26 +150,62 @@ class _LoginScreenState extends State<LoginScreen>
             );
           }
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(data['message'].toString())),
-          );
+          // Success but no traceId - show server message or generic error
+          final message =
+              data['message']?.toString() ?? 'Login failed. Please try again.';
+          _showErrorMessage(message);
         }
       } else {
-        final data = jsonDecode(response.body);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message'].toString())),
-        );
+        // Handle different HTTP error codes
+        String errorMessage;
+
+        switch (response.statusCode) {
+          case 400:
+            errorMessage =
+                data['message']?.toString() ?? 'Invalid phone number format';
+            break;
+          case 401:
+            errorMessage =
+                'Invalid credentials. Please check your phone number.';
+            break;
+          case 404:
+            errorMessage =
+                data['message']?.toString() ?? 'Phone number not found';
+            break;
+          case 429:
+            errorMessage = 'Too many login attempts. Please try again later.';
+            break;
+          case 500:
+            errorMessage = 'Server error. Please try again later.';
+            break;
+          default:
+            errorMessage = data['message']?.toString() ??
+                'Login failed. Please try again.';
+        }
+
+        _showErrorMessage(errorMessage);
       }
     } catch (e) {
+      throw FormatException('Failed to process server response');
+    }
+  }
+
+  void _showErrorMessage(String message) {
+    if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString())),
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 4),
+          action: SnackBarAction(
+            label: 'Dismiss',
+            textColor: Colors.white,
+            onPressed: () {
+              ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            },
+          ),
+        ),
       );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoading = false;
-        });
-      }
     }
   }
 
@@ -181,7 +265,8 @@ class _LoginScreenState extends State<LoginScreen>
                             height: 42,
                             margin: const EdgeInsets.symmetric(vertical: 4),
                             decoration: BoxDecoration(
-                              border: Border.all(color: AppColors.textFormFieldBorderColor),
+                              border: Border.all(
+                                  color: AppColors.textFormFieldBorderColor),
                               borderRadius: BorderRadius.circular(8.0),
                             ),
                             child: Row(
@@ -189,7 +274,8 @@ class _LoginScreenState extends State<LoginScreen>
                                 CountryCodePicker(
                                   onChanged: (CountryCode countryCode) {
                                     setState(() {
-                                      _selectedCountryCode = countryCode.dialCode!;
+                                      _selectedCountryCode =
+                                          countryCode.dialCode!;
                                     });
                                   },
                                   initialSelection: 'US',
@@ -197,7 +283,8 @@ class _LoginScreenState extends State<LoginScreen>
                                   showCountryOnly: false,
                                   showOnlyCountryWhenClosed: false,
                                   alignLeft: false,
-                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 10),
                                 ),
                                 Expanded(
                                   child: TextFormField(
@@ -206,7 +293,8 @@ class _LoginScreenState extends State<LoginScreen>
                                     decoration: const InputDecoration(
                                       border: InputBorder.none,
                                       hintText: 'Phone Number',
-                                      contentPadding: EdgeInsets.symmetric(vertical: 10),
+                                      contentPadding:
+                                          EdgeInsets.symmetric(vertical: 10),
                                     ),
                                   ),
                                 ),
@@ -243,7 +331,8 @@ class _LoginScreenState extends State<LoginScreen>
         const end = Offset.zero;
         const curve = Curves.easeInOut;
 
-        var tween = Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
+        var tween =
+            Tween(begin: begin, end: end).chain(CurveTween(curve: curve));
 
         return SlideTransition(
           position: animation.drive(tween),

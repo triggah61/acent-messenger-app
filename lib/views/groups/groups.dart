@@ -108,6 +108,34 @@ class _ChatListViewState extends State<ChatListView> {
     super.dispose();
   }
 
+  Future<void> _refreshGroups() async {
+    try {
+      await context.read<GroupProvider>().refreshSessions();
+      
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Groups refreshed successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to refresh groups: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Consumer<GroupProvider>(
@@ -122,16 +150,51 @@ class _ChatListViewState extends State<ChatListView> {
 
         if (groupProvider.sessions.isEmpty) {
           print("ChatListView - build: No groups to display");
-          return const Center(child: Text('No groups yet'));
+          return RefreshIndicator(
+            onRefresh: _refreshGroups,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                Container(
+                  height: MediaQuery.of(context).size.height * 0.6,
+                  child: Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.group,
+                          size: 64,
+                          color: Colors.grey[400],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          'No groups yet',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Pull down to refresh',
+                          style: TextStyle(
+                            color: Colors.grey[500],
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
         }
 
         print(
             "ChatListView - build: Building group list with ${groupProvider.sessions.length} items");
         return RefreshIndicator(
-          onRefresh: () {
-            print("ChatListView - build: Refreshing groups");
-            return groupProvider.refreshSessions();
-          },
+          onRefresh: _refreshGroups,
           child: ListView.builder(
             controller: _scrollController,
             itemCount:

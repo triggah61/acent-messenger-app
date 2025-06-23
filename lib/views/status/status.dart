@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
@@ -72,6 +71,34 @@ class _StatusScreenState extends State<StatusScreen> {
     }
   }
 
+  Future<void> _refreshFeed() async {
+    try {
+      await _loadFeed();
+      
+      // Show success message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Status refreshed successfully'),
+            backgroundColor: Colors.green,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+    } catch (e) {
+      // Show error message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to refresh status: ${e.toString()}'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
   Future<void> _uploadStatus() async {
     try {
       final ImagePicker picker = ImagePicker();
@@ -140,62 +167,103 @@ class _StatusScreenState extends State<StatusScreen> {
       ),
       body: _isLoading
           ? const Center(child: CircularProgressIndicator())
-          : Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: InkWell(
-                    onTap: _isUploading ? null : _uploadStatus,
-                    child: Container(
-                      padding: const EdgeInsets.all(12.0),
-                      decoration: BoxDecoration(
-                        border: Border.all(color: Colors.grey[300]!),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: Row(
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.all(8.0),
-                            decoration: BoxDecoration(
-                              color: Colors.red[100],
-                              shape: BoxShape.circle,
+          : RefreshIndicator(
+              onRefresh: _refreshFeed,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: InkWell(
+                      onTap: _isUploading ? null : _uploadStatus,
+                      child: Container(
+                        padding: const EdgeInsets.all(12.0),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey[300]!),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8.0),
+                              decoration: BoxDecoration(
+                                color: Colors.red[100],
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.camera_alt, color: Colors.red),
                             ),
-                            child: const Icon(Icons.camera_alt, color: Colors.red),
-                          ),
-                          const SizedBox(width: 16),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text('My Status',
-                                  style: TextStyle(fontWeight: FontWeight.w500)),
-                              Text('Tap to add your status',
-                                  style: TextStyle(color: Colors.grey[600])),
-                            ],
-                          ),
-                        ],
+                            const SizedBox(width: 16),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('My Status',
+                                    style: TextStyle(fontWeight: FontWeight.w500)),
+                                Text('Tap to add your status',
+                                    style: TextStyle(color: Colors.grey[600])),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.only(left: 16.0, top: 8.0),
-                  child: Text('Recent Updates',
-                      style: TextStyle(fontWeight: FontWeight.w500)),
-                ),
-                Expanded(
-                  child: ListView(
-                    padding: const EdgeInsets.only(top: 8.0),
-                    children: _posts.map((post) => _buildStatusItem(
-                      context: context,
-                      name: '${post.user.firstName} ${post.user.lastName}',
-                      time: timeago.format(post.createdAt),
-                      imageUrl: post.attachment.url,
-                      initials: post.user.photo == null ? post.user.firstName[0] : null,
-                    )).toList(),
+                  const Padding(
+                    padding: EdgeInsets.only(left: 16.0, top: 8.0),
+                    child: Text('Recent Updates',
+                        style: TextStyle(fontWeight: FontWeight.w500)),
                   ),
-                ),
-              ],
+                  Expanded(
+                    child: _posts.isEmpty
+                        ? ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            children: [
+                              Container(
+                                height: MediaQuery.of(context).size.height * 0.4,
+                                child: Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.update,
+                                        size: 64,
+                                        color: Colors.grey[400],
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        'No status updates yet',
+                                        style: TextStyle(
+                                          color: Colors.grey[600],
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 8),
+                                      Text(
+                                        'Pull down to refresh',
+                                        style: TextStyle(
+                                          color: Colors.grey[500],
+                                          fontSize: 14,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ],
+                          )
+                        : ListView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            padding: const EdgeInsets.only(top: 8.0),
+                            children: _posts.map((post) => _buildStatusItem(
+                              context: context,
+                              name: '${post.user.firstName} ${post.user.lastName}',
+                              time: timeago.format(post.createdAt),
+                              imageUrl: post.attachment.url,
+                              initials: post.user.photo == null ? post.user.firstName[0] : null,
+                            )).toList(),
+                          ),
+                  ),
+                ],
+              ),
             ),
     );
   }
