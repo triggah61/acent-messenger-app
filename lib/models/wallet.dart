@@ -1,6 +1,7 @@
 class Wallet {
   final String id;
-  final String address;
+  final String btcAddress;
+  final String ethAddress;
   final String label;
   final DateTime createdAt;
   final DateTime lastUsed;
@@ -12,7 +13,8 @@ class Wallet {
 
   Wallet({
     required this.id,
-    required this.address,
+    required this.btcAddress,
+    required this.ethAddress,
     required this.label,
     required this.createdAt,
     required this.lastUsed,
@@ -26,7 +28,8 @@ class Wallet {
   factory Wallet.fromJson(Map<String, dynamic> json) {
     return Wallet(
       id: json['_id'],
-      address: json['address'] ?? '',
+      btcAddress: json['btcAddress'] ?? '',
+      ethAddress: json['ethAddress'] ?? '',
       label: json['label'] ?? '',
       createdAt: DateTime.parse(json['createdAt']),
       lastUsed: DateTime.parse(json['lastUsed']),
@@ -41,7 +44,8 @@ class Wallet {
   Map<String, dynamic> toJson() {
     return {
       '_id': id,
-      'address': address,
+      'btcAddress': btcAddress,
+      'ethAddress': ethAddress,
       'label': label,
       'createdAt': createdAt.toIso8601String(),
       'lastUsed': lastUsed.toIso8601String(),

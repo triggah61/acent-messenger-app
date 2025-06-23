@@ -26,7 +26,7 @@ class _DepositScreenState extends State<DepositScreen> {
     final wallet = context.read<WalletProvider>().wallet;
     if (wallet != null) {
       final walletService = WalletService(context.read());
-      _qrData = walletService.generateQRCodeData(wallet.address);
+      _qrData = walletService.generateQRCodeData(wallet.btcAddress);
     }
   }
 
@@ -88,9 +88,9 @@ class _DepositScreenState extends State<DepositScreen> {
                           const SizedBox(height: 10),
                           _buildInstructionCard(),
                           const SizedBox(height: 24),
-                          _buildQRCodeCard(wallet.address),
+                          _buildQRCodeCard(wallet.btcAddress),
                           const SizedBox(height: 24),
-                          _buildAddressCard(wallet.address),
+                          _buildAddressCard(wallet.btcAddress),
                           const SizedBox(height: 24),
                           // _buildAmountSection(),
                           const SizedBox(height: 24),
@@ -462,7 +462,7 @@ class _DepositScreenState extends State<DepositScreen> {
         amount = double.tryParse(amountText);
       }
       setState(() {
-        _qrData = walletService.generateQRCodeData(wallet.address, amount: amount);
+        _qrData = walletService.generateQRCodeData(wallet.btcAddress, amount: amount);
       });
     }
   }

@@ -183,7 +183,7 @@ class _WalletScreenState extends State<WalletScreen> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      wallet.address.substring(0, 8) + '...' + wallet.address.substring(wallet.address.length - 8),
+                      wallet.btcAddress.substring(0, 8) + '...' + wallet.btcAddress.substring(wallet.btcAddress.length - 8),
                       style: const TextStyle(
                         color: Colors.white,
                         fontSize: 12,
