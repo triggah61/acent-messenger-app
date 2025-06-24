@@ -6,7 +6,9 @@ import '../../providers/wallet_provider.dart';
 import '../../services/wallet_service.dart';
 
 class DepositScreen extends StatefulWidget {
-  const DepositScreen({Key? key}) : super(key: key);
+  final String? currency;
+
+  const DepositScreen({Key? key, this.currency}) : super(key: key);
 
   @override
   State<DepositScreen> createState() => _DepositScreenState();
@@ -15,10 +17,12 @@ class DepositScreen extends StatefulWidget {
 class _DepositScreenState extends State<DepositScreen> {
   final TextEditingController _amountController = TextEditingController();
   String? _qrData;
+  late String _currentCurrency;
 
   @override
   void initState() {
     super.initState();
+    _currentCurrency = widget.currency ?? 'BTC';
     _generateQRCode();
   }
 
@@ -26,7 +30,34 @@ class _DepositScreenState extends State<DepositScreen> {
     final wallet = context.read<WalletProvider>().wallet;
     if (wallet != null) {
       final walletService = WalletService(context.read());
-      _qrData = walletService.generateQRCodeData(wallet.btcAddress);
+      final address = wallet.getAddressForCurrency(_currentCurrency);
+      _qrData = walletService.generateQRCodeData(address);
+    }
+  }
+
+  String _getCurrencyDisplayName() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        return 'Bitcoin';
+      case 'ETH':
+        return 'Ethereum';
+      case 'BNB':
+        return 'Binance Coin';
+      default:
+        return _currentCurrency.toUpperCase();
+    }
+  }
+
+  Color _getCurrencyColor() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        return Colors.orange;
+      case 'ETH':
+        return Colors.purple;
+      case 'BNB':
+        return Colors.yellow[700]!;
+      default:
+        return Colors.blue;
     }
   }
 
@@ -46,10 +77,10 @@ class _DepositScreenState extends State<DepositScreen> {
                     onPressed: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 16),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Deposit Bitcoin',
-                      style: TextStyle(
+                      'Deposit ${_getCurrencyDisplayName()}',
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 20,
                         fontWeight: FontWeight.w600,
@@ -80,6 +111,7 @@ class _DepositScreenState extends State<DepositScreen> {
                       );
                     }
 
+                    final address = wallet.getAddressForCurrency(_currentCurrency);
                     return SingleChildScrollView(
                       padding: const EdgeInsets.all(24.0),
                       child: Column(
@@ -88,11 +120,9 @@ class _DepositScreenState extends State<DepositScreen> {
                           const SizedBox(height: 10),
                           _buildInstructionCard(),
                           const SizedBox(height: 24),
-                          _buildQRCodeCard(wallet.btcAddress),
+                          _buildQRCodeCard(address),
                           const SizedBox(height: 24),
-                          _buildAddressCard(wallet.btcAddress),
-                          const SizedBox(height: 24),
-                          // _buildAmountSection(),
+                          _buildAddressCard(address),
                           const SizedBox(height: 24),
                           _buildWarningCard(),
                         ],
@@ -126,12 +156,12 @@ class _DepositScreenState extends State<DepositScreen> {
                 width: 40,
                 height: 40,
                 decoration: BoxDecoration(
-                  color: Colors.green.withOpacity(0.2),
+                  color: _getCurrencyColor().withOpacity(0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: const Icon(
+                child: Icon(
                   Icons.info_outline,
-                  color: Colors.green,
+                  color: _getCurrencyColor(),
                   size: 24,
                 ),
               ),
@@ -155,7 +185,7 @@ class _DepositScreenState extends State<DepositScreen> {
           ),
           _buildInstructionStep(
             '2',
-            'Send Bitcoin from your external wallet to this address',
+            'Send ${_getCurrencyDisplayName()} from your external wallet to this address',
           ),
           _buildInstructionStep(
             '3',
@@ -253,7 +283,7 @@ class _DepositScreenState extends State<DepositScreen> {
             ),
           const SizedBox(height: 16),
           Text(
-            'Scan this QR code with your Bitcoin wallet',
+            'Scan this QR code with your ${_getCurrencyDisplayName()} wallet',
             style: TextStyle(
               color: Colors.grey[600],
               fontSize: 14,
@@ -277,9 +307,9 @@ class _DepositScreenState extends State<DepositScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Your Bitcoin Address',
-            style: TextStyle(
+          Text(
+            'Your ${_getCurrencyDisplayName()} Address',
+            style: const TextStyle(
               color: Colors.black87,
               fontSize: 16,
               fontWeight: FontWeight.w600,
@@ -462,7 +492,8 @@ class _DepositScreenState extends State<DepositScreen> {
         amount = double.tryParse(amountText);
       }
       setState(() {
-        _qrData = walletService.generateQRCodeData(wallet.btcAddress, amount: amount);
+        final address = wallet.getAddressForCurrency(_currentCurrency);
+        _qrData = walletService.generateQRCodeData(address, amount: amount);
       });
     }
   }

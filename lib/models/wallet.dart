@@ -2,12 +2,15 @@ class Wallet {
   final String id;
   final String btcAddress;
   final String ethAddress;
+  final String bscAddress;
   final String label;
   final DateTime createdAt;
   final DateTime lastUsed;
   final String network;
   final int availableBalance; // in satoshis
   final double btcBalance;
+  final double ethBalance;
+  final double bscBalance;
   final double usdBalance;
   final double platformFeePercentage;
 
@@ -15,12 +18,15 @@ class Wallet {
     required this.id,
     required this.btcAddress,
     required this.ethAddress,
+    required this.bscAddress,
     required this.label,
     required this.createdAt,
     required this.lastUsed,
     required this.network,
     required this.availableBalance,
     required this.btcBalance,
+    required this.ethBalance,
+    required this.bscBalance,
     required this.usdBalance,
     required this.platformFeePercentage,
   });
@@ -30,12 +36,15 @@ class Wallet {
       id: json['_id'],
       btcAddress: json['btcAddress'] ?? '',
       ethAddress: json['ethAddress'] ?? '',
+      bscAddress: json['bscAddress'] ?? '',
       label: json['label'] ?? '',
       createdAt: DateTime.parse(json['createdAt']),
       lastUsed: DateTime.parse(json['lastUsed']),
       network: json['network'] ?? '',
-      availableBalance: json['availableBalance'] ?? 0,
+      availableBalance: json['availableBtcBalance'] ?? 0,
       btcBalance: (json['btcBalance'] ?? 0.0).toDouble(),
+      ethBalance: (json['ethBalance'] ?? 0.0).toDouble(),
+      bscBalance: (json['bscBalance'] ?? 0.0).toDouble(),
       usdBalance: (json['usdBalance'] ?? 0.0).toDouble(),
       platformFeePercentage: (json['platformFeePercentage'] ?? 0.0).toDouble(),
     );
@@ -46,12 +55,15 @@ class Wallet {
       '_id': id,
       'btcAddress': btcAddress,
       'ethAddress': ethAddress,
+      'bscAddress': bscAddress,
       'label': label,
       'createdAt': createdAt.toIso8601String(),
       'lastUsed': lastUsed.toIso8601String(),
       'network': network,
       'availableBalance': availableBalance,
       'btcBalance': btcBalance,
+      'ethBalance': ethBalance,
+      'bscBalance': bscBalance,
       'usdBalance': usdBalance,
       'platformFeePercentage': platformFeePercentage,
     };
@@ -60,6 +72,34 @@ class Wallet {
   // Helper method to calculate platform fee for a given amount
   double calculatePlatformFee(double amount) {
     return amount * (platformFeePercentage / 100);
+  }
+
+  // Helper methods to get balance by currency
+  double getBalanceForCurrency(String currency) {
+    switch (currency.toUpperCase()) {
+      case 'BTC':
+        return btcBalance;
+      case 'ETH':
+        return ethBalance;
+      case 'BNB':
+        return bscBalance;
+      default:
+        return 0.0;
+    }
+  }
+
+  // Helper methods to get address by currency
+  String getAddressForCurrency(String currency) {
+    switch (currency.toUpperCase()) {
+      case 'BTC':
+        return btcAddress;
+      case 'ETH':
+        return ethAddress;
+      case 'BNB':
+        return bscAddress;
+      default:
+        return '';
+    }
   }
 }
 

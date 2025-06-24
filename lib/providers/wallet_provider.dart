@@ -75,7 +75,7 @@ class WalletProvider with ChangeNotifier {
   }
 
   // Fetch transactions with pagination
-  Future<void> fetchTransactions({bool refresh = false}) async {
+  Future<void> fetchTransactions({bool refresh = false, String? currency}) async {
     if (refresh) {
       _transactions.clear();
       _transactionPagination = null;
@@ -90,6 +90,7 @@ class WalletProvider with ChangeNotifier {
       final response = await _walletService.getTransactions(
         page: 1,
         limit: 10,
+        currency: currency,
       );
 
       _transactions = response.transactions;
@@ -107,7 +108,7 @@ class WalletProvider with ChangeNotifier {
   }
 
   // Load more transactions (for pagination)
-  Future<void> loadMoreTransactions() async {
+  Future<void> loadMoreTransactions({String? currency}) async {
     if (_isLoadingMoreTransactions || !canLoadMoreTransactions) return;
 
     _isLoadingMoreTransactions = true;
@@ -118,6 +119,7 @@ class WalletProvider with ChangeNotifier {
       final response = await _walletService.getTransactions(
         page: nextPage,
         limit: 10,
+        currency: currency,
       );
 
       _transactions.addAll(response.transactions);

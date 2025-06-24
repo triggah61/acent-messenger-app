@@ -3,9 +3,9 @@ import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import '../../providers/wallet_provider.dart';
 import '../../widgets/auth_middleware.dart';
-import '../../widgets/transaction_history.dart';
 import 'deposit_screen.dart';
 import 'withdraw_screen.dart';
+import 'transactions_screen.dart';
 
 class WalletScreen extends StatefulWidget {
   const WalletScreen({Key? key}) : super(key: key);
@@ -16,7 +16,7 @@ class WalletScreen extends StatefulWidget {
 
 class _WalletScreenState extends State<WalletScreen> {
   final NumberFormat _currencyFormat = NumberFormat('#,##0.00', 'en_US');
-  final NumberFormat _btcFormat = NumberFormat('#,##0.00000000', 'en_US');
+  final NumberFormat _cryptoFormat = NumberFormat('#,##0.00000000', 'en_US');
 
   @override
   void initState() {
@@ -49,22 +49,37 @@ class _WalletScreenState extends State<WalletScreen> {
                   ),
                   child: RefreshIndicator(
                     onRefresh: () => context.read<WalletProvider>().refreshWalletData(),
-                    child: SingleChildScrollView(
-                      physics: const AlwaysScrollableScrollPhysics(),
-                      child: Padding(
-                        padding: const EdgeInsets.all(24.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const SizedBox(height: 10),
-                            _buildBalanceCard(),
-                            const SizedBox(height: 20),
-                            _buildActionButtons(),
-                            const SizedBox(height: 30),
-                            const TransactionHistory(),
-                          ],
-                        ),
-                      ),
+                    child: Consumer<WalletProvider>(
+                      builder: (context, walletProvider, child) {
+                        if (walletProvider.isLoading && walletProvider.wallet == null) {
+                          return _buildLoadingState();
+                        }
+
+                        if (walletProvider.error != null) {
+                          return _buildErrorState(walletProvider.error!);
+                        }
+
+                        final wallet = walletProvider.wallet;
+                        if (wallet == null) {
+                          return _buildErrorState('Wallet not found');
+                        }
+
+                        return SingleChildScrollView(
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          child: Padding(
+                            padding: const EdgeInsets.all(24.0),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const SizedBox(height: 10),
+                                _buildTotalBalanceCard(wallet),
+                                const SizedBox(height: 30),
+                                _buildCurrencyTiles(wallet),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
                 ),
@@ -82,7 +97,7 @@ class _WalletScreenState extends State<WalletScreen> {
         Expanded(
           child: Center(
             child: Text(
-              'Bitcoin Wallet',
+              'Your Wallets',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 24,
@@ -95,132 +110,213 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
-  Widget _buildBalanceCard() {
-    return Consumer<WalletProvider>(
-      builder: (context, walletProvider, child) {
-        if (walletProvider.isLoading && walletProvider.wallet == null) {
-          return _buildLoadingCard();
-        }
-
-        if (walletProvider.error != null) {
-          return _buildErrorCard(walletProvider.error!);
-        }
-
-        final wallet = walletProvider.wallet;
-        if (wallet == null) {
-          return _buildErrorCard('Wallet not found');
-        }
-
-        return Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Colors.orangeAccent, Colors.deepOrangeAccent],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.orangeAccent.withOpacity(0.3),
-                blurRadius: 15,
-                offset: const Offset(0, 8),
+  Widget _buildTotalBalanceCard(wallet) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          colors: [Colors.deepPurple, Colors.blueAccent],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.deepPurple.withOpacity(0.3),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: [
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.account_balance_wallet,
+                color: Colors.white,
+                size: 28,
+              ),
+              SizedBox(width: 10),
+              Text(
+                'Total Portfolio Value',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 16,
+                ),
               ),
             ],
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          const SizedBox(height: 16),
+          Text(
+            '\$${_currencyFormat.format(wallet.usdBalance)} USD',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 32,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCurrencyTiles(wallet) {
+    final currencies = [
+      {
+        'code': 'BTC',
+        'name': 'Bitcoin',
+        'balance': wallet.btcBalance,
+        'color': Colors.orange,
+        'icon': '₿',
+      },
+      {
+        'code': 'ETH',
+        'name': 'Ethereum',
+        'balance': wallet.ethBalance,
+        'color': Colors.purple,
+        'icon': 'Ξ',
+      },
+      {
+        'code': 'BNB',
+        'name': 'Binance Coin',
+        'balance': wallet.bscBalance,
+        'color': Colors.yellow[700]!,
+        'icon': 'BNB',
+      },
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Your Wallets',
+          style: TextStyle(
+            color: Colors.black87,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 16),
+        ...currencies.map((currency) => _buildCurrencyTile(
+          currency['code'] as String,
+          currency['name'] as String,
+          currency['balance'] as double,
+          currency['color'] as Color,
+          currency['icon'] as String,
+        )).toList(),
+      ],
+    );
+  }
+
+  Widget _buildCurrencyTile(String code, String name, double balance, Color color, String icon) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 16),
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: color.withOpacity(0.2)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          Row(
             children: [
-              const Row(
-                children: [
-                  Icon(
-                    Icons.account_balance_wallet,
-                    color: Colors.white,
-                    size: 28,
-                  ),
-                  SizedBox(width: 10),
-                  Text(
-                    'Total Balance',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 16,
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                '${_btcFormat.format(wallet.btcBalance)} BTC',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 32,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                '\$${_currencyFormat.format(wallet.usdBalance)} USD',
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 18,
-                ),
-              ),
-              const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                width: 50,
+                height: 50,
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(20),
+                  color: color.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(25),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.security,
-                      color: Colors.white,
-                      size: 16,
+                child: Center(
+                  child: Text(
+                    icon,
+                    style: TextStyle(
+                      color: color,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
                     ),
-                    const SizedBox(width: 6),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      wallet.btcAddress.substring(0, 8) + '...' + wallet.btcAddress.substring(wallet.btcAddress.length - 8),
+                      name,
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 12,
-                        fontFamily: 'monospace',
+                        color: Colors.black87,
+                        fontSize: 18,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_cryptoFormat.format(balance)} $code',
+                      style: TextStyle(
+                        color: Colors.grey[600],
+                        fontSize: 14,
                       ),
                     ),
                   ],
                 ),
               ),
+              Text(
+                '${_cryptoFormat.format(balance)}',
+                style: TextStyle(
+                  color: color,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
             ],
           ),
-        );
-      },
-    );
-  }
-
-  Widget _buildActionButtons() {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildActionButton(
-            icon: Icons.arrow_downward,
-            label: 'Deposit',
-            color: Colors.green,
-            onTap: () => _navigateToDeposit(),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: _buildActionButton(
+                  icon: Icons.arrow_downward,
+                  label: 'Deposit',
+                  color: Colors.green,
+                  onTap: () => _navigateToDeposit(code),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildActionButton(
+                  icon: Icons.arrow_upward,
+                  label: 'Withdraw',
+                  color: Colors.red,
+                  onTap: () => _navigateToWithdraw(code),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _buildActionButton(
+                  icon: Icons.receipt_long,
+                  label: 'Transactions',
+                  color: color,
+                  onTap: () => _navigateToTransactions(code),
+                ),
+              ),
+            ],
           ),
-        ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: _buildActionButton(
-            icon: Icons.arrow_upward,
-            label: 'Withdraw',
-            color: Colors.red,
-            onTap: () => _navigateToWithdraw(),
-          ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
@@ -233,58 +329,55 @@ class _WalletScreenState extends State<WalletScreen> {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
+        padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
           color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(15),
+          borderRadius: BorderRadius.circular(12),
           border: Border.all(color: color.withOpacity(0.3)),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Column(
           children: [
-            Icon(icon, color: color, size: 24),
-            const SizedBox(width: 8),
-            Text(
-              label,
-              style: TextStyle(
-                color: color,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            Icon(icon, color: color, size: 20),
+            // const SizedBox(height: 4),
+            // Text(
+            //   label,
+            //   style: TextStyle(
+            //     color: color,
+            //     fontSize: 12,
+            //     fontWeight: FontWeight.w600,
+            //   ),
+            // ),
           ],
         ),
       ),
     );
   }
 
-  Widget _buildLoadingCard() {
-    return Container(
-      width: double.infinity,
-      height: 180,
-      decoration: BoxDecoration(
-        color: Colors.grey[100],
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.grey[300]!),
-      ),
-      child: const Center(
-        child: CircularProgressIndicator(
-          valueColor: AlwaysStoppedAnimation<Color>(Colors.orangeAccent),
-        ),
+  Widget _buildLoadingState() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.deepPurple),
+          ),
+          SizedBox(height: 16),
+          Text(
+            'Loading wallet...',
+            style: TextStyle(
+              color: Colors.grey,
+              fontSize: 16,
+            ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildErrorCard(String error) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: Colors.red.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.red.withOpacity(0.3)),
-      ),
+  Widget _buildErrorState(String error) {
+    return Center(
       child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
           const Icon(Icons.error, color: Colors.red, size: 48),
           const SizedBox(height: 16),
@@ -305,28 +398,45 @@ class _WalletScreenState extends State<WalletScreen> {
             ),
             textAlign: TextAlign.center,
           ),
+          const SizedBox(height: 16),
+          ElevatedButton(
+            onPressed: () => context.read<WalletProvider>().refreshWalletData(),
+            child: const Text('Retry'),
+          ),
         ],
       ),
     );
   }
 
-  void _navigateToDeposit() {
+  void _navigateToDeposit(String currency) {
     Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const DepositScreen()),
+      MaterialPageRoute(
+        builder: (context) => DepositScreen(currency: currency),
+      ),
     );
   }
 
-  void _navigateToWithdraw() async {
+  void _navigateToWithdraw(String currency) async {
     await Navigator.push(
       context,
-      MaterialPageRoute(builder: (context) => const WithdrawScreen()),
+      MaterialPageRoute(
+        builder: (context) => WithdrawScreen(currency: currency),
+      ),
     );
     
     // Refresh wallet data when returning from withdrawal screen
-    // This ensures transaction history is updated if withdrawal was successful
     if (mounted) {
       context.read<WalletProvider>().refreshWalletData();
     }
+  }
+
+  void _navigateToTransactions(String currency) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => TransactionsScreen(currency: currency),
+      ),
+    );
   }
 } 

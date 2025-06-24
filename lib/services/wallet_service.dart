@@ -63,13 +63,19 @@ class WalletService {
   Future<TransactionHistoryResponse> getTransactions({
     int page = 1,
     int limit = 10,
+    String? currency,
   }) async {
     try {
       final token = await _authService.getToken();
       if (token == null) throw Exception('No authentication token');
 
+      String url = '${Config.baseApiUrl}/user/wallet/getTransactionHistory?limit=$limit&page=$page';
+      if (currency != null && currency.isNotEmpty) {
+        url += '&currency=${currency.toUpperCase()}';
+      }
+
       final response = await http.get(
-        Uri.parse('${Config.baseApiUrl}/user/wallet/getTransactionHistory?limit=$limit&page=$page'),
+        Uri.parse(url),
         headers: {'Authorization': 'Bearer $token'},
       );
 

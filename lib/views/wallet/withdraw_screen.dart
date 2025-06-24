@@ -14,7 +14,9 @@ class ValidationResult {
 }
 
 class WithdrawScreen extends StatefulWidget {
-  const WithdrawScreen({Key? key}) : super(key: key);
+  final String? currency;
+
+  const WithdrawScreen({Key? key, this.currency}) : super(key: key);
 
   @override
   State<WithdrawScreen> createState() => _WithdrawScreenState();
@@ -28,7 +30,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   
   NetworkFeeType _selectedFeeType = NetworkFeeType.medium;
   bool _isLoading = false;
-  final NumberFormat _btcFormat = NumberFormat('#,##0.00000000', 'en_US');
+  final NumberFormat _cryptoFormat = NumberFormat('#,##0.00000000', 'en_US');
+  late String _currentCurrency;
   
   // Debouncing for fee estimation
   Timer? _debounceTimer;
@@ -37,6 +40,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   @override
   void initState() {
     super.initState();
+    _currentCurrency = widget.currency ?? 'BTC';
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<WalletProvider>().fetchNetworkFees();
     });
@@ -47,6 +51,32 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     // Listen to form changes for validation
     _amountController.addListener(_onFormChanged);
     _addressController.addListener(_onFormChanged);
+  }
+
+  String _getCurrencyDisplayName() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        return 'Bitcoin';
+      case 'ETH':
+        return 'Ethereum';
+      case 'BNB':
+        return 'Binance Coin';
+      default:
+        return _currentCurrency.toUpperCase();
+    }
+  }
+
+  Color _getCurrencyColor() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        return Colors.orange;
+      case 'ETH':
+        return Colors.purple;
+      case 'BNB':
+        return Colors.yellow[700]!;
+      default:
+        return Colors.blue;
+    }
   }
 
   @override
@@ -65,10 +95,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                     onPressed: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 16),
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'Withdraw Bitcoin',
-                      style: TextStyle(
+                      'Withdraw ${_getCurrencyDisplayName()}',
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 20,
                         fontWeight: FontWeight.w600,
@@ -135,12 +165,13 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Widget _buildBalanceCard(Wallet wallet) {
+    final balance = wallet.getBalanceForCurrency(_currentCurrency);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [Colors.blueAccent, Colors.purpleAccent],
+        gradient: LinearGradient(
+          colors: [_getCurrencyColor(), _getCurrencyColor().withOpacity(0.7)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -158,7 +189,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           ),
           const SizedBox(height: 8),
           Text(
-            '${_btcFormat.format(wallet.btcBalance)} BTC',
+            '${_cryptoFormat.format(balance)} ${_currentCurrency.toUpperCase()}',
             style: const TextStyle(
               color: Colors.white,
               fontSize: 24,
@@ -198,7 +229,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             decoration: InputDecoration(
               hintText: '0.00000000',
               hintStyle: TextStyle(color: Colors.grey[400]),
-              suffixText: 'BTC',
+              suffixText: '${_getCurrencyDisplayName()}',
               suffixStyle: TextStyle(color: Colors.grey[600]),
               filled: true,
               fillColor: Colors.white,
@@ -250,14 +281,6 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           //       onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.25),
           //       child: const Text(
           //         '25%',
-          //         style: TextStyle(color: Colors.blueAccent),
-          //       ),
-          //     ),
-          //     const SizedBox(width: 16),
-          //     TextButton(
-          //       onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.5),
-          //       child: const Text(
-          //         '50%',
           //         style: TextStyle(color: Colors.blueAccent),
           //       ),
           //     ),
@@ -395,7 +418,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            '${_btcFormat.format(fee.totalBtcFee)} BTC',
+                            '${_cryptoFormat.format(fee.totalBtcFee)} ${_getCurrencyDisplayName()}',
                             style: TextStyle(
                               color: isSelected ? Colors.black87 : Colors.grey[700],
                               fontSize: 14,
@@ -403,14 +426,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                             ),
                           ),
                           Text(
-                            'Network: ${_btcFormat.format(fee.networkFee.btc)} BTC',
+                            'Network: ${_cryptoFormat.format(fee.networkFee.btc)} ${_getCurrencyDisplayName()}',
                             style: TextStyle(
                               color: isSelected ? Colors.grey[600] : Colors.grey[500],
                               fontSize: 10,
                             ),
                           ),
                           Text(
-                            'Platform: ${_btcFormat.format(fee.platformFee.btc)} BTC',
+                            'Platform: ${_cryptoFormat.format(fee.platformFee.btc)} ${_getCurrencyDisplayName()}',
                             style: TextStyle(
                               color: isSelected ? Colors.grey[600] : Colors.grey[500],
                               fontSize: 10,
@@ -581,14 +604,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          _buildSummaryRow('Amount', '${_btcFormat.format(amount)} BTC'),
-          _buildSummaryRow('Platform Fee', '${_btcFormat.format(platformFee)} BTC'),
-          _buildSummaryRow('Network Fee', '${_btcFormat.format(networkFee)} BTC'),
+          _buildSummaryRow('Amount', '${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()}'),
+          _buildSummaryRow('Platform Fee', '${_cryptoFormat.format(platformFee)} ${_getCurrencyDisplayName()}'),
+          _buildSummaryRow('Network Fee', '${_cryptoFormat.format(networkFee)} ${_getCurrencyDisplayName()}'),
           Divider(color: Colors.grey[300]),
-          _buildSummaryRow('Total to Deduct', '${_btcFormat.format(total)} BTC', isTotal: true),
+          _buildSummaryRow('Total to Deduct', '${_cryptoFormat.format(total)} ${_getCurrencyDisplayName()}', isTotal: true),
           const SizedBox(height: 8),
           Text(
-            'Remaining Balance: ${_btcFormat.format(wallet.btcBalance - total)} BTC',
+            'Remaining Balance: ${_cryptoFormat.format(wallet.btcBalance - total)} ${_getCurrencyDisplayName()}',
             style: TextStyle(
               color: total > wallet.btcBalance ? Colors.red : Colors.grey[600],
               fontSize: 12,
@@ -756,7 +779,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       final shortfall = totalCost - wallet.btcBalance;
       return ValidationResult(
         false, 
-        'Insufficient balance. You need ${_btcFormat.format(shortfall)} BTC more (including fees)'
+        'Insufficient balance. You need ${_cryptoFormat.format(shortfall)} ${_getCurrencyDisplayName()} more (including fees)'
       );
     }
 
@@ -765,7 +788,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     if (amount < minWithdrawal) {
       return ValidationResult(
         false,
-        'Minimum withdrawal amount is ${_btcFormat.format(minWithdrawal)} BTC'
+        'Minimum withdrawal amount is ${_cryptoFormat.format(minWithdrawal)} ${_getCurrencyDisplayName()}'
       );
     }
 
@@ -846,7 +869,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Your Bitcoin withdrawal of ${_btcFormat.format(amount)} BTC has been submitted successfully.',
+                            'Your Bitcoin withdrawal of ${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()} has been submitted successfully.',
                             style: const TextStyle(fontSize: 14),
                           ),
                         ],
@@ -1007,17 +1030,18 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildConfirmationRow('Amount:', '${_btcFormat.format(amount)} BTC'),
+                  _buildConfirmationRow('Amount:', '${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()}'),
                   const SizedBox(height: 8),
-                  _buildConfirmationRow('Platform Fee:', '${_btcFormat.format(platformFee)} BTC'),
+                  _buildConfirmationRow('Platform Fee:', '${_cryptoFormat.format(platformFee)} ${_getCurrencyDisplayName()}'),
+                  _buildConfirmationRow('Platform Fee:', '${_cryptoFormat.format(platformFee)} BTC'),
                   const SizedBox(height: 8),
-                  _buildConfirmationRow('Network Fee:', '${_btcFormat.format(networkFee)} BTC'),
+                  _buildConfirmationRow('Network Fee:', '${_cryptoFormat.format(networkFee)} BTC'),
                   const SizedBox(height: 8),
                   _buildConfirmationRow('Priority:', _getFeeTypeTitle(_selectedFeeType)),
                   const Divider(),
                   _buildConfirmationRow(
                     'Total Cost:',
-                    '${_btcFormat.format(totalCost)} BTC',
+                    '${_cryptoFormat.format(totalCost)} BTC',
                     isTotal: true,
                   ),
                 ],

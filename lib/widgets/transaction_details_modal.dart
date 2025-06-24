@@ -7,10 +7,12 @@ import '../services/network_config_service.dart';
 
 class TransactionDetailsModal extends StatelessWidget {
   final Transaction transaction;
+  final String? currency;
 
   const TransactionDetailsModal({
     Key? key,
     required this.transaction,
+    this.currency,
   }) : super(key: key);
 
   @override
