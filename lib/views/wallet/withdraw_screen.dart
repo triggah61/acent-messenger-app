@@ -836,6 +836,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               amount: amount,
               toAddress: address,
               feeType: _selectedFeeType,
+              currency: _currentCurrency,
               description: description.isNotEmpty ? description : null,
             );
 

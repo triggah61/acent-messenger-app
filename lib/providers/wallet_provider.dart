@@ -227,6 +227,7 @@ class WalletProvider with ChangeNotifier {
     required double amount,
     required String toAddress,
     required NetworkFeeType feeType,
+    required String currency,
     String? description,
   }) async {
     _error = null; // Clear previous errors
@@ -237,6 +238,7 @@ class WalletProvider with ChangeNotifier {
         amount: amount,
         toAddress: toAddress,
         feeType: feeType,
+        currency: currency,
         description: description,
       );
 

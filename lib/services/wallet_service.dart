@@ -134,6 +134,7 @@ class WalletService {
     required double amount,
     required String toAddress,
     required NetworkFeeType feeType,
+    required String currency,
     String? description,
   }) async {
     try {
@@ -163,6 +164,7 @@ class WalletService {
         body: json.encode({
           'toAddress': toAddress,
           'amount': amount,
+          'currency': currency.toUpperCase(),
           'priority': priority,
           'description': description ?? '',
         }),
