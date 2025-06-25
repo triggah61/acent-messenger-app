@@ -171,21 +171,21 @@ class _WalletScreenState extends State<WalletScreen> {
         'name': 'Bitcoin',
         'balance': wallet.btcBalance,
         'color': Colors.orange,
-        'icon': '₿',
+        'icon': 'assets/icons/crypto/bitcoin.png',
       },
       {
         'code': 'ETH',
         'name': 'Ethereum',
         'balance': wallet.ethBalance,
         'color': Colors.purple,
-        'icon': 'Ξ',
+        'icon': 'assets/icons/crypto/ethereum.png',
       },
       {
         'code': 'BNB',
         'name': 'Binance Coin',
         'balance': wallet.bscBalance,
         'color': Colors.yellow[700]!,
-        'icon': 'BNB',
+        'icon': 'assets/icons/crypto/bnb.png',
       },
     ];
 
@@ -241,13 +241,22 @@ class _WalletScreenState extends State<WalletScreen> {
                   borderRadius: BorderRadius.circular(25),
                 ),
                 child: Center(
-                  child: Text(
+                  child: Image.asset(
                     icon,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+                    width: 24,
+                    height: 24,
+                    errorBuilder: (context, error, stackTrace) {
+                      // Fallback to original text icons if image assets are not found
+                      final fallbackIcon = _getFallbackIcon(code);
+                      return Text(
+                        fallbackIcon,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      );
+                    },
                   ),
                 ),
               ),
@@ -447,5 +456,19 @@ class _WalletScreenState extends State<WalletScreen> {
         builder: (context) => TransactionsScreen(currency: currency),
       ),
     );
+  }
+
+  String _getFallbackIcon(String code) {
+    // Fallback to original text icons if image assets are not found
+    switch (code) {
+      case 'BTC':
+        return '₿';
+      case 'ETH':
+        return 'Ξ';
+      case 'BNB':
+        return 'BNB';
+      default:
+        return code;
+    }
   }
 } 

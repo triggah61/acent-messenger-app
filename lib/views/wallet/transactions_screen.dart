@@ -60,6 +60,19 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
     }
   }
 
+  String _getCurrencyIcon() {
+    switch (widget.currency.toUpperCase()) {
+      case 'BTC':
+        return 'assets/icons/crypto/bitcoin.png';
+      case 'ETH':
+        return 'assets/icons/crypto/ethereum.png';
+      case 'BNB':
+        return 'assets/icons/crypto/bnb.png';
+      default:
+        return 'assets/icons/crypto/bitcoin.png'; // fallback
+    }
+  }
+
   String _getCurrencySymbol() {
     switch (widget.currency.toUpperCase()) {
       case 'BTC':
@@ -155,19 +168,27 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Center(
-                child: Text(
-                  _getCurrencySymbol(),
-                  style: TextStyle(
-                    color: _getCurrencyColor(),
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
+                child: Image.asset(
+                  _getCurrencyIcon(),
+                  width: 24,
+                  height: 24,
+                  errorBuilder: (context, error, stackTrace) {
+                    // Fallback to text icons if image assets are not found
+                    return Text(
+                      _getCurrencySymbol(),
+                      style: TextStyle(
+                        color: _getCurrencyColor(),
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    );
+                  },
                 ),
               ),
             ),
             const SizedBox(width: 12),
             Text(
-              '${widget.currency.toUpperCase()} Transactions',
+              '${widget.currency.toUpperCase()} Transactions', 
               style: const TextStyle(
                 color: Colors.black87,
                 fontSize: 20,

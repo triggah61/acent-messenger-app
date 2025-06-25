@@ -101,6 +101,7 @@ flutter:
   assets:
     - images/
     - assets/sounds/
+    - assets/icons/crypto/
 
   # An image asset can refer to one or more resolution-variant files.
   # See https://flutter.dev/assets-and-images/#resolution-aware

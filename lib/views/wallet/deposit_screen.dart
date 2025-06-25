@@ -48,6 +48,32 @@ class _DepositScreenState extends State<DepositScreen> {
     }
   }
 
+  String _getCurrencyIcon() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        return 'assets/icons/crypto/bitcoin.png';
+      case 'ETH':
+        return 'assets/icons/crypto/ethereum.png';
+      case 'BNB':
+        return 'assets/icons/crypto/bnb.png';
+      default:
+        return 'assets/icons/crypto/bitcoin.png'; // fallback
+    }
+  }
+
+  String _getCurrencySymbol() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        return '₿';
+      case 'ETH':
+        return 'Ξ';
+      case 'BNB':
+        return 'BNB';
+      default:
+        return _currentCurrency.toUpperCase();
+    }
+  }
+
   Color _getCurrencyColor() {
     switch (_currentCurrency.toUpperCase()) {
       case 'BTC':
@@ -159,10 +185,18 @@ class _DepositScreenState extends State<DepositScreen> {
                   color: _getCurrencyColor().withOpacity(0.2),
                   borderRadius: BorderRadius.circular(20),
                 ),
-                child: Icon(
-                  Icons.info_outline,
-                  color: _getCurrencyColor(),
-                  size: 24,
+                child: Image.asset(
+                  _getCurrencyIcon(),
+                  width: 24,
+                  height: 24,
+                  errorBuilder: (context, error, stackTrace) {
+                    // Fallback to info icon if image assets are not found
+                    return Icon(
+                      Icons.info_outline,
+                      color: _getCurrencyColor(),
+                      size: 24,
+                    );
+                  },
                 ),
               ),
               const SizedBox(width: 16),
