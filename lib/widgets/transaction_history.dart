@@ -167,7 +167,7 @@ class _TransactionHistoryState extends State<TransactionHistory> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '$sign${_btcFormat.format(transaction.btcAmount)} BTC',
+                  '$sign${_btcFormat.format(transaction.amount)} ${transaction.currency}',
                   style: TextStyle(
                     color: color,
                     fontSize: 16,
@@ -313,10 +313,24 @@ class _TransactionHistoryState extends State<TransactionHistory> {
       return transaction.description!;
     }
     
+    final currencyName = _getCurrencyName(transaction.currency);
     if (transaction.isDeposit) {
-      return 'Bitcoin Received';
+      return '$currencyName Received';
     } else {
-      return 'Bitcoin Sent';
+      return '$currencyName Sent';
+    }
+  }
+
+  String _getCurrencyName(String currency) {
+    switch (currency.toUpperCase()) {
+      case 'BTC':
+        return 'Bitcoin';
+      case 'ETH':
+        return 'Ethereum';
+      case 'BNB':
+        return 'Binance Coin';
+      default:
+        return currency.toUpperCase();
     }
   }
 

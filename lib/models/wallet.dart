@@ -261,27 +261,27 @@ enum NetworkFeeType {
 }
 
 class FeeAmount {
-  final int satoshis;
-  final double btc;
+  final double amount;
 
   FeeAmount({
-    required this.satoshis,
-    required this.btc,
+    required this.amount,
   });
 
   factory FeeAmount.fromJson(Map<String, dynamic> json) {
     return FeeAmount(
-      satoshis: json['satoshis'] ?? 0,
-      btc: (json['btc'] ?? 0.0).toDouble(),
+      amount: (json as double? ?? 0.0).toDouble(),
     );
   }
 
   Map<String, dynamic> toJson() {
     return {
-      'satoshis': satoshis,
-      'btc': btc,
+      'amount': amount,
     };
   }
+
+  // Backward compatibility getters
+  double get btc => amount;
+  int get satoshis => (amount * 100000000).round(); // Convert to satoshis for compatibility
 }
 
 class NetworkFee {
@@ -300,8 +300,8 @@ class NetworkFee {
   factory NetworkFee.fromJson(NetworkFeeType type, Map<String, dynamic> json, String estimatedTime) {
     return NetworkFee(
       type: type,
-      networkFee: FeeAmount.fromJson(json['network']),
-      platformFee: FeeAmount.fromJson(json['platform']),
+      networkFee: FeeAmount(amount: (json['network'] ?? 0.0).toDouble()),
+      platformFee: FeeAmount(amount: (json['platform'] ?? 0.0).toDouble()),
       estimatedTime: estimatedTime,
     );
   }
@@ -317,7 +317,6 @@ class NetworkFee {
 
   // Helper getters
   double get totalBtcFee => networkFee.btc + platformFee.btc;
-  int get totalSatoshis => networkFee.satoshis + platformFee.satoshis;
   
   // Legacy compatibility
   double get fee => totalBtcFee;

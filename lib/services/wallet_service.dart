@@ -13,20 +13,20 @@ class WalletService {
   static final List<NetworkFee> _sampleNetworkFees = [
     NetworkFee(
       type: NetworkFeeType.low,
-      networkFee: FeeAmount(satoshis: 1130, btc: 0.0000113),
-      platformFee: FeeAmount(satoshis: 1000, btc: 0.00001),
+      networkFee: FeeAmount(amount: 0.0000113),
+      platformFee: FeeAmount(amount: 0.00001),
       estimatedTime: '60-120 minutes',
     ),
     NetworkFee(
       type: NetworkFeeType.medium,
-      networkFee: FeeAmount(satoshis: 3390, btc: 0.0000339),
-      platformFee: FeeAmount(satoshis: 1000, btc: 0.00001),
+      networkFee: FeeAmount(amount: 0.0000339),
+      platformFee: FeeAmount(amount: 0.00001),
       estimatedTime: '10-30 minutes',
     ),
     NetworkFee(
       type: NetworkFeeType.high,
-      networkFee: FeeAmount(satoshis: 6780, btc: 0.0000678),
-      platformFee: FeeAmount(satoshis: 1000, btc: 0.00001),
+      networkFee: FeeAmount(amount: 0.0000678),
+      platformFee: FeeAmount(amount: 0.00001),
       estimatedTime: '5-15 minutes',
     ),
   ];
@@ -281,7 +281,7 @@ class WalletService {
   }
 
   // Estimate transaction fees based on amount
-  Future<FeeEstimationResponse> estimateTransactionFee(double amount) async {
+  Future<FeeEstimationResponse> estimateTransactionFee(double amount, {String currency = 'BTC'}) async {
     try {
       final token = await _authService.getToken();
       if (token == null) throw Exception('No authentication token');
@@ -292,7 +292,10 @@ class WalletService {
           'Authorization': 'Bearer $token',
           'Content-Type': 'application/json',
         },
-        body: json.encode({'amount': amount}),
+        body: json.encode({
+          'amount': amount,
+          'currency': currency.toUpperCase(),
+        }),
       );
 
       if (response.statusCode == 200) {

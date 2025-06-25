@@ -9,7 +9,7 @@ import '../../widgets/qr_scanner_screen.dart';
 class ValidationResult {
   final bool isValid;
   final String errorMessage;
-  
+
   ValidationResult(this.isValid, this.errorMessage);
 }
 
@@ -27,12 +27,12 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _addressController = TextEditingController();
   final TextEditingController _descriptionController = TextEditingController();
-  
+
   NetworkFeeType _selectedFeeType = NetworkFeeType.medium;
   bool _isLoading = false;
   final NumberFormat _cryptoFormat = NumberFormat('#,##0.00000000', 'en_US');
   late String _currentCurrency;
-  
+
   // Debouncing for fee estimation
   Timer? _debounceTimer;
   static const Duration _debounceDuration = Duration(milliseconds: 800);
@@ -44,10 +44,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<WalletProvider>().fetchNetworkFees();
     });
-    
+
     // Listen to amount changes for fee estimation
     _amountController.addListener(_onAmountChanged);
-    
+
     // Listen to form changes for validation
     _amountController.addListener(_onFormChanged);
     _addressController.addListener(_onFormChanged);
@@ -229,7 +229,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             decoration: InputDecoration(
               hintText: '0.00000000',
               hintStyle: TextStyle(color: Colors.grey[400]),
-              suffixText: '${_getCurrencyDisplayName()}',
+              suffixText: '${_currentCurrency.toUpperCase()}',
               suffixStyle: TextStyle(color: Colors.grey[600]),
               filled: true,
               fillColor: Colors.white,
@@ -255,45 +255,21 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               if (amount == null || amount <= 0) {
                 return 'Please enter a valid amount';
               }
-              
+
               // Calculate total cost including both fees
-              final selectedFee = context.read<WalletProvider>().getFeeByType(_selectedFeeType);
+              final selectedFee =
+                  context.read<WalletProvider>().getFeeByType(_selectedFeeType);
               final totalCost = amount + (selectedFee?.totalBtcFee ?? 0.0);
-              
-              if (totalCost > wallet.btcBalance) {
+              final currentBalance =
+                  wallet.getBalanceForCurrency(_currentCurrency);
+
+              if (totalCost > currentBalance) {
                 return 'Insufficient balance (including fees)';
               }
               return null;
             },
           ),
           const SizedBox(height: 8),
-          // Row(
-          //   children: [
-          //     TextButton(
-          //       onPressed: () => _setMaxAmount(wallet.btcBalance),
-          //       child: const Text(
-          //         'Max',
-          //         style: TextStyle(color: Colors.blueAccent),
-          //       ),
-          //     ),
-          //     const SizedBox(width: 16),
-          //     TextButton(
-          //       onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.25),
-          //       child: const Text(
-          //         '25%',
-          //         style: TextStyle(color: Colors.blueAccent),
-          //       ),
-          //     ),
-          //     const SizedBox(width: 16),
-          //     TextButton(
-          //       onPressed: () => _setPercentageAmount(wallet.btcBalance, 0.75),
-          //       child: const Text(
-          //         '75%',
-          //         style: TextStyle(color: Colors.blueAccent),
-          //       ),
-          //     ),
-          //   ],
-          // ),
         ],
       ),
     );
@@ -301,7 +277,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
   Widget _buildNetworkFeeSection(WalletProvider walletProvider) {
     final fees = walletProvider.estimatedFees;
-    
+
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -330,7 +306,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                   height: 16,
                   child: CircularProgressIndicator(
                     strokeWidth: 2,
-                    valueColor: AlwaysStoppedAnimation<Color>(Colors.blueAccent),
+                    valueColor:
+                        AlwaysStoppedAnimation<Color>(Colors.blueAccent),
                   ),
                 ),
               ],
@@ -355,7 +332,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
   Widget _buildFeeOption(NetworkFee fee) {
     final isSelected = _selectedFeeType == fee.type;
-    
+
     return GestureDetector(
       onTap: () {
         setState(() {
@@ -418,24 +395,30 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           Text(
-                            '${_cryptoFormat.format(fee.totalBtcFee)} ${_getCurrencyDisplayName()}',
+                            '${_cryptoFormat.format(fee.totalBtcFee)} ${_currentCurrency.toUpperCase()}',
                             style: TextStyle(
-                              color: isSelected ? Colors.black87 : Colors.grey[700],
+                              color: isSelected
+                                  ? Colors.black87
+                                  : Colors.grey[700],
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
                             ),
                           ),
                           Text(
-                            'Network: ${_cryptoFormat.format(fee.networkFee.btc)} ${_getCurrencyDisplayName()}',
+                            'Network: ${_cryptoFormat.format(fee.networkFee.btc)} ${_currentCurrency.toUpperCase()}',
                             style: TextStyle(
-                              color: isSelected ? Colors.grey[600] : Colors.grey[500],
+                              color: isSelected
+                                  ? Colors.grey[600]
+                                  : Colors.grey[500],
                               fontSize: 10,
                             ),
                           ),
                           Text(
-                            'Platform: ${_cryptoFormat.format(fee.platformFee.btc)} ${_getCurrencyDisplayName()}',
+                            'Platform: ${_cryptoFormat.format(fee.platformFee.btc)} ${_currentCurrency.toUpperCase()}',
                             style: TextStyle(
-                              color: isSelected ? Colors.grey[600] : Colors.grey[500],
+                              color: isSelected
+                                  ? Colors.grey[600]
+                                  : Colors.grey[500],
                               fontSize: 10,
                             ),
                           ),
@@ -485,7 +468,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             controller: _addressController,
             style: const TextStyle(color: Colors.black87),
             decoration: InputDecoration(
-              hintText: 'Enter Bitcoin address (e.g., 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa)',
+              hintText:
+                  'Enter Bitcoin address (e.g., 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa)',
               hintStyle: TextStyle(color: Colors.grey[400]),
               filled: true,
               fillColor: Colors.white,
@@ -574,11 +558,11 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   Widget _buildSummaryCard(Wallet wallet, WalletProvider walletProvider) {
     final amount = double.tryParse(_amountController.text) ?? 0.0;
     final selectedFee = walletProvider.getFeeByType(_selectedFeeType);
-    
+
     if (selectedFee == null) {
       return const SizedBox.shrink();
     }
-    
+
     final networkFee = selectedFee.networkFee.btc;
     final platformFee = selectedFee.platformFee.btc;
     final totalFees = selectedFee.totalBtcFee;
@@ -604,23 +588,32 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             ),
           ),
           const SizedBox(height: 16),
-          _buildSummaryRow('Amount', '${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()}'),
-          _buildSummaryRow('Platform Fee', '${_cryptoFormat.format(platformFee)} ${_getCurrencyDisplayName()}'),
-          _buildSummaryRow('Network Fee', '${_cryptoFormat.format(networkFee)} ${_getCurrencyDisplayName()}'),
+          _buildSummaryRow('Amount',
+              '${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()}'),
+          _buildSummaryRow('Platform Fee',
+              '${_cryptoFormat.format(platformFee)} ${_getCurrencyDisplayName()}'),
+          _buildSummaryRow('Network Fee',
+              '${_cryptoFormat.format(networkFee)} ${_getCurrencyDisplayName()}'),
           Divider(color: Colors.grey[300]),
-          _buildSummaryRow('Total to Deduct', '${_cryptoFormat.format(total)} ${_getCurrencyDisplayName()}', isTotal: true),
+          _buildSummaryRow('Total to Deduct',
+              '${_cryptoFormat.format(total)} ${_getCurrencyDisplayName()}',
+              isTotal: true),
           const SizedBox(height: 8),
           Text(
-            'Remaining Balance: ${_cryptoFormat.format(wallet.btcBalance - total)} ${_getCurrencyDisplayName()}',
+            'Remaining Balance: ${_cryptoFormat.format(wallet.getBalanceForCurrency(_currentCurrency) - total)} ${_getCurrencyDisplayName()}',
             style: TextStyle(
-              color: total > wallet.btcBalance ? Colors.red : Colors.grey[600],
+              color: total > wallet.getBalanceForCurrency(_currentCurrency)
+                  ? Colors.red
+                  : Colors.grey[600],
               fontSize: 12,
-              fontWeight: total > wallet.btcBalance ? FontWeight.w600 : FontWeight.normal,
+              fontWeight: total > wallet.getBalanceForCurrency(_currentCurrency)
+                  ? FontWeight.w600
+                  : FontWeight.normal,
             ),
           ),
-          if (total > wallet.btcBalance)
+          if (total > wallet.getBalanceForCurrency(_currentCurrency))
             const SizedBox(height: 4),
-          if (total > wallet.btcBalance)
+          if (total > wallet.getBalanceForCurrency(_currentCurrency))
             const Text(
               'Insufficient balance',
               style: TextStyle(
@@ -663,12 +656,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
   Widget _buildWithdrawButton(WalletProvider walletProvider) {
     final validationResult = _validateWithdrawal(walletProvider);
-    final isButtonEnabled = validationResult.isValid && !_isLoading && !walletProvider.isLoading;
-    
+    final isButtonEnabled =
+        validationResult.isValid && !_isLoading && !walletProvider.isLoading;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        if (!validationResult.isValid && validationResult.errorMessage.isNotEmpty)
+        if (!validationResult.isValid &&
+            validationResult.errorMessage.isNotEmpty)
           Container(
             width: double.infinity,
             padding: const EdgeInsets.all(12),
@@ -746,19 +741,20 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     // Parse amount
     final amount = double.tryParse(amountText);
     if (amount == null || amount <= 0) {
-      return ValidationResult(false, 'Please enter a valid amount greater than 0');
+      return ValidationResult(
+          false, 'Please enter a valid amount greater than 0');
     }
 
     // Check if address is entered
     final address = _addressController.text.trim();
     if (address.isEmpty) {
-      return ValidationResult(false, 'Please enter a destination Bitcoin address');
+      return ValidationResult(false, 'Please enter a destination address');
     }
 
     // Check if address is valid (basic validation)
-    if (!_isValidBitcoinAddressBasic(address)) {
-      return ValidationResult(false, 'Please enter a valid Bitcoin address');
-    }
+    // if (!_isValidBitcoinAddressBasic(address)) {
+    //   return ValidationResult(false, 'Please enter a valid address');
+    // }
 
     // Check if fees are loaded
     final selectedFee = walletProvider.getFeeByType(_selectedFeeType);
@@ -768,28 +764,26 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
     // Check if there's a fee loading error
     if (walletProvider.feeError != null) {
-      return ValidationResult(false, 'Unable to load network fees. Please try again');
+      return ValidationResult(
+          false, 'Unable to load network fees. Please try again');
     }
 
     // Calculate total cost including fees
     final totalCost = amount + selectedFee.totalBtcFee;
-    
+
     // Check balance
-    if (totalCost > wallet.btcBalance) {
-      final shortfall = totalCost - wallet.btcBalance;
-      return ValidationResult(
-        false, 
-        'Insufficient balance. You need ${_cryptoFormat.format(shortfall)} ${_getCurrencyDisplayName()} more (including fees)'
-      );
+    if (totalCost > wallet.getBalanceForCurrency(_currentCurrency)) {
+      final shortfall =
+          totalCost - wallet.getBalanceForCurrency(_currentCurrency);
+      return ValidationResult(false,
+          'Insufficient balance. You need ${_cryptoFormat.format(shortfall)} ${_getCurrencyDisplayName()} more (including fees)');
     }
 
     // Check minimum withdrawal amount (if any)
     const minWithdrawal = 0.00001; // 1000 satoshis
     if (amount < minWithdrawal) {
-      return ValidationResult(
-        false,
-        'Minimum withdrawal amount is ${_cryptoFormat.format(minWithdrawal)} ${_getCurrencyDisplayName()}'
-      );
+      return ValidationResult(false,
+          'Minimum withdrawal amount is ${_cryptoFormat.format(minWithdrawal)} ${_getCurrencyDisplayName()}');
     }
 
     return ValidationResult(true, '');
@@ -797,16 +791,15 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
   bool _isValidBitcoinAddressBasic(String address) {
     if (address.isEmpty) return false;
-    
+
     // Basic Bitcoin address validation
     // Legacy addresses (P2PKH) start with '1'
-    // Script addresses (P2SH) start with '3'  
+    // Script addresses (P2SH) start with '3'
     // Bech32 addresses (P2WPKH/P2WSH) start with 'bc1'
     // Testnet addresses start with 'm', 'n', '2', 'tb1'
     final bitcoinAddressRegex = RegExp(
-      r'^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59}|[mn2][a-km-zA-HJ-NP-Z1-9]{25,34}|tb1[a-z0-9]{39,59})$'
-    );
-    
+        r'^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59}|[mn2][a-km-zA-HJ-NP-Z1-9]{25,34}|tb1[a-z0-9]{39,59})$');
+
     return bitcoinAddressRegex.hasMatch(address);
   }
 
@@ -837,14 +830,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
 
       // Show confirmation dialog
       final confirmed = await _showConfirmationDialog(amount, address);
-      
+
       if (confirmed == true) {
         final success = await context.read<WalletProvider>().createWithdrawal(
-          amount: amount,
-          toAddress: address,
-          feeType: _selectedFeeType,
-          description: description.isNotEmpty ? description : null,
-        );
+              amount: amount,
+              toAddress: address,
+              feeType: _selectedFeeType,
+              description: description.isNotEmpty ? description : null,
+            );
 
         if (success) {
           if (mounted) {
@@ -893,7 +886,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                 ),
               ),
             );
-            
+
             // Navigate back to wallet screen (which will auto-refresh)
             Navigator.pop(context);
           }
@@ -907,7 +900,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
-                        context.read<WalletProvider>().error ?? 'Withdrawal failed',
+                        context.read<WalletProvider>().error ??
+                            'Withdrawal failed',
                       ),
                     ),
                   ],
@@ -928,9 +922,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         // Extract the actual error message from the exception
         String errorMessage = e.toString();
         if (errorMessage.startsWith('Exception: ')) {
-          errorMessage = errorMessage.substring(11); // Remove 'Exception: ' prefix
+          errorMessage =
+              errorMessage.substring(11); // Remove 'Exception: ' prefix
         }
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Row(
@@ -986,12 +981,13 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
   }
 
   Future<bool?> _showConfirmationDialog(double amount, String address) {
-    final selectedFee = context.read<WalletProvider>().getFeeByType(_selectedFeeType);
-    
+    final selectedFee =
+        context.read<WalletProvider>().getFeeByType(_selectedFeeType);
+
     if (selectedFee == null) {
       return Future.value(false);
     }
-    
+
     final platformFee = selectedFee.platformFee.btc;
     final networkFee = selectedFee.networkFee.btc;
     final totalCost = amount + selectedFee.totalBtcFee;
@@ -1030,14 +1026,19 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildConfirmationRow('Amount:', '${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()}'),
+                  _buildConfirmationRow('Amount:',
+                      '${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()}'),
                   const SizedBox(height: 8),
-                  _buildConfirmationRow('Platform Fee:', '${_cryptoFormat.format(platformFee)} ${_getCurrencyDisplayName()}'),
-                  _buildConfirmationRow('Platform Fee:', '${_cryptoFormat.format(platformFee)} BTC'),
+                  _buildConfirmationRow('Platform Fee:',
+                      '${_cryptoFormat.format(platformFee)} ${_getCurrencyDisplayName()}'),
+                  _buildConfirmationRow('Platform Fee:',
+                      '${_cryptoFormat.format(platformFee)} BTC'),
                   const SizedBox(height: 8),
-                  _buildConfirmationRow('Network Fee:', '${_cryptoFormat.format(networkFee)} BTC'),
+                  _buildConfirmationRow('Network Fee:',
+                      '${_cryptoFormat.format(networkFee)} BTC'),
                   const SizedBox(height: 8),
-                  _buildConfirmationRow('Priority:', _getFeeTypeTitle(_selectedFeeType)),
+                  _buildConfirmationRow(
+                      'Priority:', _getFeeTypeTitle(_selectedFeeType)),
                   const Divider(),
                   _buildConfirmationRow(
                     'Total Cost:',
@@ -1145,7 +1146,8 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     );
   }
 
-  Widget _buildConfirmationRow(String label, String value, {bool isTotal = false}) {
+  Widget _buildConfirmationRow(String label, String value,
+      {bool isTotal = false}) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -1174,7 +1176,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     _debounceTimer = Timer(_debounceDuration, () {
       final amount = double.tryParse(_amountController.text);
       if (amount != null && amount > 0) {
-        context.read<WalletProvider>().estimateFeesForAmount(amount);
+        context
+            .read<WalletProvider>()
+            .estimateFeesForAmount(amount, currency: _currentCurrency);
       } else {
         context.read<WalletProvider>().clearFeeEstimation();
       }
@@ -1230,4 +1234,4 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     _descriptionController.dispose();
     super.dispose();
   }
-} 
+}

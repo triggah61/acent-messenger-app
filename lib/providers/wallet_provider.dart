@@ -146,7 +146,7 @@ class WalletProvider with ChangeNotifier {
   }
 
   // Estimate fees for a specific amount
-  Future<void> estimateFeesForAmount(double amount) async {
+  Future<void> estimateFeesForAmount(double amount, {String? currency}) async {
     // Don't fetch if amount is 0 or same as last request
     if (amount <= 0 || amount == _lastFeeAmount) return;
 
@@ -156,7 +156,10 @@ class WalletProvider with ChangeNotifier {
     notifyListeners();
 
     try {
-      _feeEstimation = await _walletService.estimateTransactionFee(amount);
+      _feeEstimation = await _walletService.estimateTransactionFee(
+        amount, 
+        currency: currency ?? 'BTC',
+      );
       _feeError = null;
     } catch (e) {
       _feeError = e.toString();
