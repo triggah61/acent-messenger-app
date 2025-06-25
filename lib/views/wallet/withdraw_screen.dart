@@ -589,18 +589,18 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
           ),
           const SizedBox(height: 16),
           _buildSummaryRow('Amount',
-              '${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()}'),
+              '${_cryptoFormat.format(amount)} ${_currentCurrency.toUpperCase()}'),
           _buildSummaryRow('Platform Fee',
-              '${_cryptoFormat.format(platformFee)} ${_getCurrencyDisplayName()}'),
+              '${_cryptoFormat.format(platformFee)} ${_currentCurrency.toUpperCase()}'),
           _buildSummaryRow('Network Fee',
-              '${_cryptoFormat.format(networkFee)} ${_getCurrencyDisplayName()}'),
+              '${_cryptoFormat.format(networkFee)} ${_currentCurrency.toUpperCase()}'),
           Divider(color: Colors.grey[300]),
           _buildSummaryRow('Total to Deduct',
-              '${_cryptoFormat.format(total)} ${_getCurrencyDisplayName()}',
+              '${_cryptoFormat.format(total)} ${_currentCurrency.toUpperCase()}',
               isTotal: true),
           const SizedBox(height: 8),
           Text(
-            'Remaining Balance: ${_cryptoFormat.format(wallet.getBalanceForCurrency(_currentCurrency) - total)} ${_getCurrencyDisplayName()}',
+            'Remaining Balance: ${_cryptoFormat.format(wallet.getBalanceForCurrency(_currentCurrency) - total)} ${_currentCurrency.toUpperCase()}',
             style: TextStyle(
               color: total > wallet.getBalanceForCurrency(_currentCurrency)
                   ? Colors.red
@@ -776,14 +776,14 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
       final shortfall =
           totalCost - wallet.getBalanceForCurrency(_currentCurrency);
       return ValidationResult(false,
-          'Insufficient balance. You need ${_cryptoFormat.format(shortfall)} ${_getCurrencyDisplayName()} more (including fees)');
+          'Insufficient balance. You need ${_cryptoFormat.format(shortfall)} ${_currentCurrency.toUpperCase()} more (including fees)');
     }
 
     // Check minimum withdrawal amount (if any)
     const minWithdrawal = 0.00001; // 1000 satoshis
     if (amount < minWithdrawal) {
       return ValidationResult(false,
-          'Minimum withdrawal amount is ${_cryptoFormat.format(minWithdrawal)} ${_getCurrencyDisplayName()}');
+          'Minimum withdrawal amount is ${_cryptoFormat.format(minWithdrawal)} ${_currentCurrency.toUpperCase()}');
     }
 
     return ValidationResult(true, '');
@@ -863,7 +863,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
                           ),
                           const SizedBox(height: 4),
                           Text(
-                            'Your Bitcoin withdrawal of ${_cryptoFormat.format(amount)} ${_getCurrencyDisplayName()} has been submitted successfully.',
+                            'Your ${_currentCurrency.toUpperCase()} withdrawal of ${_cryptoFormat.format(amount)} ${_currentCurrency.toUpperCase()} has been submitted successfully.',
                             style: const TextStyle(fontSize: 14),
                           ),
                         ],
