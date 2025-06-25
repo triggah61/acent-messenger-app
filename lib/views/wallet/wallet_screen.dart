@@ -202,6 +202,7 @@ class _WalletScreenState extends State<WalletScreen> {
         ),
         const SizedBox(height: 16),
         ...currencies.map((currency) => _buildCurrencyTile(
+          wallet,
           currency['code'] as String,
           currency['name'] as String,
           currency['balance'] as double,
@@ -212,7 +213,7 @@ class _WalletScreenState extends State<WalletScreen> {
     );
   }
 
-  Widget _buildCurrencyTile(String code, String name, double balance, Color color, String icon) {
+  Widget _buildCurrencyTile(wallet, String code, String name, double balance, Color color, String icon) {
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       padding: const EdgeInsets.all(20),
@@ -265,17 +266,25 @@ class _WalletScreenState extends State<WalletScreen> {
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      '${_cryptoFormat.format(balance)} $code',
+                      '${_currencyFormat.format(wallet.getUsdEquivalent(code))} USDT',
                       style: TextStyle(
                         color: Colors.grey[600],
                         fontSize: 14,
                       ),
                     ),
+                    // const SizedBox(height: 2),
+                    // Text(
+                    //   '\$${_currencyFormat.format(wallet.getUsdEquivalent(code))} USD',
+                    //   style: TextStyle(
+                    //     color: Colors.grey[500],
+                    //     fontSize: 12,
+                    //   ),
+                    // ),
                   ],
                 ),
               ),
               Text(
-                '${_cryptoFormat.format(balance)}',
+                '${_cryptoFormat.format(balance)} ${code.toUpperCase()}',
                 style: TextStyle(
                   color: color,
                   fontSize: 20,

@@ -13,6 +13,7 @@ class Wallet {
   final double bscBalance;
   final double usdBalance;
   final double platformFeePercentage;
+  final Map<String, Map<String, double>>? exchangeData;
 
   Wallet({
     required this.id,
@@ -29,9 +30,24 @@ class Wallet {
     required this.bscBalance,
     required this.usdBalance,
     required this.platformFeePercentage,
+    this.exchangeData,
   });
 
   factory Wallet.fromJson(Map<String, dynamic> json) {
+    // Parse exchange data if available
+    Map<String, Map<String, double>>? exchangeData;
+    if (json['exchangeData'] != null) {
+      exchangeData = {};
+      final data = json['exchangeData'] as Map<String, dynamic>;
+      data.forEach((currency, rates) {
+        exchangeData?[currency] = {};
+        final ratesMap = rates as Map<String, dynamic>;
+        ratesMap.forEach((toCurrency, rate) {
+          exchangeData?[currency]?[toCurrency] = (rate as num).toDouble();
+        });
+      });
+    }
+
     return Wallet(
       id: json['_id'],
       btcAddress: json['btcAddress'] ?? '',
@@ -47,6 +63,7 @@ class Wallet {
       bscBalance: (json['bscBalance'] ?? 0.0).toDouble(),
       usdBalance: (json['usdBalance'] ?? 0.0).toDouble(),
       platformFeePercentage: (json['platformFeePercentage'] ?? 0.0).toDouble(),
+      exchangeData: exchangeData,
     );
   }
 
@@ -66,6 +83,7 @@ class Wallet {
       'bscBalance': bscBalance,
       'usdBalance': usdBalance,
       'platformFeePercentage': platformFeePercentage,
+      'exchangeData': exchangeData,
     };
   }
 
@@ -101,6 +119,21 @@ class Wallet {
       default:
         return '';
     }
+  }
+
+  // Helper method to get USD equivalent for a currency
+  double getUsdEquivalent(String currency) {
+    final balance = getBalanceForCurrency(currency);
+    if (balance == 0) return 0.0;
+    
+    final rate = getExchangeRate(currency, 'USD');
+    return rate != null ? balance * rate : 0.0;
+  }
+
+  // Helper method to get exchange rate
+  double? getExchangeRate(String fromCurrency, String toCurrency) {
+    if (exchangeData == null) return null;
+    return exchangeData?[fromCurrency.toUpperCase()]?[toCurrency.toUpperCase()];
   }
 }
 
