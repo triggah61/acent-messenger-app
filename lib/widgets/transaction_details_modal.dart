@@ -136,10 +136,11 @@ class TransactionDetailsModal extends StatelessWidget {
   }
 
   Widget _buildAmountSection() {
-    final NumberFormat btcFormat = NumberFormat('#,##0.00000000', 'en_US');
+    final NumberFormat cryptoFormat = NumberFormat('#,##0.00000000', 'en_US');
     final isDeposit = transaction.isDeposit;
     final sign = isDeposit ? '+' : '-';
     final color = isDeposit ? Colors.green : Colors.red;
+    final currencyCode = transaction.currency;
 
     return Container(
       width: double.infinity,
@@ -156,17 +157,17 @@ class TransactionDetailsModal extends StatelessWidget {
       child: Column(
         children: [
           Text(
-            '$sign${btcFormat.format(transaction.btcAmount)} BTC',
+            '$sign${cryptoFormat.format(transaction.amount)} $currencyCode',
             style: TextStyle(
               fontSize: 32,
               fontWeight: FontWeight.bold,
               color: color,
             ),
           ),
-          if (transaction.netAmount.btc != transaction.amount.btc) ...[
+          if (transaction.netAmount != transaction.amount) ...[
             const SizedBox(height: 8),
             Text(
-              'Net Amount: ${btcFormat.format(transaction.netAmount.btc.abs())} BTC',
+              'Net Amount: ${cryptoFormat.format(transaction.netAmount.abs())} $currencyCode',
               style: TextStyle(
                 fontSize: 16,
                 color: Colors.grey[600],
@@ -179,17 +180,19 @@ class TransactionDetailsModal extends StatelessWidget {
   }
 
   Widget _buildDetailsSection() {
-    final NumberFormat btcFormat = NumberFormat('#,##0.00000000', 'en_US');
+    final NumberFormat cryptoFormat = NumberFormat('#,##0.00000000', 'en_US');
+    final currencyCode = transaction.currency;
     
     return _buildSection(
       title: 'Transaction Details',
       children: [
         _buildDetailRow('Type', _getTransactionTypeDisplay()),
+        _buildDetailRow('Currency', currencyCode),
         _buildDetailRow('Direction', transaction.direction.toUpperCase()),
-        if (transaction.fee.btc > 0)
-          _buildDetailRow('Network Fee', '${btcFormat.format(transaction.fee.btc)} BTC'),
-        if (transaction.adminFee.btc > 0)
-          _buildDetailRow('Platform Fee', '${btcFormat.format(transaction.adminFee.btc)} BTC'),
+        if (transaction.fee > 0)
+          _buildDetailRow('Network Fee', '${cryptoFormat.format(transaction.fee)} $currencyCode'),
+        if (transaction.adminFee > 0)
+          _buildDetailRow('Platform Fee', '${cryptoFormat.format(transaction.adminFee)} $currencyCode'),
         if (transaction.confirmations > 0)
           _buildDetailRow('Confirmations', '${transaction.confirmations}'),
         if (transaction.description != null && transaction.description!.isNotEmpty)
@@ -390,7 +393,21 @@ class TransactionDetailsModal extends StatelessWidget {
     if (transaction.description != null && transaction.description!.isNotEmpty) {
       return transaction.description!;
     }
-    return transaction.isDeposit ? 'Bitcoin Received' : 'Bitcoin Sent';
+    final currencyName = _getCurrencyName(transaction.currency);
+    return transaction.isDeposit ? '$currencyName Received' : '$currencyName Sent';
+  }
+
+  String _getCurrencyName(String currency) {
+    switch (currency.toUpperCase()) {
+      case 'BTC':
+        return 'Bitcoin';
+      case 'ETH':
+        return 'Ethereum';
+      case 'BNB':
+        return 'Binance Coin';
+      default:
+        return currency.toUpperCase();
+    }
   }
 
   String _getTransactionTypeDisplay() {

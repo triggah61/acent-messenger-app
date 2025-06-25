@@ -290,7 +290,7 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '$sign${_cryptoFormat.format(transaction.btcAmount)} ${widget.currency.toUpperCase()}',
+                  '$sign${_cryptoFormat.format(transaction.amount)} ${transaction.currency}',
                   style: TextStyle(
                     color: color,
                     fontSize: 16,
@@ -313,10 +313,10 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
                     ),
                   ),
                 ),
-                if (transaction.fee.btc > 0) ...[
+                if (transaction.fee > 0) ...[
                   const SizedBox(height: 2),
                   Text(
-                    'Fee: ${_cryptoFormat.format(transaction.fee.btc)} ${widget.currency.toUpperCase()}',
+                    'Fee: ${_cryptoFormat.format(transaction.fee)} ${transaction.currency}',
                     style: TextStyle(
                       color: Colors.grey[500],
                       fontSize: 10,

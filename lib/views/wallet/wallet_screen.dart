@@ -97,7 +97,7 @@ class _WalletScreenState extends State<WalletScreen> {
         Expanded(
           child: Center(
             child: Text(
-              'Your Wallets',
+              'Assets',
               style: TextStyle(
                 color: Colors.white,
                 fontSize: 24,
@@ -193,7 +193,7 @@ class _WalletScreenState extends State<WalletScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
-          'Your Wallets',
+          'Assets',
           style: TextStyle(
             color: Colors.black87,
             fontSize: 20,

@@ -96,7 +96,8 @@ class Wallet {
       case 'ETH':
         return ethAddress;
       case 'BNB':
-        return bscAddress;
+        // BNB on BSC uses the same address format as Ethereum
+        return bscAddress.isNotEmpty ? bscAddress : ethAddress;
       default:
         return '';
     }
@@ -107,11 +108,11 @@ class Transaction {
   final String id;
   final String? txHash;
   final String type; // 'withdrawal', 'deposit'
-  final String direction; // 'sent', 'received'
-  final TransactionAmount amount;
-  final TransactionAmount fee;
-  final TransactionAmount adminFee;
-  final TransactionAmount netAmount;
+  final String currency; // 'BTC', 'ETH', 'BNB'
+  final double amount;
+  final double fee;
+  final double adminFee;
+  final double netAmount;
   final String? fromAddress;
   final String? toAddress;
   final String status; // 'processing', 'confirmed', 'failed'
@@ -125,7 +126,7 @@ class Transaction {
     required this.id,
     this.txHash,
     required this.type,
-    required this.direction,
+    required this.currency,
     required this.amount,
     required this.fee,
     required this.adminFee,
@@ -142,14 +143,14 @@ class Transaction {
 
   factory Transaction.fromJson(Map<String, dynamic> json) {
     return Transaction(
-      id: json['id'],
+      id: json['_id'] ?? json['id'],
       txHash: json['txHash'],
       type: json['type'],
-      direction: json['direction'],
-      amount: TransactionAmount.fromJson(json['amount']),
-      fee: TransactionAmount.fromJson(json['fee']),
-      adminFee: TransactionAmount.fromJson(json['adminFee']),
-      netAmount: TransactionAmount.fromJson(json['netAmount']),
+      currency: json['currency'] ?? 'BTC',
+      amount: (json['amount'] ?? 0.0).toDouble(),
+      fee: (json['fee'] ?? 0.0).toDouble(),
+      adminFee: (json['adminFee'] ?? 0.0).toDouble(),
+      netAmount: (json['netAmount'] ?? 0.0).toDouble(),
       fromAddress: json['fromAddress'],
       toAddress: json['toAddress'],
       status: json['status'],
@@ -166,11 +167,11 @@ class Transaction {
       'id': id,
       'txHash': txHash,
       'type': type,
-      'direction': direction,
-      'amount': amount.toJson(),
-      'fee': fee.toJson(),
-      'adminFee': adminFee.toJson(),
-      'netAmount': netAmount.toJson(),
+      'currency': currency,
+      'amount': amount,
+      'fee': fee,
+      'adminFee': adminFee,
+      'netAmount': netAmount,
       'fromAddress': fromAddress,
       'toAddress': toAddress,
       'status': status,
@@ -183,35 +184,14 @@ class Transaction {
   }
 
   // Helper getter for backward compatibility
-  double get btcAmount => amount.btc.abs();
+  double get btcAmount => amount.abs();
   
   // Helper getter to determine if it's a deposit or withdrawal
-  bool get isDeposit => direction == 'received';
-  bool get isWithdrawal => direction == 'sent';
-}
-
-class TransactionAmount {
-  final int satoshis;
-  final double btc;
-
-  TransactionAmount({
-    required this.satoshis,
-    required this.btc,
-  });
-
-  factory TransactionAmount.fromJson(Map<String, dynamic> json) {
-    return TransactionAmount(
-      satoshis: json['satoshis'] ?? 0,
-      btc: (json['btc'] ?? 0.0).toDouble(),
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'satoshis': satoshis,
-      'btc': btc,
-    };
-  }
+  bool get isDeposit => type.toLowerCase() == 'deposit';
+  bool get isWithdrawal => type.toLowerCase() == 'withdrawal';
+  
+  // Helper getter to get direction for backward compatibility
+  String get direction => isDeposit ? 'received' : 'sent';
 }
 
 class TransactionPagination {
@@ -233,12 +213,12 @@ class TransactionPagination {
 
   factory TransactionPagination.fromJson(Map<String, dynamic> json) {
     return TransactionPagination(
-      page: json['page'] ?? 1,
+      page: json['currentPage'] ?? json['page'] ?? 1,
       limit: json['limit'] ?? 10,
       totalPages: json['totalPages'] ?? 1,
-      totalDocs: json['totalDocs'] ?? 0,
-      hasNextPage: json['hasNextPage'] ?? false,
-      hasPrevPage: json['hasPrevPage'] ?? false,
+      totalDocs: json['totalTransactions'] ?? json['totalDocs'] ?? 0,
+      hasNextPage: json['hasNext'] ?? json['hasNextPage'] ?? false,
+      hasPrevPage: json['hasPrev'] ?? json['hasPrevPage'] ?? false,
     );
   }
 

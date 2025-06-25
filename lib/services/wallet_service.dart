@@ -236,11 +236,29 @@ class WalletService {
   }
 
   // Generate QR code data for deposit address
-  String generateQRCodeData(String address, {double? amount}) {
-    if (amount != null && amount > 0) {
-      return 'bitcoin:$address?amount=$amount';
+  String generateQRCodeData(String address, {double? amount, String? currency}) {
+    final currencyCode = currency?.toUpperCase() ?? 'BTC';
+    
+    switch (currencyCode) {
+      case 'BTC':
+        if (amount != null && amount > 0) {
+          return 'bitcoin:$address?amount=$amount';
+        }
+        return 'bitcoin:$address';
+      case 'ETH':
+        if (amount != null && amount > 0) {
+          return 'ethereum:$address?value=${(amount * 1e18).toInt()}'; // Convert to wei
+        }
+        return 'ethereum:$address';
+      case 'BNB':
+        // BNB on BSC uses Ethereum format
+        if (amount != null && amount > 0) {
+          return 'ethereum:$address?value=${(amount * 1e18).toInt()}'; // Convert to wei
+        }
+        return 'ethereum:$address';
+      default:
+        return address; // Fallback to just the address
     }
-    return 'bitcoin:$address';
   }
 
   // Calculate total withdrawal cost (amount + platform fee + network fee)

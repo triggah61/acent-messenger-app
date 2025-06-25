@@ -31,7 +31,7 @@ class _DepositScreenState extends State<DepositScreen> {
     if (wallet != null) {
       final walletService = WalletService(context.read());
       final address = wallet.getAddressForCurrency(_currentCurrency);
-      _qrData = walletService.generateQRCodeData(address);
+      _qrData = walletService.generateQRCodeData(address, currency: _currentCurrency);
     }
   }
 
@@ -454,10 +454,7 @@ class _DepositScreenState extends State<DepositScreen> {
           ),
           const SizedBox(height: 12),
           Text(
-            '• Only send Bitcoin (BTC) to this address\n'
-            '• Sending any other cryptocurrency will result in permanent loss\n'
-            '• Minimum deposit: 0.00001 BTC\n'
-            '• Deposits require network confirmations',
+            _getWarningText(),
             style: TextStyle(
               color: Colors.grey[700],
               fontSize: 14,
@@ -467,6 +464,31 @@ class _DepositScreenState extends State<DepositScreen> {
         ],
       ),
     );
+  }
+
+  String _getWarningText() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        return '• Only send Bitcoin (BTC) to this address\n'
+            '• Sending any other cryptocurrency will result in permanent loss\n'
+            '• Minimum deposit: 0.00001 BTC\n'
+            '• Deposits require network confirmations';
+      case 'ETH':
+        return '• Only send Ethereum (ETH) to this address\n'
+            '• Sending any other cryptocurrency will result in permanent loss\n'
+            '• Minimum deposit: 0.001 ETH\n'
+            '• Deposits require network confirmations';
+      case 'BNB':
+        return '• Only send Binance Coin (BNB) on BSC network to this address\n'
+            '• Sending any other cryptocurrency will result in permanent loss\n'
+            '• Minimum deposit: 0.001 BNB\n'
+            '• Deposits require network confirmations';
+      default:
+        return '• Only send ${_getCurrencyDisplayName()} to this address\n'
+            '• Sending any other cryptocurrency will result in permanent loss\n'
+            '• Minimum deposit varies by network\n'
+            '• Deposits require network confirmations';
+    }
   }
 
   void _copyToClipboard(String text) {
@@ -493,7 +515,7 @@ class _DepositScreenState extends State<DepositScreen> {
       }
       setState(() {
         final address = wallet.getAddressForCurrency(_currentCurrency);
-        _qrData = walletService.generateQRCodeData(address, amount: amount);
+        _qrData = walletService.generateQRCodeData(address, amount: amount, currency: _currentCurrency);
       });
     }
   }
