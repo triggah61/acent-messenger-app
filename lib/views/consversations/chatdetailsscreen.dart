@@ -93,10 +93,20 @@ class _ConversationsState extends State<Conversations> {
         print('Chat: new_message received - $data');
         try {
           final message = Message.fromJson(data);
-          if (mounted) {
-            setState(() {
-              _messages.insert(0, message);
-            });
+
+          // IMPORTANT: Only add message if it belongs to the current chat session
+          final currentSessionId = widget.session?.id;
+          if (currentSessionId != null &&
+              message.chatSession == currentSessionId) {
+            if (mounted) {
+              setState(() {
+                _messages.insert(0, message);
+              });
+              print('Chat: Message added to conversation $currentSessionId');
+            }
+          } else {
+            print(
+                'Chat: Message ignored - belongs to session ${message.chatSession}, current session is $currentSessionId');
           }
         } catch (e) {
           print('Error parsing message in chat: $e');
@@ -110,10 +120,20 @@ class _ConversationsState extends State<Conversations> {
         print('Chat: typing_start received - $data');
         try {
           final userId = data['userId'] as String?;
-          if (mounted && userId != context.read<AuthProvider>().userId) {
+          final chatSessionId = data['chatSessionId'] as String?;
+          final currentSessionId = widget.session?.id;
+
+          // Only show typing indicator if it's for the current chat session
+          if (mounted &&
+              userId != context.read<AuthProvider>().userId &&
+              chatSessionId == currentSessionId) {
             setState(() {
               _isTyping = true;
             });
+            print('Chat: Typing indicator shown for session $currentSessionId');
+          } else {
+            print(
+                'Chat: Typing indicator ignored - session $chatSessionId, current session $currentSessionId');
           }
         } catch (e) {
           print('Error in typing start listener: $e');
@@ -127,10 +147,21 @@ class _ConversationsState extends State<Conversations> {
         print('Chat: stop_typing received - $data');
         try {
           final userId = data['userId'] as String?;
-          if (mounted && userId != context.read<AuthProvider>().userId) {
+          final chatSessionId = data['chatSessionId'] as String?;
+          final currentSessionId = widget.session?.id;
+
+          // Only hide typing indicator if it's for the current chat session
+          if (mounted &&
+              userId != context.read<AuthProvider>().userId &&
+              chatSessionId == currentSessionId) {
             setState(() {
               _isTyping = false;
             });
+            print(
+                'Chat: Typing indicator hidden for session $currentSessionId');
+          } else {
+            print(
+                'Chat: Typing stop ignored - session $chatSessionId, current session $currentSessionId');
           }
         } catch (e) {
           print('Error in typing stop listener: $e');
@@ -143,8 +174,20 @@ class _ConversationsState extends State<Conversations> {
       _reactionUpdatesListener = (data) {
         print('Chat: message_reactions_updated received - $data');
         try {
-          if (mounted) {
-            _updateMessageReactions(data['messageId'], data['reactions']);
+          final messageId = data['messageId'] as String?;
+          final chatSessionId = data['chatSessionId'] as String?;
+          final currentSessionId = widget.session?.id;
+
+          // Only update reactions if the message belongs to the current chat session
+          if (mounted &&
+              messageId != null &&
+              chatSessionId == currentSessionId) {
+            _updateMessageReactions(messageId, data['reactions']);
+            print(
+                'Chat: Reactions updated for message $messageId in session $currentSessionId');
+          } else {
+            print(
+                'Chat: Reaction update ignored - session $chatSessionId, current session $currentSessionId');
           }
         } catch (e) {
           print('Error in reaction updates listener: $e');
