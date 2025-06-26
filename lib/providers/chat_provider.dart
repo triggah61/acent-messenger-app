@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:acent_messenger/constants/config.dart';
-import 'package:acent_messenger/services/socket_service.dart';
+import 'package:acent_messenger/services/global_socket_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:acent_messenger/services/auth_service.dart';
@@ -8,7 +8,7 @@ import 'package:acent_messenger/models/chat_session.dart';
 
 class ChatProvider with ChangeNotifier {
   final AuthService _authService;
-  final SocketService _socketService = SocketService.instance;
+  final GlobalSocketService _globalSocketService = GlobalSocketService.instance;
   List<ChatSession> _sessions = [];
   bool _isLoading = false;
   bool _hasMore = true;
@@ -28,20 +28,30 @@ class ChatProvider with ChangeNotifier {
 
   @override
   void dispose() {
-    _socketService.removeNewSessionListener(_newSessionListener);
+    if (_newSessionListener != null) {
+      _globalSocketService.removeChatEventListener(
+          'new_chat_session', _newSessionListener!);
+    }
     super.dispose();
   }
 
   Future<void> _initializeSocket() async {
     try {
-      await _socketService.initializeSocket();
-      _newSessionListener = _socketService.onNewSession((data) {
+      // The global socket should already be initialized by GlobalEventProvider
+      // We just need to listen for new session events
+
+      _newSessionListener = (data) {
         print("ChatProvider - _initializeSocket: New session event received");
         print(data);
         fetchSessions(refresh: true);
-      });
+      };
+
+      _globalSocketService.addChatEventListener(
+          'new_chat_session', _newSessionListener!);
+
+      print('ChatProvider: Socket listener initialized');
     } catch (e) {
-      print('Failed to initialize socket: $e');
+      print('ChatProvider: Failed to initialize socket listener: $e');
     }
   }
 
@@ -52,7 +62,8 @@ class ChatProvider with ChangeNotifier {
       return;
     }
     if (refresh) {
-      print("ChatProvider - fetchSessions: Refreshing, clearing existing sessions");
+      print(
+          "ChatProvider - fetchSessions: Refreshing, clearing existing sessions");
       _sessions = [];
       _currentPage = 1;
       _hasMore = true;
@@ -73,7 +84,8 @@ class ChatProvider with ChangeNotifier {
       }
       print("ChatProvider - fetchSessions: Token found, making API request");
 
-      final url = '${Config.baseApiUrl}/user/chat/sessionList?page=$_currentPage&limit=$_limit';
+      final url =
+          '${Config.baseApiUrl}/user/chat/sessionList?page=$_currentPage&limit=$_limit';
       print("ChatProvider - fetchSessions: Requesting URL: $url");
 
       final response = await http.get(
@@ -84,23 +96,27 @@ class ChatProvider with ChangeNotifier {
         },
       );
 
-      print("ChatProvider - fetchSessions: Response status: ${response.statusCode}");
+      print(
+          "ChatProvider - fetchSessions: Response status: ${response.statusCode}");
       print("ChatProvider - fetchSessions: Response body: ${response.body}");
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body)['data'];
         final List<dynamic> docs = data['docs'];
         print("ChatProvider - fetchSessions: Found ${docs.length} sessions");
-        
-        final newSessions = docs.map((doc) => ChatSession.fromJson(doc)).toList();
-        print("ChatProvider - fetchSessions: Parsed ${newSessions.length} sessions");
-        
+
+        final newSessions =
+            docs.map((doc) => ChatSession.fromJson(doc)).toList();
+        print(
+            "ChatProvider - fetchSessions: Parsed ${newSessions.length} sessions");
+
         _sessions.addAll(newSessions);
-        print("ChatProvider - fetchSessions: Total sessions now: ${_sessions.length}");
-        
+        print(
+            "ChatProvider - fetchSessions: Total sessions now: ${_sessions.length}");
+
         _hasMore = data['hasNextPage'] ?? false;
         print("ChatProvider - fetchSessions: Has more pages: $_hasMore");
-        
+
         _currentPage++;
         print("ChatProvider - fetchSessions: Next page will be: $_currentPage");
       } else {
@@ -134,8 +150,7 @@ class ChatProvider with ChangeNotifier {
     _isLoading = false;
     _hasMore = true;
     _currentPage = 1;
-    // Disconnect socket to prevent old data from coming through
-    _socketService.disconnect();
+    // Note: Global socket should remain connected and be managed by GlobalEventProvider
     notifyListeners();
   }
-} 
+}

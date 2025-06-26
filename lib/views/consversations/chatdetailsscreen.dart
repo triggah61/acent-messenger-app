@@ -5,7 +5,7 @@ import 'package:acent_messenger/providers/chat_provider.dart';
 import 'package:acent_messenger/providers/group_provider.dart';
 import 'package:acent_messenger/providers/global_event_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
-import 'package:acent_messenger/services/socket_service.dart';
+import 'package:acent_messenger/services/global_socket_service.dart';
 import 'package:acent_messenger/views/contacts/contacts.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -35,7 +35,7 @@ class Conversations extends StatefulWidget {
 
 class _ConversationsState extends State<Conversations> {
   final AuthService _authService = AuthService();
-  final SocketService _socketService = SocketService.instance;
+  final GlobalSocketService _globalSocketService = GlobalSocketService.instance;
   bool _isAttachmentSheetVisible = false;
   final TextEditingController _messageController = TextEditingController();
   ChatSession? session;
@@ -55,20 +55,23 @@ class _ConversationsState extends State<Conversations> {
 
   // Store listener references for proper cleanup
   Function(dynamic)? _newMessageListener;
-  Function(dynamic)? _typingListener;
+  Function(dynamic)? _typingStartListener;
+  Function(dynamic)? _typingStopListener;
   Function(dynamic)? _reactionUpdatesListener;
 
   @override
   void initState() {
     super.initState();
-    
+
     // Set current active session for global event handling
     if (widget.session?.id != null) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        context.read<GlobalEventProvider>().setCurrentActiveSession(widget.session!.id);
+        context
+            .read<GlobalEventProvider>()
+            .setCurrentActiveSession(widget.session!.id);
       });
     }
-    
+
     _initializeSocket();
     _loadMessages();
     _scrollController.addListener(_scrollListener);
@@ -76,41 +79,89 @@ class _ConversationsState extends State<Conversations> {
 
   Future<void> _initializeSocket() async {
     try {
-      await _socketService.initializeSocket();
-      _socketService.joinChatSession(widget.session?.id ?? '');
+      // Ensure global socket is connected (this should already be done by GlobalEventProvider)
+      final userId = context.read<AuthProvider>().userId;
+      if (userId != null) {
+        await _globalSocketService.initializeGlobalSocket(userId);
+      }
+
+      // Join the chat session
+      _globalSocketService.joinChatSession(widget.session?.id ?? '');
 
       // Listen for new messages
-      _newMessageListener = _socketService.onNewMessage((message) {
-        if (mounted) {
-          setState(() {
-            _messages.insert(0, message);
-          });
+      _newMessageListener = (data) {
+        print('Chat: new_message received - $data');
+        try {
+          final message = Message.fromJson(data);
+          if (mounted) {
+            setState(() {
+              _messages.insert(0, message);
+            });
+          }
+        } catch (e) {
+          print('Error parsing message in chat: $e');
         }
-      });
+      };
+      _globalSocketService.addChatEventListener(
+          'new_message', _newMessageListener!);
 
-      // Listen for typing events
-      _typingListener = _socketService.onTyping((userId, isTyping) {
-        if (mounted && userId != context.read<AuthProvider>().userId) {
-          setState(() {
-            _isTyping = isTyping;
-          });
+      // Listen for typing start events
+      _typingStartListener = (data) {
+        print('Chat: typing_start received - $data');
+        try {
+          final userId = data['userId'] as String?;
+          if (mounted && userId != context.read<AuthProvider>().userId) {
+            setState(() {
+              _isTyping = true;
+            });
+          }
+        } catch (e) {
+          print('Error in typing start listener: $e');
         }
-      });
+      };
+      _globalSocketService.addChatEventListener(
+          'typing_start', _typingStartListener!);
+
+      // Listen for typing stop events
+      _typingStopListener = (data) {
+        print('Chat: stop_typing received - $data');
+        try {
+          final userId = data['userId'] as String?;
+          if (mounted && userId != context.read<AuthProvider>().userId) {
+            setState(() {
+              _isTyping = false;
+            });
+          }
+        } catch (e) {
+          print('Error in typing stop listener: $e');
+        }
+      };
+      _globalSocketService.addChatEventListener(
+          'stop_typing', _typingStopListener!);
 
       // Listen for reaction updates
-      _reactionUpdatesListener = _socketService.onMessageReactionsUpdated((data) {
-        if (mounted) {
-          _updateMessageReactions(data['messageId'], data['reactions']);
+      _reactionUpdatesListener = (data) {
+        print('Chat: message_reactions_updated received - $data');
+        try {
+          if (mounted) {
+            _updateMessageReactions(data['messageId'], data['reactions']);
+          }
+        } catch (e) {
+          print('Error in reaction updates listener: $e');
         }
-      });
+      };
+      _globalSocketService.addChatEventListener(
+          'message_reactions_updated', _reactionUpdatesListener!);
+
+      print('Chat: Socket initialization completed');
     } catch (e) {
-      print('Failed to initialize socket: $e');
+      print('Failed to initialize socket for chat: $e');
     }
   }
 
   void _updateMessageReactions(String messageId, List<dynamic> reactions) {
     if (!mounted) return;
-    
+
     setState(() {
       final messageIndex = _messages.indexWhere((m) => m.id == messageId);
       if (messageIndex != -1) {
@@ -140,10 +191,10 @@ class _ConversationsState extends State<Conversations> {
       _typingTimer?.cancel();
     }
 
-    _socketService.emitTyping(widget.session?.id ?? '', true);
+    _globalSocketService.emitChatTyping(widget.session?.id ?? '', true);
 
     _typingTimer = Timer(const Duration(seconds: 2), () {
-      _socketService.emitTyping(widget.session?.id ?? '', false);
+      _globalSocketService.emitChatTyping(widget.session?.id ?? '', false);
     });
   }
 
@@ -151,12 +202,30 @@ class _ConversationsState extends State<Conversations> {
   void dispose() {
     // Clear current active session
     context.read<GlobalEventProvider>().clearCurrentActiveSession();
-    
+
     _typingTimer?.cancel();
-    _socketService.removeNewMessageListener(_newMessageListener);
-    _socketService.removeTypingListener(_typingListener);
-    _socketService.removeReactionUpdatesListener(_reactionUpdatesListener);
-    _socketService.leaveChatSession(widget.session?.id ?? '');
+
+    // Remove chat event listeners
+    if (_newMessageListener != null) {
+      _globalSocketService.removeChatEventListener(
+          'new_message', _newMessageListener!);
+    }
+    if (_typingStartListener != null) {
+      _globalSocketService.removeChatEventListener(
+          'typing_start', _typingStartListener!);
+    }
+    if (_typingStopListener != null) {
+      _globalSocketService.removeChatEventListener(
+          'stop_typing', _typingStopListener!);
+    }
+    if (_reactionUpdatesListener != null) {
+      _globalSocketService.removeChatEventListener(
+          'message_reactions_updated', _reactionUpdatesListener!);
+    }
+
+    // Leave chat session
+    _globalSocketService.leaveChatSession(widget.session?.id ?? '');
+
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -197,21 +266,21 @@ class _ConversationsState extends State<Conversations> {
 
       if (response.statusCode == 200) {
         final responseData = json.decode(response.body);
-        
+
         // Check if response has the expected structure
         if (responseData['data'] == null) {
           throw Exception('Invalid response structure: missing data field');
         }
-        
+
         final data = responseData['data'];
-        
+
         // Check if docs field exists
         if (data['docs'] == null) {
           throw Exception('Invalid response structure: missing docs field');
         }
-        
+
         final List<Message> newMessages = [];
-        
+
         // Safely parse each message with error handling
         for (var messageJson in (data['docs'] as List)) {
           try {
@@ -238,7 +307,7 @@ class _ConversationsState extends State<Conversations> {
       setState(() {
         _isLoading = false;
       });
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -397,7 +466,7 @@ class _ConversationsState extends State<Conversations> {
     Navigator.push(
       context,
       MaterialPageRoute(
-          builder: (context) => 
+          builder: (context) =>
               CreatePollScreen()), // Replace RecordScreen with your actual record widget/route
     );
   }
@@ -835,10 +904,11 @@ class _ConversationsState extends State<Conversations> {
     if (title == null || title.trim().isEmpty) {
       return '?';
     }
-    
+
     // Split by spaces and filter out empty strings
-    final words = title.trim().split(' ').where((word) => word.isNotEmpty).toList();
-    
+    final words =
+        title.trim().split(' ').where((word) => word.isNotEmpty).toList();
+
     if (words.isEmpty) {
       return '?';
     } else if (words.length == 1) {
@@ -1232,10 +1302,11 @@ class MessageBubble extends StatelessWidget {
     if (name == null || name.trim().isEmpty) {
       return '?';
     }
-    
+
     // Split by spaces and filter out empty strings
-    final words = name.trim().split(' ').where((word) => word.isNotEmpty).toList();
-    
+    final words =
+        name.trim().split(' ').where((word) => word.isNotEmpty).toList();
+
     if (words.isEmpty) {
       return '?';
     } else if (words.length == 1) {

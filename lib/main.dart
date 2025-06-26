@@ -59,16 +59,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    
+
     // Setup clear data callbacks after providers are available
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
       final chatProvider = Provider.of<ChatProvider>(context, listen: false);
-      final walletProvider = Provider.of<WalletProvider>(context, listen: false);
+      final walletProvider =
+          Provider.of<WalletProvider>(context, listen: false);
       final groupProvider = Provider.of<GroupProvider>(context, listen: false);
-      final contactsProvider = Provider.of<ContactsProvider>(context, listen: false);
-      final globalEventProvider = Provider.of<GlobalEventProvider>(context, listen: false);
-      
+      final contactsProvider =
+          Provider.of<ContactsProvider>(context, listen: false);
+      final globalEventProvider =
+          Provider.of<GlobalEventProvider>(context, listen: false);
+
       // Set callback to clear all data when logout is called
       authProvider.setClearAllDataCallback(() {
         chatProvider.clearAllData();
@@ -77,12 +80,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         contactsProvider.clearAllData();
         globalEventProvider.disconnectGlobalEvents();
       });
-      
+
       // Set callback to initialize global events when user logs in
       authProvider.setInitializeGlobalEventsCallback((String userId) {
         globalEventProvider.ensureInitialized(userId);
       });
-      
+
       // Set callbacks for refreshing session lists when new messages arrive
       globalEventProvider.setRefreshSessionsCallbacks(
         refreshChatSessions: () {
@@ -115,12 +118,13 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
-    final globalEventProvider = Provider.of<GlobalEventProvider>(context, listen: false);
-    
+    final globalEventProvider =
+        Provider.of<GlobalEventProvider>(context, listen: false);
+
     debugPrint('App lifecycle state changed: $state');
-    
+
     switch (state) {
       case AppLifecycleState.resumed:
         debugPrint('App resumed - checking global events connection');
@@ -134,6 +138,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         debugPrint('App paused - updating user status to away');
         // App went to background - update status but keep connection
         if (authProvider.isAuthenticated) {
+          globalEventProvider.handleAppPause();
           authProvider.updateUserStatus('away');
         }
         break;
@@ -141,13 +146,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         debugPrint('App detached - updating user status to offline');
         // App is being terminated - update status to offline
         if (authProvider.isAuthenticated) {
+          globalEventProvider.handleAppDetached();
           authProvider.updateUserStatus('offline');
         }
         break;
       case AppLifecycleState.inactive:
+        debugPrint('App inactive - no action needed');
         // App is inactive (e.g., during a phone call)
         break;
       case AppLifecycleState.hidden:
+        debugPrint('App hidden - no action needed');
         // App is hidden but still running
         break;
     }
@@ -157,7 +165,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   @override
   Widget build(BuildContext context) {
     print("App - MyApp: Building app widget");
-    
+
     return MaterialApp(
       debugShowCheckedModeBanner: false,
       title: 'Chat App',
