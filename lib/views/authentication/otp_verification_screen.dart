@@ -2,12 +2,15 @@ import 'package:acent_messenger/constants/config.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:io';
 import 'package:provider/provider.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 import '../../constants/colors.dart';
-import '../../commonwidgets/botttommnavigationbar.dart';
+
 import '../../widgets/custombtn.dart';
 import '../../widgets/detailstext1.dart';
 import '../../providers/auth_provider.dart';
+import '../../services/simple_fcm_service.dart';
 import '../splash/splash.dart';
 
 class OtpVerificationScreen extends StatefulWidget {
@@ -128,25 +131,80 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
     });
 
     try {
+      // Get FCM token and device info
+      String? fcmToken;
+      String? deviceId;
+      String platform = 'web';
+
+      try {
+        final fcmService = SimpleFCMService.instance;
+        debugPrint('OTP Verification: Getting FCM token...');
+        fcmToken = await fcmService.getToken();
+        debugPrint(
+            'OTP Verification: FCM Token result: ${fcmToken != null ? "${fcmToken.substring(0, 20)}..." : "NULL"}');
+
+        // Get platform
+        platform = fcmService.getPlatform();
+
+        // Get device info
+        try {
+          if (Platform.isAndroid) {
+            final deviceInfo = DeviceInfoPlugin();
+            final androidInfo = await deviceInfo.androidInfo;
+            deviceId = androidInfo.id;
+          } else if (Platform.isIOS) {
+            final deviceInfo = DeviceInfoPlugin();
+            final iosInfo = await deviceInfo.iosInfo;
+            deviceId = iosInfo.identifierForVendor;
+          }
+          debugPrint(
+              'OTP Verification: Platform: $platform, Device ID: $deviceId');
+        } catch (e) {
+          debugPrint('OTP Verification: Error getting device info: $e');
+          deviceId = 'unknown';
+        }
+      } catch (e) {
+        debugPrint('OTP Verification: Error getting FCM token: $e');
+        // Continue without FCM token - don't fail the login
+      }
+
+      // Prepare request body
+      final requestBody = {
+        'code': otp,
+        'phone': widget.phone,
+        'dialCode': widget.dialCode,
+        'traceId': widget.traceId,
+      };
+
+      // Add FCM data if available
+      if (fcmToken != null && fcmToken.isNotEmpty) {
+        requestBody['fcmToken'] = fcmToken;
+        requestBody['platform'] = platform;
+        if (deviceId != null) {
+          requestBody['deviceId'] = deviceId;
+        }
+        debugPrint('OTP Verification: Added FCM data to request body');
+      } else {
+        debugPrint(
+            'OTP Verification: No FCM token available, skipping FCM data');
+      }
+
+      debugPrint('OTP Verification: Request body: ${jsonEncode(requestBody)}');
+
       final response = await http.post(
         Uri.parse('${Config.baseApiUrl}/auth/login/verify'),
         headers: {
           'Content-Type': 'application/json',
         },
-        body: jsonEncode({
-          'code': otp,
-          'phone': widget.phone,
-          'dialCode': widget.dialCode,
-          'traceId': widget.traceId,
-        }),
+        body: jsonEncode(requestBody),
       );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['data']['token'] != null) {
-          // Use AuthProvider to handle login success
+          // Use AuthProvider to handle login success (without FCM registration since it's done on backend)
           await Provider.of<AuthProvider>(context, listen: false)
-              .handleLoginSuccess(data['data']['token']);
+              .handleLoginSuccessWithoutFCM(data['data']['token']);
 
           if (mounted) {
             // Let the splash screen handle the navigation based on profile completion
@@ -290,7 +348,7 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
                                 },
                                 child: _isResending
                                     ? const Text(
-                                        'Resending...', 
+                                        'Resending...',
                                         style: TextStyle(
                                           color: AppColors.buttonColor,
                                           fontWeight: FontWeight.bold,

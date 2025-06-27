@@ -6,20 +6,23 @@ import 'package:http/http.dart' as http;
 import '../models/profile.dart';
 import '../services/auth_service.dart';
 import '../services/global_socket_service.dart';
+import '../services/fcm_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
   final GlobalSocketService _globalSocketService = GlobalSocketService.instance;
+  final FCMService _fcmService = FCMService.instance;
   Profile? _profile;
   bool _isLoading = true; // Start with loading true
   bool _isInitialized = false;
   String? _token;
   String? _userId;
-  
+  bool _skipFCMRegistration = false;
+
   // Callback to clear data from other providers
   Function()? _clearAllDataCallback;
-  
+
   // Global events callback
   Function(String)? _initializeGlobalEventsCallback;
 
@@ -29,12 +32,12 @@ class AuthProvider with ChangeNotifier {
   bool get isInitialized => _isInitialized;
   String? get token => _token;
   String? get userId => _userId;
-  
+
   // Set callback to clear data from other providers
   void setClearAllDataCallback(Function() callback) {
     _clearAllDataCallback = callback;
   }
-  
+
   // Set callback to initialize global events
   void setInitializeGlobalEventsCallback(Function(String) callback) {
     _initializeGlobalEventsCallback = callback;
@@ -51,31 +54,89 @@ class AuthProvider with ChangeNotifier {
   Future<void> handleLoginSuccess(String token) async {
     _isLoading = true;
     notifyListeners();
-    
+
     try {
       await _authService.storage.write(key: 'jwt_token', value: token);
       _token = token;
       await fetchProfile();
-      
+
       // Initialize global events after successful login
       if (_profile?.id != null && _initializeGlobalEventsCallback != null) {
-        debugPrint('AuthProvider: Initializing global events for user ${_profile!.id}');
+        debugPrint(
+            'AuthProvider: Initializing global events for user ${_profile!.id}');
         _initializeGlobalEventsCallback!(_profile!.id);
-        
+
         // Update user status to online
         _globalSocketService.updateUserStatus('online');
       }
+
+      // Register FCM token after successful login
+      await _registerFCMToken();
     } finally {
       _isLoading = false;
       notifyListeners();
     }
   }
 
+  // Call this after successful login when FCM token is already registered on backend
+  Future<void> handleLoginSuccessWithoutFCM(String token) async {
+    _isLoading = true;
+    notifyListeners();
+
+    try {
+      await _authService.storage.write(key: 'jwt_token', value: token);
+      _token = token;
+
+      // Skip FCM registration since it's already done on backend
+      _skipFCMRegistration = true;
+      await fetchProfile();
+      _skipFCMRegistration = false; // Reset flag
+
+      // Initialize global events after successful login
+      if (_profile?.id != null && _initializeGlobalEventsCallback != null) {
+        debugPrint(
+            'AuthProvider: Initializing global events for user ${_profile!.id}');
+        _initializeGlobalEventsCallback!(_profile!.id);
+
+        // Update user status to online
+        _globalSocketService.updateUserStatus('online');
+      }
+
+      // FCM token is already registered on backend, no need to register again
+      debugPrint(
+          'AuthProvider: FCM token already registered on backend during login');
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  /// Register FCM token with server after login
+  Future<void> _registerFCMToken() async {
+    try {
+      if (!_fcmService.isInitialized) {
+        await _fcmService.initialize();
+      }
+
+      if (await _fcmService.needsTokenRegistration()) {
+        final success = await _fcmService.registerToken();
+        if (success) {
+          debugPrint('AuthProvider: FCM token registered successfully');
+        } else {
+          debugPrint('AuthProvider: Failed to register FCM token');
+        }
+      } else {
+        debugPrint('AuthProvider: FCM token already registered');
+      }
+    } catch (e) {
+      debugPrint('AuthProvider: Error registering FCM token: $e');
+    }
+  }
+
   // Manual profile fetch
   Future<void> fetchProfile() async {
-
     print("AuthProvider - fetchProfile: isLoading: $_isLoading");
-    
+
     _isLoading = true;
     notifyListeners();
 
@@ -89,7 +150,7 @@ class AuthProvider with ChangeNotifier {
             'Authorization': 'Bearer $token'
           },
         );
-        
+
         if (response.statusCode == 200) {
           print("Profile: ${response.body}, ${response.statusCode}");
           final data = jsonDecode(response.body);
@@ -97,14 +158,21 @@ class AuthProvider with ChangeNotifier {
           _profile = Profile.fromJson(data['data']);
           _isInitialized = true;
           print(" AuthMiddleware: Profile fetched: ${_profile?.toJson()}");
-          
+
           // Ensure global events are initialized if callback is set and we have a profile
           if (_profile?.id != null && _initializeGlobalEventsCallback != null) {
-            debugPrint('AuthProvider: Ensuring global events for user ${_profile!.id}');
+            debugPrint(
+                'AuthProvider: Ensuring global events for user ${_profile!.id}');
             _initializeGlobalEventsCallback!(_profile!.id);
-            
+
             // Update user status to online
             _globalSocketService.updateUserStatus('online');
+          }
+
+          // Register FCM token if profile was fetched successfully
+          // Skip FCM registration if it was already done during login verification
+          if (!_skipFCMRegistration) {
+            await _registerFCMToken();
           }
         } else {
           _profile = null;
@@ -128,35 +196,42 @@ class AuthProvider with ChangeNotifier {
     if (_profile?.id != null) {
       _globalSocketService.updateUserStatus('offline');
     }
-    
+
+    // Remove FCM token from server before logout
+    try {
+      await _fcmService.removeToken();
+    } catch (e) {
+      debugPrint('AuthProvider: Error removing FCM token during logout: $e');
+    }
+
     // Disconnect global socket
     await _globalSocketService.disconnectGlobalSocket();
-    
+
     await _authService.logout();
     _profile = null;
     _isInitialized = false;
     _token = null;
     _userId = null;
-    
+
     // Clear secure storage
     final storage = const FlutterSecureStorage();
     await storage.delete(key: 'token');
     await storage.delete(key: 'userId');
     await storage.delete(key: 'jwt_token');
     await storage.delete(key: 'phone_number');
-    
+
     // Clear data from all other providers
     if (_clearAllDataCallback != null) {
       _clearAllDataCallback!();
     }
-    
+
     notifyListeners();
   }
 
   // Initial auth check - only called once when app starts
   Future<void> checkAuthStatus() async {
     if (_isInitialized) return;
-    
+
     _isLoading = true;
     notifyListeners();
 
@@ -193,14 +268,14 @@ class AuthProvider with ChangeNotifier {
     await storage.write(key: 'userId', value: userId);
     notifyListeners();
   }
-  
+
   // Update user status manually
   void updateUserStatus(String status) {
     if (_profile?.id != null) {
       _globalSocketService.updateUserStatus(status);
     }
   }
-  
+
   // Get global socket connection info
   Map<String, dynamic> getGlobalSocketInfo() {
     return _globalSocketService.getConnectionInfo();

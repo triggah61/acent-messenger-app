@@ -9,16 +9,32 @@ import 'providers/wallet_provider.dart';
 import 'providers/global_event_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
 import 'services/wallet_service.dart';
+import 'services/fcm_service.dart';
 import 'providers/contacts_provider.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 
-void main() {
+void main() async {
   print("App - main: Starting application");
+
+  // Ensure Flutter is initialized
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize FCM service
+  final fcmService = FCMService.instance;
+  await fcmService.initialize();
+
+  // Set up background message handler
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+
   runApp(
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ContactsProvider()),
         Provider<AuthService>(
           create: (_) => AuthService(),
+        ),
+        Provider<FCMService>(
+          create: (_) => FCMService.instance,
         ),
         ChangeNotifierProvider<AuthProvider>(
           create: (_) => AuthProvider(),

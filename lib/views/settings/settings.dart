@@ -2,6 +2,7 @@ import 'package:acent_messenger/views/helpcenter/helpcenter.dart';
 import 'package:acent_messenger/views/notifications/notifications.dart';
 import 'package:acent_messenger/views/profile/profilescreen.dart';
 import 'package:acent_messenger/views/search/search.dart';
+import 'package:acent_messenger/views/settings/notification_settings_screen.dart';
 import 'package:flutter/material.dart';
 
 import '../chats/chat_screen.dart';
@@ -88,7 +89,8 @@ class SettingsScreen extends StatelessWidget {
                           Navigator.push(
                             context,
                             MaterialPageRoute(
-                              builder: (context) => const ChatNotifications(),
+                              builder: (context) =>
+                                  const NotificationSettingsScreen(),
                             ),
                           );
                         },
