@@ -23,10 +23,12 @@ class GlobalSocketService {
   // Connection health monitoring
   Timer? _pingTimer;
   Timer? _reconnectTimer;
+  Timer? _connectionHealthTimer;
   int _reconnectAttempts = 0;
   static const int _maxReconnectAttempts = 5;
   static const Duration _pingInterval = Duration(seconds: 30);
   static const Duration _reconnectDelay = Duration(seconds: 3);
+  static const Duration _healthCheckInterval = Duration(minutes: 1);
 
   // Track last connection timestamp to detect stale connections
   DateTime? _lastConnectionTime;
@@ -35,31 +37,51 @@ class GlobalSocketService {
   // Connection state flags
   bool _isReconnecting = false;
   bool _isDisconnecting = false;
+  bool _isInitialized = false;
+
+  // Track active chat sessions for rejoining after reconnection
+  final Set<String> _activeChatSessions = <String>{};
 
   // === CHAT-SPECIFIC METHODS (consolidated from SocketService) ===
 
   // Join a chat session
   void joinChatSession(String chatSessionId) {
+    if (!chatSessionId.isNotEmpty) {
+      debugPrint('GlobalSocket: Cannot join chat - invalid session ID');
+      return;
+    }
+
     if (isConnected) {
       _globalSocket?.emit('join_chat', chatSessionId);
+      _activeChatSessions.add(chatSessionId);
       debugPrint('GlobalSocket: Joined chat session: $chatSessionId');
     } else {
-      debugPrint('GlobalSocket: Cannot join chat session - not connected');
+      debugPrint(
+          'GlobalSocket: Cannot join chat session - not connected, will rejoin on reconnection');
+      _activeChatSessions.add(chatSessionId); // Still track for later
     }
   }
 
   // Leave a chat session
   void leaveChatSession(String chatSessionId) {
+    if (!chatSessionId.isNotEmpty) {
+      debugPrint('GlobalSocket: Cannot leave chat - invalid session ID');
+      return;
+    }
+
     if (isConnected) {
       _globalSocket?.emit('leave_chat', chatSessionId);
       debugPrint('GlobalSocket: Left chat session: $chatSessionId');
     } else {
       debugPrint('GlobalSocket: Cannot leave chat session - not connected');
     }
+    _activeChatSessions.remove(chatSessionId);
   }
 
   // Emit typing event for chat
   void emitChatTyping(String chatSessionId, bool isTyping) {
+    if (!chatSessionId.isNotEmpty) return;
+
     if (isConnected) {
       _globalSocket?.emit('typing', {
         'chatSessionId': chatSessionId,
@@ -120,6 +142,10 @@ class GlobalSocketService {
   bool get isConnected => _isConnected && _globalSocket?.connected == true;
   String? get currentUserId => _currentUserId;
   bool get isReconnecting => _isReconnecting;
+  bool get isInitialized => _isInitialized;
+
+  // Get active chat sessions
+  Set<String> get activeChatSessions => Set.from(_activeChatSessions);
 
   // Initialize global socket connection for a specific user
   Future<void> initializeGlobalSocket(String userId) async {
@@ -143,6 +169,7 @@ class GlobalSocketService {
         debugPrint(
             'GlobalSocket: Health check passed, ensuring user room membership');
         _ensureUserRoomMembership();
+        _rejoinActiveChatSessions();
         return;
       } catch (e) {
         debugPrint('GlobalSocket: Health check failed, will reconnect - $e');
@@ -235,8 +262,20 @@ class GlobalSocketService {
       final roomName = 'user_$_currentUserId';
       if (_currentUserRoom != roomName) {
         debugPrint('GlobalSocket: Ensuring membership in user room $roomName');
-        _globalSocket?.emit('join_user_room', _currentUserId);
+        _globalSocket?.emit('force_rejoin_personal_room');
         _currentUserRoom = roomName;
+      }
+    }
+  }
+
+  // Rejoin active chat sessions after reconnection
+  void _rejoinActiveChatSessions() {
+    if (_activeChatSessions.isNotEmpty && isConnected) {
+      debugPrint(
+          'GlobalSocket: Rejoining ${_activeChatSessions.length} active chat sessions');
+      for (final sessionId in _activeChatSessions.toList()) {
+        _globalSocket?.emit('join_chat', sessionId);
+        debugPrint('GlobalSocket: Rejoined chat session: $sessionId');
       }
     }
   }
@@ -251,23 +290,25 @@ class GlobalSocketService {
       _reconnectAttempts = 0;
       _lastConnectionTime = DateTime.now();
       _lastPongTime = DateTime.now();
+      _isInitialized = true;
 
       debugPrint('GlobalSocket: Connected successfully');
       debugPrint('Current User ID: $_currentUserId');
 
-      // Join user's personal room for global events
+      // Personal room is auto-joined by the server, wait for confirmation
       if (_currentUserId != null) {
-        debugPrint(
-            'GlobalSocket: Emitting join_user_room for user $_currentUserId');
-        _globalSocket?.emit('join_user_room', _currentUserId);
-        _currentUserRoom = 'user_$_currentUserId';
-        debugPrint('GlobalSocket: Joined user room $_currentUserRoom');
+        final expectedRoom = 'user_$_currentUserId';
+        debugPrint('GlobalSocket: Expecting auto-join to room: $expectedRoom');
       } else {
         debugPrint('GlobalSocket: WARNING - No current user ID to join room');
       }
 
       // Start health monitoring
       _startPingTimer();
+      _startConnectionHealthCheck();
+
+      // Rejoin active chat sessions
+      _rejoinActiveChatSessions();
 
       _notifyListeners('connection_status', {'connected': true});
     });
@@ -276,6 +317,7 @@ class GlobalSocketService {
       _isConnected = false;
       _currentUserRoom = null;
       _stopPingTimer();
+      _stopConnectionHealthCheck();
 
       debugPrint('GlobalSocket: Disconnected - reason: $reason');
 
@@ -309,6 +351,11 @@ class GlobalSocketService {
     _globalSocket?.on('joined_user_room', (data) {
       debugPrint('GlobalSocket: Confirmed joined user room: $data');
       _currentUserRoom = data['roomName'];
+
+      // If this was an auto-join, log it specially
+      if (data['auto'] == true) {
+        debugPrint('GlobalSocket: Auto-joined personal room successfully');
+      }
     });
 
     _globalSocket?.on('left_user_room', (data) {
@@ -318,10 +365,35 @@ class GlobalSocketService {
       }
     });
 
-    // Handle pong responses
+    // Enhanced pong handling
     _globalSocket?.on('pong', (data) {
       _lastPongTime = DateTime.now();
       debugPrint('GlobalSocket: Received pong from server');
+    });
+
+    // Handle server pings
+    _globalSocket?.on('ping', (data) {
+      debugPrint('GlobalSocket: Received ping from server, sending pong');
+      _globalSocket?.emit('pong', {'userId': _currentUserId});
+    });
+
+    // Handle connection status requests
+    _globalSocket?.on('connection_status', (data) {
+      debugPrint('GlobalSocket: Connection status from server: $data');
+    });
+
+    // Handle room rejoin confirmations
+    _globalSocket?.on('rooms_rejoined', (data) {
+      debugPrint('GlobalSocket: Rooms rejoined confirmation: $data');
+    });
+
+    // Handle errors
+    _globalSocket?.on('join_chat_error', (data) {
+      debugPrint('GlobalSocket: Join chat error: $data');
+    });
+
+    _globalSocket?.on('join_user_room_error', (data) {
+      debugPrint('GlobalSocket: Join user room error: $data');
     });
 
     // Handle user status events
@@ -450,7 +522,7 @@ class GlobalSocketService {
       _notifyChatListeners('new_chat_session', data);
     });
 
-    // Typing indicators in chat
+    // Enhanced typing indicators in chat
     _globalSocket?.on('typing_start', (data) {
       debugPrint('GlobalSocket: Chat typing start - $data');
       _notifyChatListeners('typing_start', data);
@@ -502,6 +574,40 @@ class GlobalSocketService {
   void _stopPingTimer() {
     _pingTimer?.cancel();
     _pingTimer = null;
+  }
+
+  // Start connection health monitoring
+  void _startConnectionHealthCheck() {
+    _stopConnectionHealthCheck();
+    _connectionHealthTimer = Timer.periodic(_healthCheckInterval, (timer) {
+      _performConnectionHealthCheck();
+    });
+  }
+
+  void _stopConnectionHealthCheck() {
+    _connectionHealthTimer?.cancel();
+    _connectionHealthTimer = null;
+  }
+
+  // Perform periodic connection health check
+  void _performConnectionHealthCheck() {
+    if (!isConnected || _currentUserId == null) {
+      debugPrint(
+          'GlobalSocket: Health check skipped - not connected or no user');
+      return;
+    }
+
+    debugPrint('GlobalSocket: Performing connection health check');
+
+    // Request connection status from server
+    _globalSocket?.emit('get_connection_status');
+
+    // Check if personal room is still active
+    if (_currentUserRoom == null) {
+      debugPrint(
+          'GlobalSocket: Health check found missing personal room, forcing rejoin');
+      _globalSocket?.emit('force_rejoin_personal_room');
+    }
   }
 
   // Schedule reconnection with exponential backoff
@@ -619,6 +725,7 @@ class GlobalSocketService {
     _isDisconnecting = true;
 
     _stopPingTimer();
+    _stopConnectionHealthCheck();
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
     _reconnectAttempts = 0;
@@ -655,6 +762,7 @@ class GlobalSocketService {
     _currentUserRoom = null;
     _lastConnectionTime = null;
     _lastPongTime = null;
+    _isInitialized = false;
 
     _isDisconnecting = false;
   }
@@ -668,6 +776,9 @@ class GlobalSocketService {
     // Stop any playing sounds
     _soundService.stopAllSounds();
 
+    // Clear active chat sessions
+    _activeChatSessions.clear();
+
     debugPrint('GlobalSocket: Disconnected successfully');
   }
 
@@ -675,15 +786,38 @@ class GlobalSocketService {
   Map<String, dynamic> getConnectionInfo() {
     return {
       'isConnected': isConnected,
+      'isInitialized': _isInitialized,
       'currentUserId': _currentUserId,
       'currentUserRoom': _currentUserRoom,
+      'activeChatSessions': _activeChatSessions.toList(),
       'hasSocket': _globalSocket != null,
       'listenerCount': _eventListeners.length,
+      'chatListenerCount': _chatEventListeners.length,
       'reconnectAttempts': _reconnectAttempts,
       'isReconnecting': _isReconnecting,
       'lastConnectionTime': _lastConnectionTime?.toIso8601String(),
       'lastPongTime': _lastPongTime?.toIso8601String(),
       'socketConnected': _globalSocket?.connected,
     };
+  }
+
+  // Debug methods
+  void logStatus() {
+    final info = getConnectionInfo();
+    debugPrint('GlobalSocket Status: $info');
+  }
+
+  void forceReconnect() {
+    if (_currentUserId != null) {
+      debugPrint('GlobalSocket: Force reconnecting...');
+      _scheduleReconnection(_currentUserId);
+    }
+  }
+
+  void forceRejoinPersonalRoom() {
+    if (isConnected) {
+      debugPrint('GlobalSocket: Force rejoining personal room...');
+      _globalSocket?.emit('force_rejoin_personal_room');
+    }
   }
 }

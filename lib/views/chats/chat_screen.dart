@@ -12,6 +12,8 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../consversations/chatdetailsscreen.dart';
 import '../../services/chat_service.dart';
+import 'package:acent_messenger/services/global_socket_service.dart';
+import 'package:flutter/foundation.dart';
 
 // Contact model for API response
 class Contact {
@@ -113,7 +115,7 @@ class _HomeScreenState extends State<HomeScreen> {
         context.read<ChatProvider>().refreshSessions(),
         _fetchContacts(),
       ]);
-      
+
       // Show success message
       if (mounted) {
         // ScaffoldMessenger.of(context).showSnackBar(
@@ -278,13 +280,17 @@ class _HomeScreenState extends State<HomeScreen> {
                                 print(
                                     "HomeScreen - build: No sessions to display");
                                 return ListView(
-                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  physics:
+                                      const AlwaysScrollableScrollPhysics(),
                                   children: [
                                     Container(
-                                      height: MediaQuery.of(context).size.height * 0.4,
+                                      height:
+                                          MediaQuery.of(context).size.height *
+                                              0.4,
                                       child: Center(
                                         child: Column(
-                                          mainAxisAlignment: MainAxisAlignment.center,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.center,
                                           children: [
                                             Icon(
                                               Icons.chat_bubble_outline,
@@ -461,7 +467,7 @@ class _ChatSessionTile extends StatelessWidget {
       },
     );
   }
-  
+
   String _getSessionInitials(String? title) {
     if (title == null || title.trim().isEmpty) {
       return '?';
