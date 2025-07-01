@@ -24,6 +24,10 @@ class PusherService {
   String? _currentUserId;
   bool _isInitialized = false;
 
+  // Prevent simultaneous connection attempts
+  bool _isConnecting = false;
+  Completer<bool>? _connectCompleter;
+
   // Subscribed channels
   final Map<String, PusherChannel> _subscribedChannels = {};
   final Set<String> _activeChatSessions = <String>{};
@@ -45,14 +49,27 @@ class PusherService {
 
   /// Initialize Pusher service
   Future<bool> initializeGlobalSocket(String userId) async {
+    // If a connection attempt is already in progress, wait for it to finish
+    if (_isConnecting && _connectCompleter != null) {
+      debugPrint('PusherService: Connection already in progress – waiting');
+      return _connectCompleter!.future;
+    }
+
     try {
       debugPrint('PusherService: Initializing for user $userId');
+
+      _isConnecting = true;
+      _connectCompleter = Completer<bool>();
 
       if (_isInitialized && _currentUserId == userId && _isConnected) {
         debugPrint(
             'PusherService: Already initialized and connected for user $userId');
         await _ensureUserChannel();
         await _rejoinActiveChatSessions();
+        _isConnecting = false;
+        if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
+          _connectCompleter!.complete(true);
+        }
         return true;
       }
 
@@ -62,9 +79,17 @@ class PusherService {
       }
 
       await _connect(userId);
+      _isConnecting = false;
+      if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
+        _connectCompleter!.complete(true);
+      }
       return true;
     } catch (e) {
       debugPrint('PusherService: Failed to initialize - $e');
+      _isConnecting = false;
+      if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
+        _connectCompleter!.complete(false);
+      }
       return false;
     }
   }
@@ -162,13 +187,17 @@ class PusherService {
   }
 
   /// Connection state change handler
-  void _onConnectionStateChange(String currentState, String previousState) {
+  void _onConnectionStateChange(dynamic currentState, dynamic previousState) {
     debugPrint(
         'PusherService: Connection state changed from $previousState to $currentState');
 
     final wasConnected = _isConnected;
+
+    // Ensure we work with string representation of the state
+    final currentStateStr = currentState.toString().toLowerCase();
+
     // Handle both lowercase and uppercase states
-    _isConnected = currentState.toLowerCase() == 'connected';
+    _isConnected = currentStateStr.contains('connected');
 
     if (_isConnected && !wasConnected) {
       debugPrint('PusherService: Connected successfully');
@@ -176,6 +205,13 @@ class PusherService {
       _setupUserChannel();
       _startConnectionHealthCheck();
       _notifyListeners('connection_status', {'connected': true});
+      // Mark connecting attempt finished successfully
+      if (_isConnecting) {
+        _isConnecting = false;
+        if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
+          _connectCompleter!.complete(true);
+        }
+      }
     } else if (!_isConnected && wasConnected) {
       debugPrint('PusherService: Disconnected');
       _notifyListeners('connection_status', {'connected': false});
@@ -396,7 +432,7 @@ class PusherService {
       debugPrint(
           'PusherService: Pusher exists but not connected, waiting for connection...');
       int retries = 0;
-      while (!_isConnected && retries < 10) {
+      while (!_isConnected && retries < 25) {
         await Future.delayed(const Duration(milliseconds: 200));
         retries++;
         debugPrint(
@@ -693,6 +729,7 @@ class PusherService {
       'isConnected': _isConnected,
       'currentUserId': _currentUserId,
       'isInitialized': _isInitialized,
+      'isConnecting': _isConnecting,
       'subscribedChannels': _subscribedChannels.keys.toList(),
       'activeChatSessions': _activeChatSessions.toList(),
     };
@@ -703,6 +740,7 @@ class PusherService {
     debugPrint('=== PusherService Debug Info ===');
     debugPrint('isConnected: $_isConnected');
     debugPrint('isInitialized: $_isInitialized');
+    debugPrint('isConnecting: $_isConnecting');
     debugPrint('currentUserId: $_currentUserId');
     debugPrint('pusher instance: ${_pusher != null ? "exists" : "null"}');
     debugPrint('subscribedChannels: ${_subscribedChannels.keys.toList()}');
@@ -767,6 +805,12 @@ class PusherService {
       _isInitialized = false;
       _currentUserId = null;
       _activeChatSessions.clear();
+
+      // Mark connecting attempt finished
+      _isConnecting = false;
+      if (_connectCompleter != null && !_connectCompleter!.isCompleted) {
+        _connectCompleter!.complete(false);
+      }
 
       debugPrint('PusherService: Clean disconnect completed');
     } catch (e) {
