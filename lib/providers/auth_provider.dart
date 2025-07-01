@@ -5,13 +5,13 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../models/profile.dart';
 import '../services/auth_service.dart';
-import '../services/global_socket_service.dart';
+import '../services/pusher_service.dart';
 import '../services/fcm_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 class AuthProvider with ChangeNotifier {
   final AuthService _authService = AuthService();
-  final GlobalSocketService _globalSocketService = GlobalSocketService.instance;
+  final PusherService _pusherService = PusherService.instance;
   final FCMService _fcmService = FCMService.instance;
   Profile? _profile;
   bool _isLoading = true; // Start with loading true
@@ -67,7 +67,7 @@ class AuthProvider with ChangeNotifier {
         _initializeGlobalEventsCallback!(_profile!.id);
 
         // Update user status to online
-        _globalSocketService.updateUserStatus('online');
+        _pusherService.updateUserStatus('online');
       }
 
       // Register FCM token after successful login
@@ -99,7 +99,7 @@ class AuthProvider with ChangeNotifier {
         _initializeGlobalEventsCallback!(_profile!.id);
 
         // Update user status to online
-        _globalSocketService.updateUserStatus('online');
+        _pusherService.updateUserStatus('online');
       }
 
       // FCM token is already registered on backend, no need to register again
@@ -156,6 +156,13 @@ class AuthProvider with ChangeNotifier {
           final data = jsonDecode(response.body);
           print("Profile Data: ${data['data']['id']}");
           _profile = Profile.fromJson(data['data']);
+          _userId = _profile?.id; // Set userId when profile is fetched
+
+          // Save userId to secure storage for persistence
+          if (_userId != null) {
+            await _authService.storage.write(key: 'userId', value: _userId!);
+          }
+
           _isInitialized = true;
           print(" AuthMiddleware: Profile fetched: ${_profile?.toJson()}");
 
@@ -166,7 +173,7 @@ class AuthProvider with ChangeNotifier {
             _initializeGlobalEventsCallback!(_profile!.id);
 
             // Update user status to online
-            _globalSocketService.updateUserStatus('online');
+            _pusherService.updateUserStatus('online');
           }
 
           // Register FCM token if profile was fetched successfully
@@ -194,7 +201,7 @@ class AuthProvider with ChangeNotifier {
   Future<void> logout() async {
     // Update user status to offline before logout
     if (_profile?.id != null) {
-      _globalSocketService.updateUserStatus('offline');
+      _pusherService.updateUserStatus('offline');
     }
 
     // Remove FCM token from server before logout
@@ -205,7 +212,7 @@ class AuthProvider with ChangeNotifier {
     }
 
     // Disconnect global socket
-    await _globalSocketService.disconnectGlobalSocket();
+    await _pusherService.disconnectGlobalSocket();
 
     await _authService.logout();
     _profile = null;
@@ -237,16 +244,21 @@ class AuthProvider with ChangeNotifier {
 
     try {
       final token = await _authService.getToken();
+      final storedUserId = await getUserId(); // Load userId from storage
+
       if (token != null) {
         _token = token; // Set the token
+        _userId = storedUserId; // Set the stored userId
         await fetchProfile(); // This will set the profile if token is valid
       } else {
         _profile = null;
         _token = null;
+        _userId = null;
       }
     } catch (e) {
       _profile = null;
       _token = null;
+      _userId = null;
       print("Error checking auth status: $e");
     } finally {
       _isLoading = false;
@@ -272,12 +284,12 @@ class AuthProvider with ChangeNotifier {
   // Update user status manually
   void updateUserStatus(String status) {
     if (_profile?.id != null) {
-      _globalSocketService.updateUserStatus(status);
+      _pusherService.updateUserStatus(status);
     }
   }
 
   // Get global socket connection info
   Map<String, dynamic> getGlobalSocketInfo() {
-    return _globalSocketService.getConnectionInfo();
+    return _pusherService.getConnectionInfo();
   }
 }

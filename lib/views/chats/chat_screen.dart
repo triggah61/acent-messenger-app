@@ -12,7 +12,7 @@ import 'package:http/http.dart' as http;
 import 'dart:convert';
 import '../consversations/chatdetailsscreen.dart';
 import '../../services/chat_service.dart';
-import 'package:acent_messenger/services/global_socket_service.dart';
+import 'package:acent_messenger/services/pusher_service.dart';
 import 'package:flutter/foundation.dart';
 
 // Contact model for API response

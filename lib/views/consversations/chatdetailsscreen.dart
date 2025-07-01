@@ -5,7 +5,7 @@ import 'package:acent_messenger/providers/chat_provider.dart';
 import 'package:acent_messenger/providers/group_provider.dart';
 import 'package:acent_messenger/providers/global_event_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
-import 'package:acent_messenger/services/global_socket_service.dart';
+import 'package:acent_messenger/services/pusher_service.dart';
 import 'package:acent_messenger/views/contacts/contacts.dart';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
@@ -35,7 +35,7 @@ class Conversations extends StatefulWidget {
 
 class _ConversationsState extends State<Conversations> {
   final AuthService _authService = AuthService();
-  final GlobalSocketService _globalSocketService = GlobalSocketService.instance;
+  final PusherService _pusherService = PusherService.instance;
   bool _isAttachmentSheetVisible = false;
   final TextEditingController _messageController = TextEditingController();
   ChatSession? session;
@@ -78,97 +78,106 @@ class _ConversationsState extends State<Conversations> {
   }
 
   Future<void> _initializeSocket() async {
+    print('PusherService: Initializing socket called');
     try {
-      // Ensure global socket is connected (this should already be done by GlobalEventProvider)
-      final userId = context.read<AuthProvider>().userId;
-      if (userId != null) {
-        await _globalSocketService.initializeGlobalSocket(userId);
+      // Wait for AuthProvider to finish loading if necessary
+      final authProvider = context.read<AuthProvider>();
+      if (authProvider.isLoading && !authProvider.isInitialized) {
+        print('AuthProvider is still loading, waiting...');
+        // Wait up to 5 seconds for auth provider to initialize
+        int attempts = 0;
+        while (authProvider.isLoading && attempts < 50) {
+          // 50 attempts * 100ms = 5 seconds
+          await Future.delayed(const Duration(milliseconds: 100));
+          attempts++;
+        }
       }
 
-      // Join the chat session
-      _globalSocketService.joinChatSession(widget.session?.id ?? '');
+      // Get user ID from AuthProvider - try both methods for robustness
+      final userId = authProvider.userId ?? authProvider.profile?.id;
+      if (userId == null) {
+        print(
+            'Failed to get user ID for socket initialization - userId is null');
+        print(
+            'AuthProvider state: isLoading=${authProvider.isLoading}, isInitialized=${authProvider.isInitialized}, isAuthenticated=${authProvider.isAuthenticated}');
+        print(
+            'Profile ID: ${authProvider.profile?.id}, UserId: ${authProvider.userId}');
+        return;
+      }
 
+      print('PusherService: Successfully retrieved user ID: $userId');
+
+      // Ensure global socket is connected (this should already be done by GlobalEventProvider)
+      // final result = await _pusherService.initializeGlobalSocket(userId);
+      // if (!result) {
+      //   print('Failed to initialize global socket');
+      //   _pusherService.debugConnectionStatus();
+      //   return;
+      // }
+
+      await _pusherService.initializeGlobalSocket(userId);
+
+      print('PusherService: Socket initialized');
+
+      print('PusherService: Joining to chat session ${widget.session?.id}');
+
+      // Join chat session
+      _pusherService.joinChatSession(widget.session?.id ?? '');
+
+      // Set up event listeners for this specific chat
       // Listen for new messages
       _newMessageListener = (data) {
-        print('Chat: new_message received - $data');
+        print('Chat: New message received - $data');
         try {
           final message = Message.fromJson(data);
-
-          // IMPORTANT: Only add message if it belongs to the current chat session
-          final currentSessionId = widget.session?.id;
-          if (currentSessionId != null &&
-              message.chatSession == currentSessionId) {
-            if (mounted) {
-              setState(() {
-                _messages.insert(0, message);
-              });
-              print('Chat: Message added to conversation $currentSessionId');
+          if (mounted) {
+            setState(() {
+              _messages.insert(0, message);
+            });
+            if (widget.session?.type == 'group') {
+              context.read<GroupProvider>().fetchSessions(refresh: true);
+            } else {
+              context.read<ChatProvider>().fetchSessions(refresh: true);
             }
-          } else {
-            print(
-                'Chat: Message ignored - belongs to session ${message.chatSession}, current session is $currentSessionId');
           }
         } catch (e) {
-          print('Error parsing message in chat: $e');
+          print('Error processing new message: $e');
         }
       };
-      _globalSocketService.addChatEventListener(
-          'new_message', _newMessageListener!);
+      _pusherService.addChatEventListener('new_message', _newMessageListener!);
 
-      // Listen for typing start events
+      // Listen for typing indicators
       _typingStartListener = (data) {
-        print('Chat: typing_start received - $data');
+        print('Chat: Typing started - $data');
         try {
           final userId = data['userId'] as String?;
-          final chatSessionId = data['chatSessionId'] as String?;
-          final currentSessionId = widget.session?.id;
-
-          // Only show typing indicator if it's for the current chat session
-          if (mounted &&
-              userId != context.read<AuthProvider>().userId &&
-              chatSessionId == currentSessionId) {
+          if (mounted && userId != null) {
+            // Handle typing indicator
             setState(() {
               _isTyping = true;
             });
-            print('Chat: Typing indicator shown for session $currentSessionId');
-          } else {
-            print(
-                'Chat: Typing indicator ignored - session $chatSessionId, current session $currentSessionId');
           }
         } catch (e) {
           print('Error in typing start listener: $e');
         }
       };
-      _globalSocketService.addChatEventListener(
+      _pusherService.addChatEventListener(
           'typing_start', _typingStartListener!);
 
-      // Listen for typing stop events
       _typingStopListener = (data) {
-        print('Chat: stop_typing received - $data');
+        print('Chat: Typing stopped - $data');
         try {
           final userId = data['userId'] as String?;
-          final chatSessionId = data['chatSessionId'] as String?;
-          final currentSessionId = widget.session?.id;
-
-          // Only hide typing indicator if it's for the current chat session
-          if (mounted &&
-              userId != context.read<AuthProvider>().userId &&
-              chatSessionId == currentSessionId) {
+          if (mounted && userId != null) {
             setState(() {
               _isTyping = false;
             });
-            print(
-                'Chat: Typing indicator hidden for session $currentSessionId');
-          } else {
-            print(
-                'Chat: Typing stop ignored - session $chatSessionId, current session $currentSessionId');
           }
         } catch (e) {
           print('Error in typing stop listener: $e');
         }
       };
-      _globalSocketService.addChatEventListener(
-          'stop_typing', _typingStopListener!);
+      _pusherService.addChatEventListener('stop_typing', _typingStopListener!);
 
       // Listen for reaction updates
       _reactionUpdatesListener = (data) {
@@ -193,12 +202,13 @@ class _ConversationsState extends State<Conversations> {
           print('Error in reaction updates listener: $e');
         }
       };
-      _globalSocketService.addChatEventListener(
+      _pusherService.addChatEventListener(
           'message_reactions_updated', _reactionUpdatesListener!);
 
       print('Chat: Socket initialization completed');
     } catch (e) {
       print('Failed to initialize socket for chat: $e');
+      _pusherService.debugConnectionStatus();
     }
   }
 
@@ -234,10 +244,10 @@ class _ConversationsState extends State<Conversations> {
       _typingTimer?.cancel();
     }
 
-    _globalSocketService.emitChatTyping(widget.session?.id ?? '', true);
+    _pusherService.emitChatTyping(widget.session?.id ?? '', true);
 
     _typingTimer = Timer(const Duration(seconds: 2), () {
-      _globalSocketService.emitChatTyping(widget.session?.id ?? '', false);
+      _pusherService.emitChatTyping(widget.session?.id ?? '', false);
     });
   }
 
@@ -250,24 +260,24 @@ class _ConversationsState extends State<Conversations> {
 
     // Remove chat event listeners
     if (_newMessageListener != null) {
-      _globalSocketService.removeChatEventListener(
+      _pusherService.removeChatEventListener(
           'new_message', _newMessageListener!);
     }
     if (_typingStartListener != null) {
-      _globalSocketService.removeChatEventListener(
+      _pusherService.removeChatEventListener(
           'typing_start', _typingStartListener!);
     }
     if (_typingStopListener != null) {
-      _globalSocketService.removeChatEventListener(
+      _pusherService.removeChatEventListener(
           'stop_typing', _typingStopListener!);
     }
     if (_reactionUpdatesListener != null) {
-      _globalSocketService.removeChatEventListener(
+      _pusherService.removeChatEventListener(
           'message_reactions_updated', _reactionUpdatesListener!);
     }
 
     // Leave chat session
-    _globalSocketService.leaveChatSession(widget.session?.id ?? '');
+    _pusherService.leaveChatSession(widget.session?.id ?? '');
 
     _messageController.dispose();
     _scrollController.dispose();

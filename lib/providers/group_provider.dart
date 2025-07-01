@@ -1,6 +1,6 @@
 import 'dart:convert';
 import 'package:acent_messenger/constants/config.dart';
-import 'package:acent_messenger/services/global_socket_service.dart';
+import 'package:acent_messenger/services/pusher_service.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:acent_messenger/services/auth_service.dart';
@@ -8,7 +8,7 @@ import 'package:acent_messenger/models/chat_session.dart';
 
 class GroupProvider with ChangeNotifier {
   final AuthService _authService;
-  final GlobalSocketService _globalSocketService = GlobalSocketService.instance;
+  final PusherService _pusherService = PusherService.instance;
   List<ChatSession> _sessions = [];
   bool _isLoading = false;
   bool _hasMore = true;
@@ -29,7 +29,7 @@ class GroupProvider with ChangeNotifier {
   @override
   void dispose() {
     if (_newSessionListener != null) {
-      _globalSocketService.removeChatEventListener(
+      _pusherService.removeChatEventListener(
           'new_chat_session', _newSessionListener!);
     }
     super.dispose();
@@ -46,7 +46,7 @@ class GroupProvider with ChangeNotifier {
         fetchSessions(refresh: true);
       };
 
-      _globalSocketService.addChatEventListener(
+      _pusherService.addChatEventListener(
           'new_chat_session', _newSessionListener!);
 
       print('GroupProvider: Socket listener initialized');

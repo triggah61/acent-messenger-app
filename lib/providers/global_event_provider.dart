@@ -1,12 +1,11 @@
 import 'package:flutter/foundation.dart';
-import 'package:acent_messenger/services/global_socket_service.dart';
+import 'package:acent_messenger/services/pusher_service.dart';
 import 'package:acent_messenger/services/sound_notification_service.dart';
-import 'package:acent_messenger/models/message.dart';
-import 'package:acent_messenger/models/chat_session.dart';
+
 import 'dart:async';
 
 class GlobalEventProvider with ChangeNotifier {
-  final GlobalSocketService _globalSocketService = GlobalSocketService.instance;
+  final PusherService _pusherService = PusherService.instance;
   final SoundNotificationService _soundService =
       SoundNotificationService.instance;
 
@@ -55,7 +54,7 @@ class GlobalEventProvider with ChangeNotifier {
             'GlobalEventProvider: Already initialized for user $userId, checking connection');
         if (!_isGlobalConnected) {
           debugPrint('GlobalEventProvider: Reconnecting global socket');
-          await _globalSocketService.initializeGlobalSocket(userId);
+          await _pusherService.initializeGlobalSocket(userId);
         }
         return;
       }
@@ -73,7 +72,7 @@ class GlobalEventProvider with ChangeNotifier {
       await _soundService.initialize();
 
       // Initialize global socket
-      await _globalSocketService.initializeGlobalSocket(userId);
+      await _pusherService.initializeGlobalSocket(userId);
 
       // Setup event listeners
       _setupEventListeners();
@@ -104,7 +103,7 @@ class GlobalEventProvider with ChangeNotifier {
         // Always force reconnection on app resume to ensure proper room membership
         debugPrint('GlobalEventProvider: Force reconnecting after app resume');
         try {
-          await _globalSocketService.initializeGlobalSocket(_currentUserId!);
+          await _pusherService.initializeGlobalSocket(_currentUserId!);
           debugPrint(
               'GlobalEventProvider: Reconnection successful after app resume');
         } catch (e) {
@@ -187,7 +186,7 @@ class GlobalEventProvider with ChangeNotifier {
 
   void _setupEventListeners() {
     // Connection status
-    _globalSocketService.addEventListener('connection_status', (data) {
+    _pusherService.addEventListener('connection_status', (data) {
       _isGlobalConnected = data['connected'] ?? false;
       debugPrint(
           'GlobalEventProvider: Connection status changed - $_isGlobalConnected');
@@ -195,52 +194,52 @@ class GlobalEventProvider with ChangeNotifier {
     });
 
     // Global new message
-    _globalSocketService.addEventListener('global_new_message', (data) {
+    _pusherService.addEventListener('global_new_message', (data) {
       _handleNewMessage(data);
     });
 
     // Global new conversation
-    _globalSocketService.addEventListener('global_new_conversation', (data) {
+    _pusherService.addEventListener('global_new_conversation', (data) {
       _handleNewConversation(data);
     });
 
     // Global new group
-    _globalSocketService.addEventListener('global_new_group', (data) {
+    _pusherService.addEventListener('global_new_group', (data) {
       _handleNewGroup(data);
     });
 
     // Global notification
-    _globalSocketService.addEventListener('global_notification', (data) {
+    _pusherService.addEventListener('global_notification', (data) {
       _handleNotification(data);
     });
 
     // Incoming call
-    _globalSocketService.addEventListener('global_incoming_call', (data) {
+    _pusherService.addEventListener('global_incoming_call', (data) {
       _handleIncomingCall(data);
     });
 
     // User status changes
-    _globalSocketService.addEventListener('global_user_status', (data) {
+    _pusherService.addEventListener('global_user_status', (data) {
       _handleUserStatusChange(data);
     });
 
     // Message read status
-    _globalSocketService.addEventListener('global_message_read', (data) {
+    _pusherService.addEventListener('global_message_read', (data) {
       _handleMessageRead(data);
     });
 
     // Contact updates
-    _globalSocketService.addEventListener('global_contact_update', (data) {
+    _pusherService.addEventListener('global_contact_update', (data) {
       _handleContactUpdate(data);
     });
 
     // Group member updates
-    _globalSocketService.addEventListener('global_group_member_update', (data) {
+    _pusherService.addEventListener('global_group_member_update', (data) {
       _handleGroupMemberUpdate(data);
     });
 
     // Profile updates
-    _globalSocketService.addEventListener('global_profile_update', (data) {
+    _pusherService.addEventListener('global_profile_update', (data) {
       _handleProfileUpdate(data);
     });
   }
@@ -513,15 +512,15 @@ class GlobalEventProvider with ChangeNotifier {
 
   // Send global events
   void updateUserStatus(String status) {
-    _globalSocketService.updateUserStatus(status);
+    _pusherService.updateUserStatus(status);
   }
 
   void markMessageAsRead(String messageId, String chatSessionId) {
-    _globalSocketService.markMessageAsRead(messageId, chatSessionId);
+    _pusherService.markMessageAsRead(messageId, chatSessionId);
   }
 
   void sendGlobalTyping(String chatSessionId, bool isTyping) {
-    _globalSocketService.sendGlobalTyping(chatSessionId, isTyping);
+    _pusherService.sendGlobalTyping(chatSessionId, isTyping);
   }
 
   // Disconnect global events
@@ -531,7 +530,7 @@ class GlobalEventProvider with ChangeNotifier {
     // Stop connection health check
     _stopConnectionHealthCheck();
 
-    await _globalSocketService.disconnectGlobalSocket();
+    await _pusherService.disconnectGlobalSocket();
 
     // Dispose sound service
     await _soundService.dispose();
@@ -555,7 +554,7 @@ class GlobalEventProvider with ChangeNotifier {
 
   // Get connection info
   Map<String, dynamic> getConnectionInfo() {
-    final socketInfo = _globalSocketService.getConnectionInfo();
+    final socketInfo = _pusherService.getConnectionInfo();
     return {
       'provider_initialized': _isInitialized,
       'provider_connected': _isGlobalConnected,
@@ -589,7 +588,7 @@ class GlobalEventProvider with ChangeNotifier {
     }
 
     debugPrint('GlobalEventProvider: Checking connection health');
-    final socketInfo = _globalSocketService.getConnectionInfo();
+    final socketInfo = _pusherService.getConnectionInfo();
 
     debugPrint('GlobalEventProvider: Socket info - ${socketInfo.toString()}');
 
@@ -605,7 +604,7 @@ class GlobalEventProvider with ChangeNotifier {
       debugPrint('  - Provider connected: $_isGlobalConnected');
 
       try {
-        await _globalSocketService.initializeGlobalSocket(_currentUserId!);
+        await _pusherService.initializeGlobalSocket(_currentUserId!);
         debugPrint('GlobalEventProvider: Health check reconnection successful');
       } catch (e) {
         debugPrint('GlobalEventProvider: Health check reconnection failed: $e');
