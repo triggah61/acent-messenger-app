@@ -3,6 +3,7 @@
 import 'package:firebase_core/firebase_core.dart' show FirebaseOptions;
 import 'package:flutter/foundation.dart'
     show defaultTargetPlatform, kIsWeb, TargetPlatform;
+import 'constants/env_config.dart';
 
 /// Default [FirebaseOptions] for use with your Firebase apps.
 ///
@@ -43,45 +44,43 @@ class DefaultFirebaseOptions {
     }
   }
 
-  static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyBwMNKPGiv78RK_OAROzaaF-mBe4hL1kdI',
-    appId: '1:988277005062:web:ce9ee77a66195228f7dc87',
-    messagingSenderId: '988277005062',
-    projectId: 'acent-messenger',
-    authDomain: 'acent-messenger.firebaseapp.com',
-    storageBucket: 'acent-messenger.firebasestorage.app',
-    measurementId: 'G-DQ05GY4NZ6',
-  );
+  static FirebaseOptions get web => FirebaseOptions(
+        apiKey: EnvConfig.firebaseWebApiKey,
+        appId: EnvConfig.firebaseWebAppId,
+        messagingSenderId: EnvConfig.firebaseWebMessagingSenderId,
+        projectId: EnvConfig.firebaseWebProjectId,
+        authDomain: EnvConfig.firebaseWebAuthDomain,
+        storageBucket: EnvConfig.firebaseWebStorageBucket,
+        measurementId: EnvConfig.firebaseWebMeasurementId,
+      );
 
-  static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyC2NMJXU7XiWr-Eb765CCe_wGtC0sYH8sk',
-    appId: '1:988277005062:android:fae94b6678534e1af7dc87',
-    messagingSenderId: '988277005062',
-    projectId: 'acent-messenger',
-    storageBucket: 'acent-messenger.firebasestorage.app',
-  );
+  static FirebaseOptions get android => FirebaseOptions(
+        apiKey: EnvConfig.firebaseAndroidApiKey,
+        appId: EnvConfig.firebaseAndroidAppId,
+        messagingSenderId: EnvConfig.firebaseWebMessagingSenderId,
+        projectId: EnvConfig.firebaseWebProjectId,
+        storageBucket: EnvConfig.firebaseWebStorageBucket,
+      );
 
-  static const FirebaseOptions ios = FirebaseOptions(
-    apiKey: 'AIzaSyBwMNKPGiv78RK_OAROzaaF-mBe4hL1kdI',
-    appId: '1:988277005062:ios:ce9ee77a66195228f7dc87',
-    messagingSenderId: '988277005062',
-    projectId: 'acent-messenger',
-    authDomain: 'acent-messenger.firebaseapp.com',
-    storageBucket: 'acent-messenger.firebasestorage.app',
-    iosClientId:
-        '988277005062-abcd1234efgh5678ijkl9012mnop3456.apps.googleusercontent.com',
-    iosBundleId: 'com.example.acent_messenger',
-  );
+  static FirebaseOptions get ios => FirebaseOptions(
+        apiKey: EnvConfig.firebaseIosApiKey,
+        appId: EnvConfig.firebaseIosAppId,
+        messagingSenderId: EnvConfig.firebaseWebMessagingSenderId,
+        projectId: EnvConfig.firebaseWebProjectId,
+        authDomain: EnvConfig.firebaseWebAuthDomain,
+        storageBucket: EnvConfig.firebaseWebStorageBucket,
+        iosClientId: EnvConfig.firebaseIosClientId,
+        iosBundleId: EnvConfig.firebaseIosBundleId,
+      );
 
-  static const FirebaseOptions macos = FirebaseOptions(
-    apiKey: 'AIzaSyBwMNKPGiv78RK_OAROzaaF-mBe4hL1kdI',
-    appId: '1:988277005062:ios:ce9ee77a66195228f7dc87',
-    messagingSenderId: '988277005062',
-    projectId: 'acent-messenger',
-    authDomain: 'acent-messenger.firebaseapp.com',
-    storageBucket: 'acent-messenger.firebasestorage.app',
-    iosClientId:
-        '988277005062-abcd1234efgh5678ijkl9012mnop3456.apps.googleusercontent.com',
-    iosBundleId: 'com.example.acent_messenger',
-  );
+  static FirebaseOptions get macos => FirebaseOptions(
+        apiKey: EnvConfig.firebaseMacosApiKey,
+        appId: EnvConfig.firebaseMacosAppId,
+        messagingSenderId: EnvConfig.firebaseWebMessagingSenderId,
+        projectId: EnvConfig.firebaseWebProjectId,
+        authDomain: EnvConfig.firebaseWebAuthDomain,
+        storageBucket: EnvConfig.firebaseWebStorageBucket,
+        iosClientId: EnvConfig.firebaseMacosClientId,
+        iosBundleId: EnvConfig.firebaseMacosBundleId,
+      );
 }

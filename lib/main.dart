@@ -12,12 +12,17 @@ import 'services/wallet_service.dart';
 import 'services/fcm_service.dart';
 import 'providers/contacts_provider.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'constants/env_config.dart';
 
 void main() async {
   print("App - main: Starting application");
 
   // Ensure Flutter is initialized
   WidgetsFlutterBinding.ensureInitialized();
+
+  // Initialize environment configuration
+  await EnvConfig.initialize();
+  print("App - main: Environment configuration loaded");
 
   // Initialize FCM service
   final fcmService = FCMService.instance;
