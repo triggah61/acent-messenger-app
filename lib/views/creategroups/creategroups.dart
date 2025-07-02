@@ -1,6 +1,5 @@
-import 'package:acent_messenger/providers/group_provider.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
+// Removed unused imports - smart updates now handled by GlobalEventProvider
 import 'dart:convert';
 import '../../services/chat_service.dart';
 import '../../services/auth_service.dart';
@@ -135,7 +134,8 @@ class _CreateGroupsState extends State<CreateGroups> {
         _titleController.text.trim(),
         _selectedMemberIds,
       );
-      await context.read<GroupProvider>().fetchSessions(refresh: true);
+      // No need to manually refresh sessions - the smart update mechanism
+      // will handle this automatically when the new group session is created
       if (mounted) {
         Navigator.pushReplacement(
           context,
@@ -252,15 +252,19 @@ class _CreateGroupsState extends State<CreateGroups> {
                             itemCount: _contacts.length,
                             itemBuilder: (context, index) {
                               final contact = _contacts[index];
-                              final isSelected = _selectedMemberIds.contains(contact.id);
+                              final isSelected =
+                                  _selectedMemberIds.contains(contact.id);
                               return ListTile(
                                 leading: CircleAvatar(
                                   radius: 24,
                                   backgroundImage: contact.photo != null
-                                      ? NetworkImage(Config.getPhotoUrl(contact.photo!))
+                                      ? NetworkImage(
+                                          Config.getPhotoUrl(contact.photo!))
                                       : null,
                                   child: contact.photo == null
-                                      ? Text(contact.firstName.isNotEmpty ? contact.firstName[0].toUpperCase() : '?')
+                                      ? Text(contact.firstName.isNotEmpty
+                                          ? contact.firstName[0].toUpperCase()
+                                          : '?')
                                       : null,
                                 ),
                                 title: Text(

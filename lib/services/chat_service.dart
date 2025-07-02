@@ -13,7 +13,8 @@ class ChatService {
     try {
       final token = await _authService.getToken();
       final response = await http.post(
-        Uri.parse('${Config.baseApiUrl}/user/chat/findChatSessionByReceipient/$recipientId'),
+        Uri.parse(
+            '${Config.baseApiUrl}/user/chat/findChatSessionByReceipient/$recipientId'),
         headers: {
           'Content-Type': 'application/json',
           'Authorization': 'Bearer $token',
@@ -32,7 +33,8 @@ class ChatService {
     }
   }
 
-  Future<ChatSession> createGroup(String title, List<String> recipientIds) async {
+  Future<ChatSession> createGroup(
+      String title, List<String> recipientIds) async {
     try {
       final token = await _authService.getToken();
       final response = await http.post(
@@ -59,4 +61,36 @@ class ChatService {
       rethrow;
     }
   }
-} 
+
+  /// Get a specific chat session by ID
+  /// This is used for FCM notification navigation
+  Future<ChatSession?> getChatSession(String sessionId) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('No authentication token available');
+      }
+
+      final response = await http.get(
+        Uri.parse('${Config.baseApiUrl}/user/chat/session/$sessionId'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        return ChatSession.fromJson(data['data']);
+      } else if (response.statusCode == 404) {
+        print('ChatService: Chat session not found: $sessionId');
+        return null;
+      } else {
+        throw Exception('Failed to get chat session: ${response.statusCode}');
+      }
+    } catch (e) {
+      print('Error in getChatSession: $e');
+      return null;
+    }
+  }
+}

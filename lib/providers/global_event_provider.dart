@@ -32,6 +32,10 @@ class GlobalEventProvider with ChangeNotifier {
   Function()? _refreshChatSessionsCallback;
   Function()? _refreshGroupSessionsCallback;
 
+  // Smart update callbacks for session lists
+  Function(Map<String, dynamic>)? _updateChatSessionCallback;
+  Function(Map<String, dynamic>)? _updateGroupSessionCallback;
+
   // Getters
   List<Map<String, dynamic>> get notifications => _notifications;
   Map<String, dynamic>? get latestMessage => _latestMessage;
@@ -288,15 +292,94 @@ class GlobalEventProvider with ChangeNotifier {
       'timestamp': DateTime.now().toIso8601String(),
     });
 
-    // Refresh session lists to update last message and unread counts
-    _refreshSessionLists();
+    // Smart update session lists with new message data
+    _updateSessionListsWithMessage(data);
 
     notifyListeners();
   }
 
-  // Refresh both chat and group session lists
+  // Smart update session lists with new message data
+  void _updateSessionListsWithMessage(Map<String, dynamic> messageData) {
+    debugPrint(
+        'GlobalEventProvider: Smart updating session lists with new message');
+    debugPrint(
+        'GlobalEventProvider: Message data keys: ${messageData.keys.toList()}');
+
+    // Try multiple ways to determine session type
+    String sessionType = 'personal'; // default
+
+    // Method 1: Check for explicit sessionType field
+    if (messageData['sessionType'] != null) {
+      sessionType = messageData['sessionType'] as String;
+    }
+    // Method 2: Check session data if available
+    else if (messageData['session'] != null) {
+      final sessionData = messageData['session'] as Map<String, dynamic>?;
+      sessionType = sessionData?['type'] as String? ?? 'personal';
+    }
+    // Method 3: Check participants array for group detection
+    else if (messageData['participants'] != null) {
+      final participants = messageData['participants'] as List?;
+      if (participants != null && participants.length > 2) {
+        sessionType = 'group';
+      }
+    }
+
+    debugPrint('GlobalEventProvider: Determined session type: $sessionType');
+
+    // Use a small delay to allow UI to settle before triggering update
+    Future.delayed(const Duration(milliseconds: 50), () {
+      if (sessionType == 'group') {
+        if (_updateGroupSessionCallback != null) {
+          try {
+            debugPrint(
+                'GlobalEventProvider: Calling group session smart update callback');
+            _updateGroupSessionCallback!(messageData);
+            debugPrint(
+                'GlobalEventProvider: Group session smart update completed');
+          } catch (e) {
+            debugPrint(
+                'GlobalEventProvider: Error in group session smart update: $e');
+            // Fallback to full refresh
+            _fallbackToFullRefresh();
+          }
+        } else {
+          debugPrint(
+              'GlobalEventProvider: Group session update callback is null, falling back to refresh');
+          _fallbackToFullRefresh();
+        }
+      } else {
+        if (_updateChatSessionCallback != null) {
+          try {
+            debugPrint(
+                'GlobalEventProvider: Calling chat session smart update callback');
+            _updateChatSessionCallback!(messageData);
+            debugPrint(
+                'GlobalEventProvider: Chat session smart update completed');
+          } catch (e) {
+            debugPrint(
+                'GlobalEventProvider: Error in chat session smart update: $e');
+            // Fallback to full refresh
+            _fallbackToFullRefresh();
+          }
+        } else {
+          debugPrint(
+              'GlobalEventProvider: Chat session update callback is null, falling back to refresh');
+          _fallbackToFullRefresh();
+        }
+      }
+    });
+  }
+
+  // Fallback to full refresh when smart update fails
+  void _fallbackToFullRefresh() {
+    debugPrint('GlobalEventProvider: Falling back to full session refresh');
+    _refreshSessionLists();
+  }
+
+  // Original refresh method (kept for backwards compatibility and fallbacks)
   void _refreshSessionLists() {
-    debugPrint('GlobalEventProvider: Refreshing session lists');
+    debugPrint('GlobalEventProvider: Refreshing session lists (full refresh)');
 
     // Use a small delay to allow UI to settle before triggering refresh
     Future.delayed(const Duration(milliseconds: 100), () {
@@ -629,6 +712,16 @@ class GlobalEventProvider with ChangeNotifier {
     _refreshChatSessionsCallback = refreshChatSessions;
     _refreshGroupSessionsCallback = refreshGroupSessions;
     debugPrint('GlobalEventProvider: Session refresh callbacks set');
+  }
+
+  // Set smart update callbacks for session lists
+  void setSmartUpdateCallbacks({
+    Function(Map<String, dynamic>)? updateChatSession,
+    Function(Map<String, dynamic>)? updateGroupSession,
+  }) {
+    _updateChatSessionCallback = updateChatSession;
+    _updateGroupSessionCallback = updateGroupSession;
+    debugPrint('GlobalEventProvider: Smart update callbacks set');
   }
 
   // Set current active session (call when entering a chat screen)

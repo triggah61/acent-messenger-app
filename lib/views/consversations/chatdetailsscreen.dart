@@ -1,8 +1,7 @@
 import 'package:acent_messenger/constants/config.dart';
 import 'package:acent_messenger/models/chat_session.dart';
 import 'package:acent_messenger/models/message.dart';
-import 'package:acent_messenger/providers/chat_provider.dart';
-import 'package:acent_messenger/providers/group_provider.dart';
+// Removed unused imports - smart updates now handled by GlobalEventProvider
 import 'package:acent_messenger/providers/global_event_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
 import 'package:acent_messenger/services/pusher_service.dart';
@@ -148,11 +147,8 @@ class _ConversationsState extends State<Conversations> {
             setState(() {
               _messages.insert(0, message);
             });
-            if (widget.session?.type == 'group') {
-              context.read<GroupProvider>().fetchSessions(refresh: true);
-            } else {
-              context.read<ChatProvider>().fetchSessions(refresh: true);
-            }
+            // Note: Session list updates are now handled automatically by GlobalEventProvider
+            // via smart update callbacks, so no need to manually refresh here
           }
         } catch (e) {
           print('Error processing new message: $e');
@@ -509,11 +505,8 @@ class _ConversationsState extends State<Conversations> {
           _attachments = [];
           _replyingTo = null;
         });
-        if (widget.session?.type == 'group') {
-          context.read<GroupProvider>().fetchSessions(refresh: true);
-        } else {
-          context.read<ChatProvider>().fetchSessions(refresh: true);
-        }
+        // No need to manually refresh sessions - the smart update mechanism
+        // will handle this automatically when the message is received via Pusher
       } else {
         final errorData = json.decode(responseBody);
         throw Exception("Failed to send message: ${errorData['message']}");

@@ -13,6 +13,7 @@ import 'services/fcm_service.dart';
 import 'providers/contacts_provider.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'constants/env_config.dart';
+import 'services/navigation_service.dart';
 
 void main() async {
   print("App - main: Starting application");
@@ -81,6 +82,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
+    // Handle initial notification if app was opened from notification
+    _handleInitialNotification();
+
     // Setup clear data callbacks after providers are available
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final authProvider = Provider.of<AuthProvider>(context, listen: false);
@@ -126,8 +130,61 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
           }
         },
       );
-      debugPrint('Main: Session refresh callbacks have been set');
+
+      // Set smart update callbacks for efficient session updates
+      globalEventProvider.setSmartUpdateCallbacks(
+        updateChatSession: (messageData) {
+          try {
+            debugPrint('Main: Smart chat session update triggered');
+            chatProvider.updateSessionWithNewMessage(messageData);
+          } catch (e) {
+            debugPrint('Main: Error in smart chat session update: $e');
+            // Fallback to full refresh on error
+            chatProvider.refreshSessions();
+          }
+        },
+        updateGroupSession: (messageData) {
+          try {
+            debugPrint('Main: Smart group session update triggered');
+            groupProvider.updateSessionWithNewMessage(messageData);
+          } catch (e) {
+            debugPrint('Main: Error in smart group session update: $e');
+            // Fallback to full refresh on error
+            groupProvider.refreshSessions();
+          }
+        },
+      );
+
+      debugPrint(
+          'Main: Session refresh callbacks and smart update callbacks have been set');
     });
+  }
+
+  /// Handle initial notification when app is opened from notification
+  Future<void> _handleInitialNotification() async {
+    try {
+      debugPrint('Main: Checking for initial notification');
+
+      // Get the initial notification that opened the app (if any)
+      final initialMessage =
+          await FirebaseMessaging.instance.getInitialMessage();
+
+      if (initialMessage != null) {
+        debugPrint(
+            'Main: App opened from notification: ${initialMessage.messageId}');
+        debugPrint('Main: Initial notification data: ${initialMessage.data}');
+
+        // Wait a bit for the app to finish loading
+        await Future.delayed(const Duration(seconds: 2));
+
+        // Handle the notification navigation
+        NavigationService.instance.handleNotificationData(initialMessage.data);
+      } else {
+        debugPrint('Main: No initial notification found');
+      }
+    } catch (e) {
+      debugPrint('Main: Error handling initial notification: $e');
+    }
   }
 
   @override
@@ -188,6 +245,7 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
     print("App - MyApp: Building app widget");
 
     return MaterialApp(
+      navigatorKey: NavigationService.navigatorKey, // Add global navigator key
       debugShowCheckedModeBanner: false,
       title: 'Chat App',
       theme: ThemeData(

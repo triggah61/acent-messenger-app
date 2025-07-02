@@ -43,7 +43,8 @@ class ChatProvider with ChangeNotifier {
       _newSessionListener = (data) {
         print("ChatProvider - _initializeSocket: New session event received");
         print(data);
-        fetchSessions(refresh: true);
+        // Use smart update instead of full refresh
+        addNewSession(data);
       };
 
       _pusherService.addChatEventListener(
@@ -141,6 +142,132 @@ class ChatProvider with ChangeNotifier {
     } catch (e) {
       print("ChatProvider - refreshSessions: Error during refresh - $e");
       rethrow;
+    }
+  }
+
+  // Smart update: Update existing session with new message or add new session
+  void updateSessionWithNewMessage(Map<String, dynamic> messageData) {
+    try {
+      print(
+          "ChatProvider - updateSessionWithNewMessage: Processing message data");
+
+      final chatSessionId = messageData['chatSession'] as String?;
+      if (chatSessionId == null) {
+        print(
+            "ChatProvider - updateSessionWithNewMessage: No chatSessionId found");
+        return;
+      }
+
+      // Find existing session
+      final existingIndex =
+          _sessions.indexWhere((session) => session.id == chatSessionId);
+
+      if (existingIndex != -1) {
+        // Update existing session
+        print(
+            "ChatProvider - updateSessionWithNewMessage: Updating existing session $chatSessionId");
+        _updateExistingSession(existingIndex, messageData);
+      } else {
+        // This might be a new session, let's fetch it specifically
+        print(
+            "ChatProvider - updateSessionWithNewMessage: Session not found, might be new session");
+        _handlePotentialNewSession(chatSessionId);
+      }
+
+      notifyListeners();
+    } catch (e) {
+      print("ChatProvider - updateSessionWithNewMessage: Error - $e");
+      // Fallback to refresh if smart update fails
+      fetchSessions(refresh: true);
+    }
+  }
+
+  void _updateExistingSession(
+      int sessionIndex, Map<String, dynamic> messageData) {
+    final session = _sessions[sessionIndex];
+
+    // Create updated last message
+    final updatedLastMessage = LastMessage(
+      id: messageData['_id'] ?? '',
+      sender: messageData['sender'] ?? '',
+      content: messageData['content'] ?? '',
+      attachments: messageData['attachments'] ?? [],
+      status: messageData['status'] ?? 'sent',
+      createdAt: messageData['createdAt'] != null
+          ? DateTime.parse(messageData['createdAt'])
+          : DateTime.now(),
+    );
+
+    // Create updated session
+    final updatedSession = ChatSession(
+      id: session.id,
+      title: session.title,
+      type: session.type,
+      lastMessage: updatedLastMessage,
+      createdBy: session.createdBy,
+      otherUser: session.otherUser,
+      status: session.status,
+      recipients: session.recipients,
+      photo: session.photo,
+      createdAt: DateTime.now(), // Update to current time to move to top
+    );
+
+    // Remove from current position and add to top
+    _sessions.removeAt(sessionIndex);
+    _sessions.insert(0, updatedSession);
+
+    print(
+        "ChatProvider - _updateExistingSession: Updated session ${session.id} and moved to top");
+  }
+
+  Future<void> _handlePotentialNewSession(String chatSessionId) async {
+    try {
+      print(
+          "ChatProvider - _handlePotentialNewSession: Fetching session $chatSessionId");
+
+      final token = await _authService.getToken();
+      if (token == null) return;
+
+      // Try to fetch the specific session (this would need a new API endpoint)
+      // For now, we'll do a limited refresh to get the latest session
+      _sessions.clear();
+      _currentPage = 1;
+      _hasMore = true;
+      await fetchSessions();
+    } catch (e) {
+      print("ChatProvider - _handlePotentialNewSession: Error - $e");
+    }
+  }
+
+  // Add new session to the top of the list
+  void addNewSession(Map<String, dynamic> sessionData) {
+    try {
+      print("ChatProvider - addNewSession: Adding new session");
+
+      final newSession = ChatSession.fromJson(sessionData);
+
+      // Check if session already exists
+      final existingIndex =
+          _sessions.indexWhere((session) => session.id == newSession.id);
+
+      if (existingIndex == -1) {
+        // Add to top of list
+        _sessions.insert(0, newSession);
+        print(
+            "ChatProvider - addNewSession: Added new session ${newSession.id}");
+      } else {
+        // Move existing session to top
+        final existingSession = _sessions.removeAt(existingIndex);
+        _sessions.insert(0, existingSession);
+        print(
+            "ChatProvider - addNewSession: Moved existing session ${newSession.id} to top");
+      }
+
+      notifyListeners();
+    } catch (e) {
+      print("ChatProvider - addNewSession: Error - $e");
+      // Fallback to refresh if smart add fails
+      fetchSessions(refresh: true);
     }
   }
 

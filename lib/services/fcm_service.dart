@@ -12,6 +12,7 @@ import '../constants/config.dart';
 import '../firebase_options.dart';
 import '../services/auth_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'navigation_service.dart';
 
 /// Firebase Cloud Messaging (FCM) Service
 /// Handles push notifications, token registration, and local notifications
@@ -180,25 +181,10 @@ class FCMService {
 
   /// Handle notification navigation
   void _handleNotificationNavigation(Map<String, dynamic> data) {
-    // Navigate based on notification type
-    final type = data['type'] as String?;
+    debugPrint('FCMService: Handling notification navigation with data: $data');
 
-    switch (type) {
-      case 'new_message':
-        // Navigate to chat screen
-        debugPrint('FCMService: Navigate to chat: ${data['chatSessionId']}');
-        break;
-      case 'incoming_call':
-        // Navigate to call screen
-        debugPrint('FCMService: Navigate to call: ${data['callId']}');
-        break;
-      case 'group_message':
-        // Navigate to group chat
-        debugPrint('FCMService: Navigate to group: ${data['groupId']}');
-        break;
-      default:
-        debugPrint('FCMService: Unknown notification type: $type');
-    }
+    // Use the navigation service to handle the routing
+    NavigationService.instance.handleNotificationData(data);
   }
 
   /// Request notification permissions
