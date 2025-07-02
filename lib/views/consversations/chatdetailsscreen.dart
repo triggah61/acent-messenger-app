@@ -43,6 +43,9 @@ class _ConversationsState extends State<Conversations> {
   bool _isSending = false;
   bool _isTyping = false;
   Timer? _typingTimer;
+  Timer? _typingIndicatorTimer;
+  Map<String, String> _typingUsers = {}; // userId -> userName
+  String? _currentUserId;
   Message? _replyingTo;
 
   // Message list state
@@ -72,9 +75,20 @@ class _ConversationsState extends State<Conversations> {
       });
     }
 
+    _loadCurrentUserId();
     _initializeSocket();
     _loadMessages();
     _scrollController.addListener(_scrollListener);
+  }
+
+  Future<void> _loadCurrentUserId() async {
+    try {
+      final authProvider = context.read<AuthProvider>();
+      _currentUserId = authProvider.userId ?? authProvider.profile?.id;
+      print('Chat: Current user ID loaded: $_currentUserId');
+    } catch (e) {
+      print('Error loading current user ID: $e');
+    }
   }
 
   Future<void> _initializeSocket() async {
@@ -151,10 +165,55 @@ class _ConversationsState extends State<Conversations> {
         print('Chat: Typing started - $data');
         try {
           final userId = data['userId'] as String?;
-          if (mounted && userId != null) {
-            // Handle typing indicator
+
+          // Only show typing indicator for other users, not current user
+          if (mounted && userId != null && userId != _currentUserId) {
+            // Get user name from event data or session participants
+            String userName = 'Someone';
+
+            // First try to get user info from the event data
+            if (data['userInfo'] != null) {
+              final userInfo = data['userInfo'];
+              final firstName = userInfo['firstName'] as String? ?? '';
+              final lastName = userInfo['lastName'] as String? ?? '';
+              userName = '$firstName $lastName'.trim();
+              if (userName.isEmpty) {
+                userName = userInfo['username'] as String? ?? 'Someone';
+              }
+            } else if (widget.session?.recipients != null) {
+              // Fallback to session participants
+              try {
+                final typingUser = widget.session!.recipients
+                    .firstWhere(
+                      (participant) => participant.user.id == userId,
+                    )
+                    .user;
+                userName =
+                    '${typingUser.firstName ?? ''} ${typingUser.lastName ?? ''}'
+                        .trim();
+                if (userName.isEmpty) {
+                  userName = 'Someone';
+                }
+              } catch (e) {
+                // User not found in recipients, keep default 'Someone'
+                print('Typing user not found in recipients: $e');
+              }
+            }
+
             setState(() {
-              _isTyping = true;
+              _typingUsers[userId] = userName;
+              _isTyping = _typingUsers.isNotEmpty;
+            });
+
+            // Clear typing indicator after timeout
+            _typingIndicatorTimer?.cancel();
+            _typingIndicatorTimer = Timer(const Duration(seconds: 5), () {
+              if (mounted) {
+                setState(() {
+                  _typingUsers.remove(userId);
+                  _isTyping = _typingUsers.isNotEmpty;
+                });
+              }
             });
           }
         } catch (e) {
@@ -168,10 +227,18 @@ class _ConversationsState extends State<Conversations> {
         print('Chat: Typing stopped - $data');
         try {
           final userId = data['userId'] as String?;
-          if (mounted && userId != null) {
+
+          // Only handle typing stop for other users, not current user
+          if (mounted && userId != null && userId != _currentUserId) {
             setState(() {
-              _isTyping = false;
+              _typingUsers.remove(userId);
+              _isTyping = _typingUsers.isNotEmpty;
             });
+
+            // Cancel the timeout since user explicitly stopped typing
+            if (_typingUsers.isEmpty) {
+              _typingIndicatorTimer?.cancel();
+            }
           }
         } catch (e) {
           print('Error in typing stop listener: $e');
@@ -251,12 +318,29 @@ class _ConversationsState extends State<Conversations> {
     });
   }
 
+  String _getTypingText() {
+    if (_typingUsers.isEmpty) return '';
+
+    final userNames = _typingUsers.values.toList();
+
+    if (userNames.length == 1) {
+      return '${userNames.first} is typing...';
+    } else if (userNames.length == 2) {
+      return '${userNames.first} and ${userNames.last} are typing...';
+    } else if (userNames.length <= 3) {
+      return '${userNames.take(2).join(', ')} and ${userNames.length - 2} other${userNames.length > 3 ? 's' : ''} are typing...';
+    } else {
+      return 'Several people are typing...';
+    }
+  }
+
   @override
   void dispose() {
     // Clear current active session
     context.read<GlobalEventProvider>().clearCurrentActiveSession();
 
     _typingTimer?.cancel();
+    _typingIndicatorTimer?.cancel();
 
     // Remove chat event listeners
     if (_newMessageListener != null) {
@@ -650,9 +734,9 @@ class _ConversationsState extends State<Conversations> {
               Container(
                 padding:
                     const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-                child: const Text(
-                  'Someone is typing...',
-                  style: TextStyle(
+                child: Text(
+                  _getTypingText(),
+                  style: const TextStyle(
                     color: Colors.grey,
                     fontSize: 12,
                   ),
