@@ -79,6 +79,35 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     }
   }
 
+  String _getAddressHintText() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        return 'Enter Bitcoin address (e.g., 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa)';
+      case 'ETH':
+        return 'Enter Ethereum address (e.g., 0x742d35Cc6634C0532925a3b8D7f6d8Eb5f2d9e3A)';
+      case 'BNB':
+        return 'Enter BNB address (e.g., bnb1grpf0955h0ykzq3ar5nmum7y6gdfl6lxfn46h2)';
+      default:
+        return 'Enter ${_currentCurrency.toUpperCase()} address';
+    }
+  }
+
+  String _getAddressValidationRegex() {
+    switch (_currentCurrency.toUpperCase()) {
+      case 'BTC':
+        // Bitcoin address validation regex
+        return r'^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59}|[mn2][a-km-zA-HJ-NP-Z1-9]{25,34}|tb1[a-z0-9]{39,59})$';
+      case 'ETH':
+        // Ethereum address validation regex (0x followed by 40 hex characters)
+        return r'^0x[a-fA-F0-9]{40}$';
+      case 'BNB':
+        // BNB address validation regex (bnb1 followed by 38 characters)
+        return r'^bnb1[a-z0-9]{38}$';
+      default:
+        return r'^.+$'; // Generic validation - just not empty
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -468,8 +497,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
             controller: _addressController,
             style: const TextStyle(color: Colors.black87),
             decoration: InputDecoration(
-              hintText:
-                  'Enter Bitcoin address (e.g., 1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa)',
+              hintText: _getAddressHintText(),
               hintStyle: TextStyle(color: Colors.grey[400]),
               filled: true,
               fillColor: Colors.white,
@@ -497,6 +525,12 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               if (value == null || value.isEmpty) {
                 return 'Please enter a destination address';
               }
+
+              // Validate address format based on currency
+              if (!_isValidAddressFormat(value)) {
+                return 'Please enter a valid ${_getCurrencyDisplayName()} address';
+              }
+
               return null;
             },
           ),
@@ -752,9 +786,10 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     }
 
     // Check if address is valid (basic validation)
-    // if (!_isValidBitcoinAddressBasic(address)) {
-    //   return ValidationResult(false, 'Please enter a valid address');
-    // }
+    if (!_isValidAddressFormat(address)) {
+      return ValidationResult(
+          false, 'Please enter a valid ${_getCurrencyDisplayName()} address');
+    }
 
     // Check if fees are loaded
     final selectedFee = walletProvider.getFeeByType(_selectedFeeType);
@@ -787,6 +822,13 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
     }
 
     return ValidationResult(true, '');
+  }
+
+  bool _isValidAddressFormat(String address) {
+    if (address.isEmpty) return false;
+
+    final regex = RegExp(_getAddressValidationRegex());
+    return regex.hasMatch(address);
   }
 
   bool _isValidBitcoinAddressBasic(String address) {
@@ -1205,8 +1247,9 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
               children: [
                 const Icon(Icons.check_circle, color: Colors.white),
                 const SizedBox(width: 8),
-                const Expanded(
-                  child: Text('Bitcoin address scanned successfully!'),
+                Expanded(
+                  child: Text(
+                      '${_getCurrencyDisplayName()} address scanned successfully!'),
                 ),
               ],
             ),
