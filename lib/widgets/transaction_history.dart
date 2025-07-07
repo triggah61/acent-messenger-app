@@ -349,16 +349,23 @@ class _TransactionHistoryState extends State<TransactionHistory> {
 
   String _formatDate(DateTime date) {
     final now = DateTime.now();
-    final difference = now.difference(date);
+    final localDate = date.toLocal(); // Convert to local timezone
+    final difference = now.difference(localDate);
 
-    if (difference.inDays > 0) {
-      return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
-    } else if (difference.inHours > 0) {
-      return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
-    } else if (difference.inMinutes > 0) {
-      return '${difference.inMinutes} minute${difference.inMinutes > 1 ? 's' : ''} ago';
-    } else {
+    // Show relative time for recent transactions with local time
+    if (difference.inMinutes < 1) {
       return 'Just now';
+    } else if (difference.inMinutes < 60) {
+      return '${difference.inMinutes} min ago';
+    } else if (difference.inHours < 24) {
+      return '${difference.inHours}h ago • ${DateFormat('h:mm a').format(localDate)}';
+    } else if (difference.inDays == 1) {
+      return 'Yesterday • ${DateFormat('h:mm a').format(localDate)}';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays} days ago • ${DateFormat('h:mm a').format(localDate)}';
+    } else {
+      // For older transactions, show full date with local time
+      return DateFormat('MMM dd • h:mm a').format(localDate);
     }
   }
 

@@ -465,7 +465,8 @@ class _TransactionsScreenState extends State<TransactionsScreen> {
   }
 
   String _formatDate(DateTime date) {
-    return DateFormat('MMM dd, yyyy • HH:mm').format(date);
+    final localDate = date.toLocal();
+    return DateFormat('MMM dd, yyyy • hh:mm a').format(localDate);
   }
 
   Color _getStatusColor(String status) {
