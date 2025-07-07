@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import '../views/consversations/chatdetailsscreen.dart';
+import '../views/calls/incoming_call_screen.dart';
 import '../models/chat_session.dart';
+import '../models/call.dart';
 import '../services/chat_service.dart';
 import '../services/auth_service.dart';
+import '../services/call_service.dart';
 import '../constants/config.dart';
 
 /// Navigation service for handling navigation from anywhere in the app
@@ -43,9 +46,7 @@ class NavigationService {
       showDialog(
         context: context,
         barrierDismissible: false,
-        builder: (context) => const Center(
-          child: CircularProgressIndicator(),
-        ),
+        builder: (context) => const Center(child: CircularProgressIndicator()),
       );
 
       try {
@@ -61,17 +62,17 @@ class NavigationService {
           // Navigate to the chat details screen
           await Navigator.of(context).push(
             MaterialPageRoute(
-              builder: (context) => Conversations(
-                session: session,
-              ),
+              builder: (context) => Conversations(session: session),
             ),
           );
 
           debugPrint(
-              'NavigationService: Successfully navigated to chat session');
+            'NavigationService: Successfully navigated to chat session',
+          );
         } else {
           debugPrint(
-              'NavigationService: Chat session not found: $cleanSessionId');
+            'NavigationService: Chat session not found: $cleanSessionId',
+          );
           _showErrorMessage(context, 'Chat session not found');
         }
       } catch (e) {
@@ -107,7 +108,8 @@ class NavigationService {
   }) async {
     try {
       debugPrint(
-          'NavigationService: Navigating to call: $callId, type: $callType');
+        'NavigationService: Navigating to call: $callId, type: $callType',
+      );
 
       final context = this.context;
       if (context == null) {
@@ -115,9 +117,45 @@ class NavigationService {
         return;
       }
 
-      // TODO: Implement call screen navigation when call screens are available
-      // For now, show a placeholder
-      _showInfoMessage(context, 'Call feature coming soon!');
+      // Import the required services and screens
+      final callService = CallService(AuthService());
+
+      // Show loading while fetching call details
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(child: CircularProgressIndicator()),
+      );
+
+      try {
+        // Get the specific call by ID (much more efficient than searching history)
+        final call = await callService.getCallById(callId);
+
+        // Hide loading
+        Navigator.of(context).pop();
+
+        if (call != null) {
+          debugPrint('NavigationService: Successfully found call: ${call.id}');
+          // Navigate to incoming call screen
+          await Navigator.of(context).push(
+            MaterialPageRoute(
+              builder:
+                  (context) => IncomingCallScreen(
+                    call: call,
+                    notificationData: additionalData,
+                  ),
+            ),
+          );
+        } else {
+          debugPrint('NavigationService: Call not found or expired: $callId');
+          _showErrorMessage(context, 'Call not found or expired');
+        }
+      } catch (e) {
+        // Hide loading if still showing
+        Navigator.of(context).pop();
+        debugPrint('NavigationService: Error loading call details: $e');
+        _showErrorMessage(context, 'Error loading call: ${e.toString()}');
+      }
     } catch (e) {
       debugPrint('NavigationService: Call navigation error: $e');
     }
@@ -164,8 +202,10 @@ class NavigationService {
           debugPrint('NavigationService: Unknown notification type: $type');
           final context = this.context;
           if (context != null) {
-            _showInfoMessage(context,
-                'Notification received: ${data['title'] ?? 'Unknown'}');
+            _showInfoMessage(
+              context,
+              'Notification received: ${data['title'] ?? 'Unknown'}',
+            );
           }
       }
     } catch (e) {

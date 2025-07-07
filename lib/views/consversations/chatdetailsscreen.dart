@@ -1,9 +1,12 @@
 import 'package:acent_messenger/constants/config.dart';
+
 import 'package:acent_messenger/models/chat_session.dart';
 import 'package:acent_messenger/models/message.dart';
+import 'package:acent_messenger/models/call.dart';
 // Removed unused imports - smart updates now handled by GlobalEventProvider
 import 'package:acent_messenger/providers/global_event_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
+import 'package:acent_messenger/services/call_service.dart';
 import 'package:acent_messenger/services/pusher_service.dart';
 import 'package:acent_messenger/views/contacts/contacts.dart';
 import 'package:flutter/material.dart';
@@ -15,6 +18,7 @@ import '../../providers/auth_provider.dart';
 import '../../constants/colors.dart';
 import '../camera/camera.dart';
 import '../chatcalls/chatcalls.dart';
+import '../calls/agora_call_screen.dart';
 import '../createpoll/createpoll.dart';
 import '../documents/documents.dart';
 import '../gallery/gallery.dart';
@@ -34,6 +38,7 @@ class Conversations extends StatefulWidget {
 
 class _ConversationsState extends State<Conversations> {
   final AuthService _authService = AuthService();
+  late final CallService _callService;
   final PusherService _pusherService = PusherService.instance;
   bool _isAttachmentSheetVisible = false;
   final TextEditingController _messageController = TextEditingController();
@@ -64,6 +69,9 @@ class _ConversationsState extends State<Conversations> {
   @override
   void initState() {
     super.initState();
+
+    // Initialize CallService
+    _callService = CallService(_authService);
 
     // Set current active session for global event handling
     if (widget.session?.id != null) {
@@ -637,6 +645,131 @@ class _ConversationsState extends State<Conversations> {
     );
   }
 
+  /// Initiate a video call
+  Future<void> _initiateVideoCall() async {
+    await _initiateCall('video');
+  }
+
+  /// Initiate a voice call
+  Future<void> _initiateVoiceCall() async {
+    await _initiateCall('voice');
+  }
+
+  /// Main call initiation method
+  Future<void> _initiateCall(String callType) async {
+    try {
+      if (widget.session == null) {
+        _showErrorMessage('No active chat session');
+        return;
+      }
+
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+
+      // Get participant IDs based on chat session type
+      List<String> participantIds = [];
+
+      if (widget.session!.type == 'group') {
+        // For group chats, include all recipients
+        participantIds = widget.session!.recipients
+            .map((recipient) => recipient.user.id)
+            .toList();
+      } else {
+        // For individual chats, get the other user
+        if (widget.session!.otherUser?.id != null) {
+          participantIds = [widget.session!.otherUser!.id];
+        } else {
+          throw Exception('Unable to identify call recipient');
+        }
+      }
+
+      // Initiate the call
+      final result = await _callService.initiateCall(
+        participantIds: participantIds,
+        type: callType,
+        chatSessionId: widget.session!.id,
+      );
+
+      // Hide loading indicator
+      Navigator.of(context).pop();
+
+      if (result['success'] == true) {
+        final call = result['call'] as Call;
+        final channelName = result['channelName'] as String;
+
+        // Navigate to call screen with the call details
+        await _navigateToCallScreen(call, channelName);
+
+        _showSuccessMessage('Call initiated successfully');
+      } else {
+        _showErrorMessage(result['error'] ?? 'Failed to initiate call');
+      }
+    } catch (e) {
+      // Hide loading indicator if still showing
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      }
+
+      print('Error initiating call: $e');
+      _showErrorMessage('Failed to initiate call: ${e.toString()}');
+    }
+  }
+
+  /// Navigate to the actual call screen
+  Future<void> _navigateToCallScreen(Call call, String channelName) async {
+    try {
+      // Get Agora token for the call
+      final agoraToken = await _callService.getCallToken(call.id);
+
+      if (agoraToken != null) {
+        // Navigate to the Agora call screen
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => AgoraCallScreen(
+              call: call,
+              channelName: channelName,
+              agoraToken: agoraToken.token,
+              agoraUid: agoraToken.integerUid,
+              isIncoming: false,
+            ),
+          ),
+        );
+      } else {
+        throw Exception('Failed to get call token');
+      }
+    } catch (e) {
+      print('Error navigating to call screen: $e');
+      _showErrorMessage('Failed to start call: ${e.toString()}');
+    }
+  }
+
+  void _showSuccessMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.green,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
+  void _showErrorMessage(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final profileInfo =
@@ -663,21 +796,13 @@ class _ConversationsState extends State<Conversations> {
           actions: [
             IconButton(
               icon: const Icon(Icons.video_call),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const CallScreen()),
-                );
-              },
+              onPressed: _initiateVideoCall,
+              tooltip: 'Start video call',
             ),
             IconButton(
               icon: const Icon(Icons.phone),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (context) => const CallScreen()),
-                );
-              },
+              onPressed: _initiateVoiceCall,
+              tooltip: 'Start voice call',
             ),
           ],
           title: Row(

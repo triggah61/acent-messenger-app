@@ -14,6 +14,7 @@ import 'providers/contacts_provider.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'constants/env_config.dart';
 import 'services/navigation_service.dart';
+import 'services/permission_service.dart';
 
 void main() async {
   print("App - main: Starting application");
@@ -41,6 +42,9 @@ void main() async {
         ),
         Provider<FCMService>(
           create: (_) => FCMService.instance,
+        ),
+        Provider<PermissionService>(
+          create: (_) => PermissionService.instance,
         ),
         ChangeNotifierProvider<AuthProvider>(
           create: (_) => AuthProvider(),
@@ -157,7 +161,22 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
 
       debugPrint(
           'Main: Session refresh callbacks and smart update callbacks have been set');
+
+      // Initialize permissions after UI is loaded
+      _initializePermissions();
     });
+  }
+
+  /// Initialize permissions after app is fully loaded
+  void _initializePermissions() async {
+    try {
+      debugPrint('Main: Initializing permissions...');
+      await PermissionService.instance.initializePermissions();
+      debugPrint('Main: Permissions initialized successfully');
+    } catch (e) {
+      debugPrint('Main: Error initializing permissions: $e');
+      // Don't block app startup if permissions fail
+    }
   }
 
   /// Handle initial notification when app is opened from notification

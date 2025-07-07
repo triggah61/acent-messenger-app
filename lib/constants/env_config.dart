@@ -62,6 +62,19 @@ class EnvConfig {
   static String get firebaseMacosBundleId =>
       dotenv.env['FIREBASE_MACOS_BUNDLE_ID'] ?? firebaseIosBundleId;
 
+  // Agora Configuration
+  static String get agoraAppId =>
+      dotenv.env['AGORA_APP_ID'] ?? '7ee53c636c6a4572a2c799c95f1f4f34';
+  static String get agoraAppCertificate =>
+      dotenv.env['AGORA_APP_CERTIFICATE'] ?? '';
+
+  // Call Configuration
+  static int get callTimeoutSeconds =>
+      int.tryParse(dotenv.env['CALL_TIMEOUT_SECONDS'] ?? '30') ?? 30;
+  static int get tokenRefreshThresholdSeconds =>
+      int.tryParse(dotenv.env['TOKEN_REFRESH_THRESHOLD_SECONDS'] ?? '300') ??
+      300;
+
   // Helper method to get full photo URL
   static String getPhotoUrl(String? photoPath) {
     if (photoPath == null || photoPath.isEmpty) return '';
