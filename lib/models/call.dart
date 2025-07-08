@@ -9,7 +9,7 @@ class Call {
   final CallParticipant initiator;
   final List<CallParticipant> participants;
   final String
-  status; // 'initiated', 'ringing', 'active', 'ended', 'missed', 'declined'
+      status; // 'initiated', 'ringing', 'active', 'ended', 'missed', 'declined'
   final DateTime? startedAt;
   final DateTime? endedAt;
   final int duration; // Duration in seconds
@@ -43,30 +43,36 @@ class Call {
       channelName: json['channelName'] ?? '',
       type: json['type'] ?? 'voice',
       mode: json['mode'] ?? 'individual',
-      initiator: CallParticipant.fromJson(json['initiator'] ?? {}),
-      participants:
-          (json['participants'] as List<dynamic>? ?? [])
-              .map((p) => CallParticipant.fromJson(p))
-              .toList(),
+      // Fix: initiator is a user object directly, not a participant
+      initiator: CallParticipant(
+        user: CallUser.fromJson(json['initiator'] ?? {}),
+        role: 'caller',
+        status: 'accepted',
+        duration: 0,
+      ),
+      participants: (json['participants'] as List<dynamic>? ?? [])
+          .map((p) => CallParticipant.fromJson(p))
+          .toList(),
       status: json['status'] ?? 'initiated',
       startedAt:
           json['startedAt'] != null ? DateTime.parse(json['startedAt']) : null,
       endedAt: json['endedAt'] != null ? DateTime.parse(json['endedAt']) : null,
       duration: json['duration'] ?? 0,
       endReason: json['endReason'],
-      chatSessionId: json['chatSession'],
-      quality:
-          json['quality'] != null
-              ? CallQuality.fromJson(json['quality'])
-              : null,
-      createdAt:
-          json['createdAt'] != null
-              ? DateTime.parse(json['createdAt'])
-              : DateTime.now(),
-      updatedAt:
-          json['updatedAt'] != null
-              ? DateTime.parse(json['updatedAt'])
-              : DateTime.now(),
+      // Fix: handle chatSession as object and extract ID
+      chatSessionId: json['chatSessionId'] ??
+          (json['chatSession'] is Map<String, dynamic>
+              ? json['chatSession']['_id']
+              : json['chatSession']),
+      quality: json['quality'] != null
+          ? CallQuality.fromJson(json['quality'])
+          : null,
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'])
+          : DateTime.now(),
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.parse(json['updatedAt'])
+          : DateTime.now(),
     );
   }
 
@@ -123,7 +129,7 @@ class CallParticipant {
   final CallUser user;
   final String role; // 'caller' or 'callee'
   final String
-  status; // 'invited', 'ringing', 'accepted', 'declined', 'missed', 'ended'
+      status; // 'invited', 'ringing', 'accepted', 'declined', 'missed', 'ended'
   final DateTime? joinedAt;
   final DateTime? leftAt;
   final int duration; // Duration in seconds

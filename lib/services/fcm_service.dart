@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -149,19 +150,60 @@ class FCMService {
       onDidReceiveNotificationResponse: _onLocalNotificationTapped,
     );
 
-    // Create notification channel for Android
+    // Set up iOS notification categories
+    if (Platform.isIOS) {
+      await _setupIOSNotificationCategories();
+    }
+
+    // Create notification channels for Android
     if (Platform.isAndroid) {
-      const androidChannel = AndroidNotificationChannel(
+      final androidPlugin = _localNotifications!
+          .resolvePlatformSpecificImplementation<
+              AndroidFlutterLocalNotificationsPlugin>();
+
+      // Channel for regular messages
+      const messagesChannel = AndroidNotificationChannel(
         'acent_messages',
         'Acent Messages',
         description: 'Notification channel for Acent Messenger',
         importance: Importance.high,
       );
 
-      await _localNotifications!
+      // Channel for incoming calls with ringtone
+      final callsChannel = AndroidNotificationChannel(
+        'acent_calls',
+        'Acent Calls',
+        description: 'Notification channel for incoming calls',
+        importance: Importance.max,
+        playSound: true,
+        enableVibration: true,
+        vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
+        enableLights: true,
+        showBadge: true,
+      );
+
+      await androidPlugin?.createNotificationChannel(messagesChannel);
+      await androidPlugin?.createNotificationChannel(callsChannel);
+    }
+  }
+
+  /// Set up iOS notification categories with actions
+  Future<void> _setupIOSNotificationCategories() async {
+    try {
+      final iosPlugin = _localNotifications!
           .resolvePlatformSpecificImplementation<
-              AndroidFlutterLocalNotificationsPlugin>()
-          ?.createNotificationChannel(androidChannel);
+              IOSFlutterLocalNotificationsPlugin>();
+
+      if (iosPlugin != null) {
+        await iosPlugin.requestPermissions(
+          alert: true,
+          badge: true,
+          sound: true,
+        );
+      }
+    } catch (e) {
+      debugPrint(
+          'FCMService: Error setting up iOS notification categories: $e');
     }
   }
 
@@ -172,11 +214,89 @@ class FCMService {
     if (response.payload != null) {
       try {
         final data = jsonDecode(response.payload!);
+        // Only handle navigation (no action buttons anymore)
         _handleNotificationNavigation(data);
       } catch (e) {
         debugPrint('FCMService: Error parsing notification payload: $e');
       }
     }
+  }
+
+  // /// Handle call action button presses (DISABLED - removed action buttons)
+  // void _handleCallAction(String actionId, Map<String, dynamic> data) {
+  //   debugPrint('FCMService: Handling call action: $actionId');
+
+  //   final callId = data['call_id'] as String? ?? data['callId'] as String?;
+
+  //   if (callId == null) {
+  //     debugPrint('FCMService: No call ID found in notification data');
+  //     return;
+  //   }
+
+  //   switch (actionId) {
+  //     case 'answer_call':
+  //       debugPrint('FCMService: Answer call action for call: $callId');
+  //       _handleAnswerCall(callId, data);
+  //       break;
+  //     case 'decline_call':
+  //       debugPrint('FCMService: Decline call action for call: $callId');
+  //       _handleDeclineCall(callId, data);
+  //       break;
+  //     default:
+  //       debugPrint('FCMService: Unknown action: $actionId');
+  //       break;
+  //   }
+  // }
+
+  // /// Handle answer call action (DISABLED - removed action buttons)
+  // void _handleAnswerCall(String callId, Map<String, dynamic> data) {
+  //   debugPrint('FCMService: Answering call: $callId');
+
+  //   // Clear the call notification
+  //   _clearCallNotification(callId);
+
+  //   // Navigate to the call screen
+  //   NavigationService.instance.navigateToCall(
+  //     callId: callId,
+  //     callType: data['callType'] as String? ?? 'voice',
+  //     additionalData: data,
+  //   );
+  // }
+
+  // /// Handle decline call action (DISABLED - removed action buttons)
+  // void _handleDeclineCall(String callId, Map<String, dynamic> data) async {
+  //   debugPrint('FCMService: Declining call: $callId');
+
+  //   // Clear the call notification
+  //   _clearCallNotification(callId);
+
+  //   try {
+  //     // Call the decline API
+  //     final token = await _authService.getToken();
+  //     if (token != null) {
+  //       final response = await http.post(
+  //         Uri.parse('${Config.baseApiUrl}/user/call/decline/$callId'),
+  //         headers: {
+  //           'Content-Type': 'application/json',
+  //           'Authorization': 'Bearer $token',
+  //         },
+  //       );
+
+  //       if (response.statusCode == 200) {
+  //         debugPrint('FCMService: Call declined successfully');
+  //       } else {
+  //         debugPrint(
+  //             'FCMService: Failed to decline call: ${response.statusCode}');
+  //       }
+  //     }
+  //   } catch (e) {
+  //     debugPrint('FCMService: Error declining call: $e');
+  //   }
+  // }
+
+  /// Clear call notification
+  void _clearCallNotification(String callId) {
+    _localNotifications?.cancel(callId.hashCode);
   }
 
   /// Handle notification navigation
@@ -248,6 +368,74 @@ class FCMService {
   Future<void> _showLocalNotification(RemoteMessage message) async {
     if (_localNotifications == null) return;
 
+    final notification = message.notification;
+    if (notification == null) return;
+
+    final notificationType = message.data['type'] as String?;
+    final callId = message.data['callId'] as String?;
+
+    // Check if this is an incoming call notification
+    if (notificationType == 'incoming_call' && callId != null) {
+      await _showIncomingCallNotification(message, callId);
+    } else {
+      await _showRegularNotification(message);
+    }
+  }
+
+  /// Show incoming call notification with ringtone (no action buttons)
+  Future<void> _showIncomingCallNotification(
+      RemoteMessage message, String callId) async {
+    final notification = message.notification;
+    if (notification == null) return;
+
+    final androidDetails = AndroidNotificationDetails(
+      'acent_calls',
+      'Acent Calls',
+      channelDescription: 'Notification channel for incoming calls',
+      importance: Importance.max,
+      priority: Priority.max,
+      icon: '@mipmap/ic_launcher',
+      category: AndroidNotificationCategory.call,
+      fullScreenIntent: true,
+      ongoing: true,
+      autoCancel: true,
+      playSound: true,
+      enableVibration: true,
+      vibrationPattern:
+          Int64List.fromList([0, 1000, 500, 1000, 500, 1000]), // Ring pattern
+      enableLights: true,
+      timeoutAfter: 30000, // Auto-dismiss after 30 seconds
+      // Remove action buttons to avoid confusion
+    );
+
+    const iosDetails = DarwinNotificationDetails(
+      presentAlert: true,
+      presentBadge: true,
+      presentSound: true,
+      sound: 'default', // Use default iOS ringtone
+      interruptionLevel: InterruptionLevel.critical,
+    );
+
+    final notificationDetails = NotificationDetails(
+      android: androidDetails,
+      iOS: iosDetails,
+    );
+
+    await _localNotifications!.show(
+      callId.hashCode,
+      notification.title,
+      notification.body,
+      notificationDetails,
+      payload: jsonEncode({
+        ...message.data,
+        'notification_type': 'incoming_call',
+        'call_id': callId,
+      }),
+    );
+  }
+
+  /// Show regular notification
+  Future<void> _showRegularNotification(RemoteMessage message) async {
     final notification = message.notification;
     if (notification == null) return;
 
