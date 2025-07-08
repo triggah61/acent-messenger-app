@@ -102,7 +102,7 @@ class _WithdrawScreenState extends State<WithdrawScreen> {
         return r'^0x[a-fA-F0-9]{40}$';
       case 'BNB':
         // BNB address validation regex (bnb1 followed by 38 characters)
-        return r'^bnb1[a-z0-9]{38}$';
+        return r'^0x[a-fA-F0-9]{40}$';
       default:
         return r'^.+$'; // Generic validation - just not empty
     }

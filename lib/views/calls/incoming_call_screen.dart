@@ -58,6 +58,9 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
 
     // Make the screen appear over lock screen
     _setupSystemUI();
+
+    // Dismiss the incoming call notification immediately when screen loads
+    _dismissCallNotification();
   }
 
   @override
@@ -112,6 +115,18 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
       systemNavigationBarColor: Colors.transparent,
       systemNavigationBarIconBrightness: Brightness.light,
     ));
+  }
+
+  void _dismissCallNotification() {
+    try {
+      // Dismiss the incoming call notification immediately when screen loads
+      // This ensures notification disappears when user clicks on it or when screen is shown
+      _fcmService.dismissIncomingCall(widget.call.id);
+      debugPrint(
+          'IncomingCallScreen: Dismissed incoming call notification for call ${widget.call.id}');
+    } catch (e) {
+      debugPrint('IncomingCallScreen: Error dismissing notification: $e');
+    }
   }
 
   void _loadCallerInfo() {
