@@ -881,11 +881,11 @@ class _ConversationsState extends State<Conversations> {
                     ],
                   ),
                 ),
-                const Icon(
-                  Icons.info_outline,
-                  size: 20,
-                  color: Colors.grey,
-                ),
+                // const Icon(
+                //   Icons.info_outline,
+                //   size: 20,
+                //   color: Colors.grey,
+                // ),
               ],
             ),
           ),
