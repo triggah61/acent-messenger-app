@@ -8,6 +8,7 @@ import '../../models/call.dart';
 import '../../services/call_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/permission_service.dart';
+import '../../services/pusher_service.dart';
 import '../../constants/env_config.dart';
 
 class AgoraCallScreen extends StatefulWidget {
@@ -31,8 +32,9 @@ class AgoraCallScreen extends StatefulWidget {
 }
 
 class _AgoraCallScreenState extends State<AgoraCallScreen> {
-  late RtcEngine _engine;
+  RtcEngine? _engine;
   late final CallService _callService;
+  late final PusherService _pusherService;
 
   // Call state
   bool _isJoined = false;
@@ -59,18 +61,134 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   Timer? _callTimer;
   String _callDuration = '00:00';
 
+  // Event listeners
+  Function(dynamic)? _callDeclinedListener;
+  Function(dynamic)? _callEndedListener;
+
   @override
   void initState() {
     super.initState();
     _callService = CallService(AuthService());
+    _pusherService = PusherService.instance;
     _setupWakelock();
+    _setupRealtimeEventListeners();
     _initializeAgora();
   }
 
   @override
   void dispose() {
     _cleanup();
+    _cleanupRealtimeEventListeners();
     super.dispose();
+  }
+
+  void _setupRealtimeEventListeners() {
+    try {
+      // Listen for call declined events
+      _callDeclinedListener = (data) {
+        debugPrint('AgoraCallScreen: Received call_declined event: $data');
+
+        final callId = data['callId'] as String?;
+        if (callId == widget.call.id && mounted) {
+          _handleCallDeclined(data);
+        }
+      };
+      _pusherService.addEventListener('call_declined', _callDeclinedListener!);
+
+      // Listen for call ended events
+      _callEndedListener = (data) {
+        debugPrint('AgoraCallScreen: Received call_ended event: $data');
+
+        final callId = data['callId'] as String?;
+        if (callId == widget.call.id && mounted) {
+          _handleCallEnded(data);
+        }
+      };
+      _pusherService.addEventListener('call_ended', _callEndedListener!);
+
+      debugPrint(
+          'AgoraCallScreen: Set up real-time event listeners for call ${widget.call.id}');
+    } catch (e) {
+      debugPrint('AgoraCallScreen: Error setting up event listeners: $e');
+    }
+  }
+
+  void _cleanupRealtimeEventListeners() {
+    try {
+      if (_callDeclinedListener != null) {
+        _pusherService.removeEventListener(
+            'call_declined', _callDeclinedListener!);
+      }
+      if (_callEndedListener != null) {
+        _pusherService.removeEventListener('call_ended', _callEndedListener!);
+      }
+      debugPrint('AgoraCallScreen: Cleaned up real-time event listeners');
+    } catch (e) {
+      debugPrint('AgoraCallScreen: Error cleaning up event listeners: $e');
+    }
+  }
+
+  void _handleCallDeclined(Map<String, dynamic> data) {
+    if (!mounted) return;
+
+    final declinedBy = data['declinedBy'] as String?;
+    final status = data['status'] as String?;
+
+    debugPrint(
+        'AgoraCallScreen: Call declined by $declinedBy, status: $status');
+
+    // If all participants have declined or call is fully declined, end the call
+    if (status == 'declined') {
+      _showCallEndedMessage('Call declined by other party');
+      _endCallAndClose();
+    }
+  }
+
+  void _handleCallEnded(Map<String, dynamic> data) {
+    if (!mounted) return;
+
+    final endedBy = data['endedBy'] as String?;
+    final reason = data['reason'] as String?;
+
+    debugPrint('AgoraCallScreen: Call ended by $endedBy, reason: $reason');
+
+    String message = 'Call ended';
+    if (reason == 'timeout') {
+      message = 'Call timed out';
+    } else if (reason == 'declined') {
+      message = 'Call declined';
+    } else if (reason == 'normal') {
+      message = 'Call ended by other party';
+    }
+
+    _showCallEndedMessage(message);
+    _endCallAndClose();
+  }
+
+  void _showCallEndedMessage(String message) {
+    if (!mounted) return;
+
+    // Show a brief message before closing
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 1),
+        backgroundColor: Colors.red.withOpacity(0.8),
+      ),
+    );
+  }
+
+  Future<void> _endCallAndClose() async {
+    if (!mounted) return;
+
+    try {
+      // Clean up Agora and close the screen
+      await _cleanup();
+      Navigator.of(context).pop();
+    } catch (e) {
+      debugPrint('AgoraCallScreen: Error during call end cleanup: $e');
+      Navigator.of(context).pop();
+    }
   }
 
   Future<void> _setupWakelock() async {
@@ -103,7 +221,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
       // Initialize Agora engine
       _engine = createAgoraRtcEngine();
-      await _engine.initialize(
+      if (_engine == null) {
+        throw Exception('Failed to create Agora RTC engine');
+      }
+
+      await _engine!.initialize(
         RtcEngineContext(
           appId: appId,
           channelProfile: ChannelProfileType.channelProfileCommunication,
@@ -111,7 +233,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       );
 
       // Set up event handlers
-      _engine.registerEventHandler(
+      _engine!.registerEventHandler(
         RtcEngineEventHandler(
           onJoinChannelSuccess: _onJoinChannelSuccess,
           onUserJoined: _onUserJoined,
@@ -203,17 +325,19 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Future<void> _configureMediaSettings() async {
+    if (_engine == null) return;
+
     // Audio settings
-    await _engine.enableAudio();
-    await _engine.setDefaultAudioRouteToSpeakerphone(_isSpeakerOn);
+    await _engine!.enableAudio();
+    await _engine!.setDefaultAudioRouteToSpeakerphone(_isSpeakerOn);
 
     // Video settings for video calls
     if (widget.call.type == 'video') {
-      await _engine.enableVideo();
-      await _engine.startPreview();
+      await _engine!.enableVideo();
+      await _engine!.startPreview();
 
       // Set video configuration
-      await _engine.setVideoEncoderConfiguration(
+      await _engine!.setVideoEncoderConfiguration(
         const VideoEncoderConfiguration(
           dimensions: VideoDimensions(width: 640, height: 480),
           frameRate: 15,
@@ -225,6 +349,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   Future<void> _joinChannel() async {
     try {
+      if (_engine == null) {
+        throw Exception('Agora engine not initialized');
+      }
+
       // Get the current user's ID to use as UID
       final uid = await _getUserUid();
 
@@ -232,7 +360,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
       print('AgoraCallScreen: Channel: ${widget.channelName}');
       print('AgoraCallScreen: Token length: ${widget.agoraToken.length}');
 
-      await _engine.joinChannel(
+      await _engine!.joinChannel(
         token: widget.agoraToken,
         channelId: widget.channelName,
         uid: uid,
@@ -393,8 +521,11 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     _hideControlsTimer?.cancel();
 
     try {
-      await _engine.leaveChannel();
-      await _engine.release();
+      if (_engine != null) {
+        await _engine!.leaveChannel();
+        await _engine!.release();
+        _engine = null;
+      }
       await WakelockPlus.disable();
     } catch (e) {
       print('AgoraCallScreen: Error during cleanup: $e');
@@ -403,8 +534,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
 
   // Media control methods
   Future<void> _toggleMute() async {
+    if (_engine == null) return;
+
     try {
-      await _engine.muteLocalAudioStream(!_isMuted);
+      await _engine!.muteLocalAudioStream(!_isMuted);
       setState(() {
         _isMuted = !_isMuted;
       });
@@ -414,10 +547,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Future<void> _toggleVideo() async {
-    if (widget.call.type != 'video') return;
+    if (widget.call.type != 'video' || _engine == null) return;
 
     try {
-      await _engine.muteLocalVideoStream(!_isVideoOff);
+      await _engine!.muteLocalVideoStream(!_isVideoOff);
       setState(() {
         _isVideoOff = !_isVideoOff;
       });
@@ -427,8 +560,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Future<void> _toggleSpeaker() async {
+    if (_engine == null) return;
+
     try {
-      await _engine.setDefaultAudioRouteToSpeakerphone(!_isSpeakerOn);
+      await _engine!.setDefaultAudioRouteToSpeakerphone(!_isSpeakerOn);
       setState(() {
         _isSpeakerOn = !_isSpeakerOn;
       });
@@ -438,10 +573,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
   }
 
   Future<void> _switchCamera() async {
-    if (widget.call.type != 'video') return;
+    if (widget.call.type != 'video' || _engine == null) return;
 
     try {
-      await _engine.switchCamera();
+      await _engine!.switchCamera();
       setState(() {
         _isCameraFront = !_isCameraFront;
       });
@@ -495,43 +630,42 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder:
-          (context) => AlertDialog(
-            title: const Text('Call Configuration Error'),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(message),
-                  if (message.contains('Agora App ID not configured')) ...[
-                    const SizedBox(height: 16),
-                    const Text(
-                      'To fix this issue:',
-                      style: TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 8),
-                    const Text('1. Go to https://console.agora.io/'),
-                    const Text('2. Create a project and get your App ID'),
-                    const Text(
-                      '3. Set AGORA_APP_ID in your backend environment',
-                    ),
-                    const Text('4. Set AGORA_APP_CERTIFICATE as well'),
-                    const Text('5. Restart your backend server'),
-                  ],
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () {
-                  Navigator.of(context).pop();
-                  Navigator.of(context).pop();
-                },
-                child: const Text('OK'),
-              ),
+      builder: (context) => AlertDialog(
+        title: const Text('Call Configuration Error'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(message),
+              if (message.contains('Agora App ID not configured')) ...[
+                const SizedBox(height: 16),
+                const Text(
+                  'To fix this issue:',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                const Text('1. Go to https://console.agora.io/'),
+                const Text('2. Create a project and get your App ID'),
+                const Text(
+                  '3. Set AGORA_APP_ID in your backend environment',
+                ),
+                const Text('4. Set AGORA_APP_CERTIFICATE as well'),
+                const Text('5. Restart your backend server'),
+              ],
             ],
           ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              Navigator.of(context).pop();
+            },
+            child: const Text('OK'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -571,10 +705,10 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
     return Stack(
       children: [
         // Remote video (full screen)
-        if (_remoteUsers.isNotEmpty)
+        if (_remoteUsers.isNotEmpty && _engine != null)
           AgoraVideoView(
             controller: VideoViewController.remote(
-              rtcEngine: _engine,
+              rtcEngine: _engine!,
               canvas: VideoCanvas(uid: _remoteUsers.first),
               connection: RtcConnection(channelId: widget.channelName),
             ),
@@ -591,7 +725,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           ),
 
         // Local video (small overlay)
-        if (!_isVideoOff)
+        if (!_isVideoOff && _engine != null)
           Positioned(
             top: 100,
             right: 20,
@@ -602,7 +736,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                 borderRadius: BorderRadius.circular(8),
                 child: AgoraVideoView(
                   controller: VideoViewController(
-                    rtcEngine: _engine,
+                    rtcEngine: _engine!,
                     canvas: const VideoCanvas(uid: 0),
                   ),
                 ),
@@ -761,10 +895,9 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
                     _buildControlButton(
                       icon: _isVideoOff ? Icons.videocam_off : Icons.videocam,
                       color: _isVideoOff ? Colors.red : Colors.white,
-                      backgroundColor:
-                          _isVideoOff
-                              ? Colors.white
-                              : Colors.black.withOpacity(0.3),
+                      backgroundColor: _isVideoOff
+                          ? Colors.white
+                          : Colors.black.withOpacity(0.3),
                       onTap: _toggleVideo,
                     ),
 

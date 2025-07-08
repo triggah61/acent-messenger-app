@@ -5,6 +5,9 @@ import 'dart:async';
 import '../../models/call.dart';
 import '../../services/call_service.dart';
 import '../../services/auth_service.dart';
+import '../../services/pusher_service.dart';
+import '../../services/fcm_service.dart';
+import '../../services/call_ringtone_service.dart';
 import '../../constants/config.dart';
 import 'agora_call_screen.dart';
 
@@ -25,6 +28,8 @@ class IncomingCallScreen extends StatefulWidget {
 class _IncomingCallScreenState extends State<IncomingCallScreen>
     with TickerProviderStateMixin {
   late final CallService _callService;
+  late final PusherService _pusherService;
+  late final FCMService _fcmService;
   late AnimationController _pulseController;
   late AnimationController _slideController;
   late Animation<double> _pulseAnimation;
@@ -36,16 +41,26 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   String _callerPhone = '';
   String? _callerPhotoUrl;
 
+  // Event listeners
+  Function(dynamic)? _callDeclinedListener;
+  Function(dynamic)? _callEndedListener;
+
   @override
   void initState() {
     super.initState();
     _callService = CallService(AuthService());
+    _pusherService = PusherService.instance;
+    _fcmService = FCMService.instance;
     _setupAnimations();
     _loadCallerInfo();
     _startCallTimeout();
+    _setupRealtimeEventListeners();
 
     // Make the screen appear over lock screen
     _setupSystemUI();
+
+    // Dismiss the incoming call notification immediately when screen loads
+    _dismissCallNotification();
   }
 
   @override
@@ -53,6 +68,12 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     _timeoutTimer?.cancel();
     _pulseController.dispose();
     _slideController.dispose();
+    _cleanupRealtimeEventListeners();
+
+    // Stop ringtone when screen is disposed - use both services for reliability
+    _fcmService.stopCallRingtone();
+    CallRingtoneService.instance.stopRingtone();
+
     super.dispose();
   }
 
@@ -96,6 +117,18 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     ));
   }
 
+  void _dismissCallNotification() {
+    try {
+      // Dismiss the incoming call notification immediately when screen loads
+      // This ensures notification disappears when user clicks on it or when screen is shown
+      _fcmService.dismissIncomingCall(widget.call.id);
+      debugPrint(
+          'IncomingCallScreen: Dismissed incoming call notification for call ${widget.call.id}');
+    } catch (e) {
+      debugPrint('IncomingCallScreen: Error dismissing notification: $e');
+    }
+  }
+
   void _loadCallerInfo() {
     try {
       // Get caller information from the call data
@@ -120,12 +153,151 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   }
 
   void _startCallTimeout() {
-    // Auto-decline call after 30 seconds
+    // Auto-decline call after 30 seconds with proper cleanup
     _timeoutTimer = Timer(const Duration(seconds: 30), () {
       if (mounted && !_isProcessing) {
-        _declineCall(reason: 'timeout');
+        debugPrint('IncomingCallScreen: Call timed out after 30 seconds');
+        _handleCallTimeout();
       }
     });
+  }
+
+  void _handleCallTimeout() async {
+    if (_isProcessing || !mounted) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      // Stop ringtone immediately - use both services for reliability
+      await _fcmService.stopCallRingtone();
+      await CallRingtoneService.instance.stopRingtone();
+
+      // End the call on backend with timeout reason
+      await _callService.endCall(widget.call.id, reason: 'timeout');
+
+      // Show timeout message
+      _showCallEndedMessage('Call timed out');
+
+      // Close screen
+      _closeScreen();
+    } catch (e) {
+      debugPrint('IncomingCallScreen: Error handling timeout: $e');
+      // Still close the screen even if backend call fails
+      _closeScreen();
+    }
+  }
+
+  void _setupRealtimeEventListeners() {
+    try {
+      // Listen for call declined events
+      _callDeclinedListener = (data) {
+        debugPrint('IncomingCallScreen: Received call_declined event: $data');
+
+        final callId = data['callId'] as String?;
+        if (callId == widget.call.id && mounted) {
+          _handleCallDeclined(data);
+        }
+      };
+      _pusherService.addEventListener('call_declined', _callDeclinedListener!);
+
+      // Listen for call ended events
+      _callEndedListener = (data) {
+        debugPrint('IncomingCallScreen: Received call_ended event: $data');
+
+        final callId = data['callId'] as String?;
+        if (callId == widget.call.id && mounted) {
+          _handleCallEnded(data);
+        }
+      };
+      _pusherService.addEventListener('call_ended', _callEndedListener!);
+
+      debugPrint(
+          'IncomingCallScreen: Set up real-time event listeners for call ${widget.call.id}');
+    } catch (e) {
+      debugPrint('IncomingCallScreen: Error setting up event listeners: $e');
+    }
+  }
+
+  void _cleanupRealtimeEventListeners() {
+    try {
+      if (_callDeclinedListener != null) {
+        _pusherService.removeEventListener(
+            'call_declined', _callDeclinedListener!);
+      }
+      if (_callEndedListener != null) {
+        _pusherService.removeEventListener('call_ended', _callEndedListener!);
+      }
+      debugPrint('IncomingCallScreen: Cleaned up real-time event listeners');
+    } catch (e) {
+      debugPrint('IncomingCallScreen: Error cleaning up event listeners: $e');
+    }
+  }
+
+  void _handleCallDeclined(Map<String, dynamic> data) {
+    if (!mounted || _isProcessing) return;
+
+    final declinedBy = data['declinedBy'] as String?;
+    final status = data['status'] as String?;
+
+    debugPrint(
+        'IncomingCallScreen: Call declined by $declinedBy, status: $status');
+
+    // Stop ringtone when call is declined by another party
+    _fcmService.stopCallRingtone();
+    CallRingtoneService.instance.stopRingtone();
+
+    // If all participants have declined or call is fully declined, close the screen
+    if (status == 'declined') {
+      _showCallEndedMessage('Call declined');
+      _closeScreen();
+    }
+  }
+
+  void _handleCallEnded(Map<String, dynamic> data) {
+    if (!mounted || _isProcessing) return;
+
+    final endedBy = data['endedBy'] as String?;
+    final reason = data['reason'] as String?;
+
+    debugPrint('IncomingCallScreen: Call ended by $endedBy, reason: $reason');
+
+    // Stop ringtone when call is ended by another party
+    _fcmService.stopCallRingtone();
+    CallRingtoneService.instance.stopRingtone();
+
+    String message = 'Call ended';
+    if (reason == 'timeout') {
+      message = 'Call timed out';
+    } else if (reason == 'declined') {
+      message = 'Call declined';
+    }
+
+    _showCallEndedMessage(message);
+    _closeScreen();
+  }
+
+  void _showCallEndedMessage(String message) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        duration: const Duration(seconds: 2),
+        backgroundColor: Colors.red.withOpacity(0.8),
+      ),
+    );
+  }
+
+  void _closeScreen() {
+    if (!mounted) return;
+
+    // Cancel timeout timer
+    _timeoutTimer?.cancel();
+
+    // Close the screen
+    Navigator.of(context).pop();
   }
 
   Future<void> _acceptCall() async {
@@ -136,6 +308,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     });
 
     try {
+      // Stop the ringtone immediately - use both services for reliability
+      await _fcmService.stopCallRingtone();
+      await CallRingtoneService.instance.stopRingtone();
+
       // Vibrate to provide haptic feedback
       HapticFeedback.mediumImpact();
 
@@ -181,6 +357,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     });
 
     try {
+      // Stop the ringtone immediately - use both services for reliability
+      await _fcmService.stopCallRingtone();
+      await CallRingtoneService.instance.stopRingtone();
+
       // Vibrate to provide haptic feedback
       HapticFeedback.lightImpact();
 
