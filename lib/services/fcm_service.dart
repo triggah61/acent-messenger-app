@@ -14,6 +14,7 @@ import '../firebase_options.dart';
 import '../services/auth_service.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'navigation_service.dart';
+import 'call_ringtone_service.dart';
 
 /// Firebase Cloud Messaging (FCM) Service
 /// Handles push notifications, token registration, and local notifications
@@ -28,6 +29,7 @@ class FCMService {
   FlutterLocalNotificationsPlugin? _localNotifications;
   final AuthService _authService = AuthService();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
+  final CallRingtoneService _ringtoneService = CallRingtoneService.instance;
 
   bool _isInitialized = false;
   String? _currentToken;
@@ -169,13 +171,14 @@ class FCMService {
         importance: Importance.high,
       );
 
-      // Channel for incoming calls with ringtone
+      // Channel for incoming calls with proper calling behavior
       final callsChannel = AndroidNotificationChannel(
         'acent_calls',
         'Acent Calls',
         description: 'Notification channel for incoming calls',
         importance: Importance.max,
         playSound: true,
+        // Use system default ringtone for calls
         enableVibration: true,
         vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
         enableLights: true,
@@ -299,6 +302,22 @@ class FCMService {
     _localNotifications?.cancel(callId.hashCode);
   }
 
+  /// Stop call ringtone (public method)
+  Future<void> stopCallRingtone() async {
+    try {
+      await _ringtoneService.stopRingtone();
+      debugPrint('FCMService: Stopped call ringtone');
+    } catch (e) {
+      debugPrint('FCMService: Error stopping ringtone: $e');
+    }
+  }
+
+  /// Clear call notification and stop ringtone
+  Future<void> dismissIncomingCall(String callId) async {
+    _clearCallNotification(callId);
+    await stopCallRingtone();
+  }
+
   /// Handle notification navigation
   void _handleNotificationNavigation(Map<String, dynamic> data) {
     debugPrint('FCMService: Handling notification navigation with data: $data');
@@ -382,11 +401,20 @@ class FCMService {
     }
   }
 
-  /// Show incoming call notification with ringtone (no action buttons)
+  /// Show incoming call notification with proper calling behavior
   Future<void> _showIncomingCallNotification(
       RemoteMessage message, String callId) async {
     final notification = message.notification;
     if (notification == null) return;
+
+    // Start the call ringtone
+    try {
+      await _ringtoneService.initialize();
+      await _ringtoneService.startRingtone();
+      debugPrint('FCMService: Started call ringtone for call: $callId');
+    } catch (e) {
+      debugPrint('FCMService: Error starting ringtone: $e');
+    }
 
     final androidDetails = AndroidNotificationDetails(
       'acent_calls',
@@ -398,14 +426,33 @@ class FCMService {
       category: AndroidNotificationCategory.call,
       fullScreenIntent: true,
       ongoing: true,
-      autoCancel: true,
+      autoCancel: false, // Don't auto-cancel call notifications
       playSound: true,
+      // Let Android use default call ringtone from notification channel
       enableVibration: true,
-      vibrationPattern:
-          Int64List.fromList([0, 1000, 500, 1000, 500, 1000]), // Ring pattern
+      vibrationPattern: Int64List.fromList([0, 1000, 500, 1000, 500, 1000]),
       enableLights: true,
-      timeoutAfter: 30000, // Auto-dismiss after 30 seconds
-      // Remove action buttons to avoid confusion
+      ledColor: const Color(0xFF00FF00),
+      ledOnMs: 1000,
+      ledOffMs: 500,
+      timeoutAfter: 60000, // 1 minute timeout for calls
+      // Call-like notification styling
+      colorized: true,
+      color: const Color(0xFF4CAF50), // Green color for calls
+      // Enhanced call notification layout
+      styleInformation: const BigTextStyleInformation(
+        '',
+        contentTitle: 'Incoming Call',
+        summaryText: 'Acent Messenger',
+        htmlFormatContentTitle: true,
+        htmlFormatSummaryText: true,
+      ),
+      // Additional call notification properties
+      usesChronometer: false,
+      when: DateTime.now().millisecondsSinceEpoch,
+      showWhen: true,
+      // Ensure it appears on lock screen
+      visibility: NotificationVisibility.public,
     );
 
     const iosDetails = DarwinNotificationDetails(
@@ -414,6 +461,7 @@ class FCMService {
       presentSound: true,
       sound: 'default', // Use default iOS ringtone
       interruptionLevel: InterruptionLevel.critical,
+      categoryIdentifier: 'INCOMING_CALL',
     );
 
     final notificationDetails = NotificationDetails(
@@ -423,8 +471,8 @@ class FCMService {
 
     await _localNotifications!.show(
       callId.hashCode,
-      notification.title,
-      notification.body,
+      notification.title ?? 'Incoming Call',
+      notification.body ?? 'Tap to answer',
       notificationDetails,
       payload: jsonEncode({
         ...message.data,

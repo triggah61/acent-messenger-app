@@ -6,6 +6,8 @@ import '../../models/call.dart';
 import '../../services/call_service.dart';
 import '../../services/auth_service.dart';
 import '../../services/pusher_service.dart';
+import '../../services/fcm_service.dart';
+import '../../services/call_ringtone_service.dart';
 import '../../constants/config.dart';
 import 'agora_call_screen.dart';
 
@@ -27,6 +29,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     with TickerProviderStateMixin {
   late final CallService _callService;
   late final PusherService _pusherService;
+  late final FCMService _fcmService;
   late AnimationController _pulseController;
   late AnimationController _slideController;
   late Animation<double> _pulseAnimation;
@@ -47,6 +50,7 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     super.initState();
     _callService = CallService(AuthService());
     _pusherService = PusherService.instance;
+    _fcmService = FCMService.instance;
     _setupAnimations();
     _loadCallerInfo();
     _startCallTimeout();
@@ -62,6 +66,11 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     _pulseController.dispose();
     _slideController.dispose();
     _cleanupRealtimeEventListeners();
+
+    // Stop ringtone when screen is disposed - use both services for reliability
+    _fcmService.stopCallRingtone();
+    CallRingtoneService.instance.stopRingtone();
+
     super.dispose();
   }
 
@@ -129,12 +138,40 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
   }
 
   void _startCallTimeout() {
-    // Auto-decline call after 30 seconds
+    // Auto-decline call after 30 seconds with proper cleanup
     _timeoutTimer = Timer(const Duration(seconds: 30), () {
       if (mounted && !_isProcessing) {
-        _declineCall(reason: 'timeout');
+        debugPrint('IncomingCallScreen: Call timed out after 30 seconds');
+        _handleCallTimeout();
       }
     });
+  }
+
+  void _handleCallTimeout() async {
+    if (_isProcessing || !mounted) return;
+
+    setState(() {
+      _isProcessing = true;
+    });
+
+    try {
+      // Stop ringtone immediately - use both services for reliability
+      await _fcmService.stopCallRingtone();
+      await CallRingtoneService.instance.stopRingtone();
+
+      // End the call on backend with timeout reason
+      await _callService.endCall(widget.call.id, reason: 'timeout');
+
+      // Show timeout message
+      _showCallEndedMessage('Call timed out');
+
+      // Close screen
+      _closeScreen();
+    } catch (e) {
+      debugPrint('IncomingCallScreen: Error handling timeout: $e');
+      // Still close the screen even if backend call fails
+      _closeScreen();
+    }
   }
 
   void _setupRealtimeEventListeners() {
@@ -192,6 +229,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     debugPrint(
         'IncomingCallScreen: Call declined by $declinedBy, status: $status');
 
+    // Stop ringtone when call is declined by another party
+    _fcmService.stopCallRingtone();
+    CallRingtoneService.instance.stopRingtone();
+
     // If all participants have declined or call is fully declined, close the screen
     if (status == 'declined') {
       _showCallEndedMessage('Call declined');
@@ -206,6 +247,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     final reason = data['reason'] as String?;
 
     debugPrint('IncomingCallScreen: Call ended by $endedBy, reason: $reason');
+
+    // Stop ringtone when call is ended by another party
+    _fcmService.stopCallRingtone();
+    CallRingtoneService.instance.stopRingtone();
 
     String message = 'Call ended';
     if (reason == 'timeout') {
@@ -248,6 +293,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     });
 
     try {
+      // Stop the ringtone immediately - use both services for reliability
+      await _fcmService.stopCallRingtone();
+      await CallRingtoneService.instance.stopRingtone();
+
       // Vibrate to provide haptic feedback
       HapticFeedback.mediumImpact();
 
@@ -293,6 +342,10 @@ class _IncomingCallScreenState extends State<IncomingCallScreen>
     });
 
     try {
+      // Stop the ringtone immediately - use both services for reliability
+      await _fcmService.stopCallRingtone();
+      await CallRingtoneService.instance.stopRingtone();
+
       // Vibrate to provide haptic feedback
       HapticFeedback.lightImpact();
 
