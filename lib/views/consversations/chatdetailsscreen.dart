@@ -3,6 +3,7 @@ import 'package:acent_messenger/constants/config.dart';
 import 'package:acent_messenger/models/chat_session.dart';
 import 'package:acent_messenger/models/message.dart';
 import 'package:acent_messenger/models/call.dart';
+import 'package:acent_messenger/models/profile.dart';
 // Removed unused imports - smart updates now handled by GlobalEventProvider
 import 'package:acent_messenger/providers/global_event_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
@@ -770,6 +771,37 @@ class _ConversationsState extends State<Conversations> {
     );
   }
 
+  void _showConversationInfo() {
+    if (widget.session == null) return;
+
+    if (widget.session!.type == 'group') {
+      _showGroupInfoModal();
+    } else {
+      _showUserInfoModal();
+    }
+  }
+
+  void _showUserInfoModal() {
+    final otherUser = widget.session?.otherUser;
+    if (otherUser == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => UserInfoModal(user: otherUser),
+    );
+  }
+
+  void _showGroupInfoModal() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (context) => GroupInfoModal(session: widget.session!),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final profileInfo =
@@ -805,45 +837,57 @@ class _ConversationsState extends State<Conversations> {
               tooltip: 'Start voice call',
             ),
           ],
-          title: Row(
-            children: [
-              CircleAvatar(
-                backgroundImage: widget.session?.photo != null
-                    ? NetworkImage(Config.getPhotoUrl(widget.session!.photo!))
-                    : null,
-                child: widget.session?.photo == null
-                    ? Text(_getSessionInitials(widget.session?.title))
-                    : null,
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    widget.session?.title ?? 'Unknown',
-                    style: const TextStyle(
-                      fontWeight: FontWeight.bold,
-                    ),
+          title: GestureDetector(
+            onTap: _showConversationInfo,
+            child: Row(
+              children: [
+                CircleAvatar(
+                  backgroundImage: widget.session?.photo != null
+                      ? NetworkImage(Config.getPhotoUrl(widget.session!.photo!))
+                      : null,
+                  child: widget.session?.photo == null
+                      ? Text(_getSessionInitials(widget.session?.title))
+                      : null,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.session?.title ?? 'Unknown',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.bold,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (widget.session?.type == 'group')
+                        Text(
+                          '${widget.session?.recipients.length ?? 0} participants',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                        )
+                      else
+                        Text(
+                          '${widget.session?.otherUser?.dialCode} ${widget.session?.otherUser?.phone}',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.grey,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
                   ),
-                  if (widget.session?.type == 'group')
-                    Text(
-                      '${widget.session?.recipients.length ?? 0} participants',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey,
-                      ),
-                    )
-                  else
-                    Text(
-                      '${widget.session?.otherUser?.dialCode} ${widget.session?.otherUser?.phone}',
-                      style: const TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey,
-                      ),
-                    ),
-                ],
-              ),
-            ],
+                ),
+                const Icon(
+                  Icons.info_outline,
+                  size: 20,
+                  color: Colors.grey,
+                ),
+              ],
+            ),
           ),
         ),
         body: Column(
@@ -1571,6 +1615,461 @@ class MessageBubble extends StatelessWidget {
       String first = words[0].isNotEmpty ? words[0][0].toUpperCase() : '';
       String second = words[1].isNotEmpty ? words[1][0].toUpperCase() : '';
       return '$first$second';
+    }
+  }
+}
+
+/// User Information Modal for Personal Chats
+class UserInfoModal extends StatelessWidget {
+  final Profile user;
+
+  const UserInfoModal({super.key, required this.user});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: const EdgeInsets.all(24),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle bar
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // User Avatar
+            Stack(
+              children: [
+                CircleAvatar(
+                  radius: 50,
+                  backgroundImage: user.photo != null
+                      ? NetworkImage(Config.getPhotoUrl(user.photo!))
+                      : null,
+                  child: user.photo == null
+                      ? Text(
+                          _getUserInitials(user),
+                          style: const TextStyle(
+                              fontSize: 24, fontWeight: FontWeight.bold),
+                        )
+                      : null,
+                ),
+                Positioned(
+                  bottom: 0,
+                  right: 0,
+                  child: Container(
+                    width: 20,
+                    height: 20,
+                    decoration: BoxDecoration(
+                      color: Colors.green,
+                      shape: BoxShape.circle,
+                      border: Border.all(color: Colors.white, width: 2),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // User Name
+            Text(
+              '${user.firstName ?? ''} ${user.lastName ?? ''}'.trim().isNotEmpty
+                  ? '${user.firstName ?? ''} ${user.lastName ?? ''}'.trim()
+                  : user.username ?? 'Unknown User',
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+
+            const SizedBox(height: 8),
+
+            // User Status
+            if (user.status != null)
+              Text(
+                user.status!,
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
+              ),
+
+            const SizedBox(height: 24),
+
+            // User Information Cards
+            _buildInfoCard(
+              icon: Icons.phone,
+              title: 'Phone',
+              value: '${user.dialCode ?? ''} ${user.phone}'.trim(),
+            ),
+
+            if (user.username != null)
+              _buildInfoCard(
+                icon: Icons.alternate_email,
+                title: 'Username',
+                value: user.username!,
+              ),
+
+            if (user.gender != null)
+              _buildInfoCard(
+                icon: Icons.person,
+                title: 'Gender',
+                value: user.gender!.toUpperCase(),
+              ),
+
+            if (user.dob != null)
+              _buildInfoCard(
+                icon: Icons.cake,
+                title: 'Date of Birth',
+                value: _formatDate(user.dob!),
+              ),
+
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoCard({
+    required IconData icon,
+    required String title,
+    required String value,
+  }) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, color: Colors.blue, size: 24),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  value,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getUserInitials(Profile user) {
+    final firstName = user.firstName ?? '';
+    final lastName = user.lastName ?? '';
+
+    if (firstName.isNotEmpty && lastName.isNotEmpty) {
+      return '${firstName[0]}${lastName[0]}'.toUpperCase();
+    } else if (firstName.isNotEmpty) {
+      return firstName[0].toUpperCase();
+    } else if (user.username != null && user.username!.isNotEmpty) {
+      return user.username![0].toUpperCase();
+    }
+    return '?';
+  }
+
+  String _formatDate(String dateString) {
+    try {
+      final date = DateTime.parse(dateString);
+      return '${date.day}/${date.month}/${date.year}';
+    } catch (e) {
+      return dateString;
+    }
+  }
+}
+
+/// Group Information Modal for Group Chats
+class GroupInfoModal extends StatelessWidget {
+  final ChatSession session;
+
+  const GroupInfoModal({super.key, required this.session});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      padding: const EdgeInsets.all(24),
+      child: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Handle bar
+            Container(
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 24),
+
+            // Group Avatar
+            CircleAvatar(
+              radius: 50,
+              backgroundImage: session.photo != null
+                  ? NetworkImage(Config.getPhotoUrl(session.photo!))
+                  : null,
+              child: session.photo == null
+                  ? Text(
+                      _getGroupInitials(session.title),
+                      style: const TextStyle(
+                          fontSize: 24, fontWeight: FontWeight.bold),
+                    )
+                  : null,
+            ),
+
+            const SizedBox(height: 16),
+
+            // Group Name
+            Text(
+              session.title,
+              style: const TextStyle(
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+              textAlign: TextAlign.center,
+            ),
+
+            const SizedBox(height: 8),
+
+            // Group Info
+            Text(
+              'Group • ${session.recipients.length} participants',
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey[600],
+              ),
+              textAlign: TextAlign.center,
+            ),
+
+            const SizedBox(height: 24),
+
+            // Group Description Card
+            _buildGroupInfoCard(),
+
+            const SizedBox(height: 24),
+
+            // Participants Section
+            Row(
+              children: [
+                Icon(Icons.group, color: Colors.blue, size: 20),
+                const SizedBox(width: 8),
+                Text(
+                  'Participants (${session.recipients.length})',
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 16),
+
+            // Participants List
+            ...session.recipients
+                .map((recipient) => _buildParticipantTile(recipient)),
+
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildGroupInfoCard() {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[200]!),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: Colors.blue, size: 24),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Group Information',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Created ${_formatCreatedDate(session.createdAt)}',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildParticipantTile(Recipient recipient) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 20,
+            backgroundImage: recipient.user.photo != null
+                ? NetworkImage(Config.getPhotoUrl(recipient.user.photo!))
+                : null,
+            child: recipient.user.photo == null
+                ? Text(
+                    _getParticipantInitials(recipient.user),
+                    style: const TextStyle(
+                        fontSize: 12, fontWeight: FontWeight.bold),
+                  )
+                : null,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${recipient.user.firstName} ${recipient.user.lastName}'
+                          .trim()
+                          .isNotEmpty
+                      ? '${recipient.user.firstName} ${recipient.user.lastName}'
+                          .trim()
+                      : 'Unknown User',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                Text(
+                  '${recipient.user.dialCode} ${recipient.user.phone}',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          if (recipient.role == 'admin')
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.blue[100],
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                'Admin',
+                style: TextStyle(
+                  fontSize: 10,
+                  color: Colors.blue[700],
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  String _getGroupInitials(String title) {
+    if (title.trim().isEmpty) return '?';
+
+    final words =
+        title.trim().split(' ').where((word) => word.isNotEmpty).toList();
+
+    if (words.isEmpty) {
+      return '?';
+    } else if (words.length == 1) {
+      return words[0].isNotEmpty ? words[0][0].toUpperCase() : '?';
+    } else {
+      String first = words[0].isNotEmpty ? words[0][0].toUpperCase() : '';
+      String second = words[1].isNotEmpty ? words[1][0].toUpperCase() : '';
+      return '$first$second';
+    }
+  }
+
+  String _getParticipantInitials(Sender user) {
+    final firstName = user.firstName;
+    final lastName = user.lastName;
+
+    if (firstName.isNotEmpty && lastName.isNotEmpty) {
+      return '${firstName[0]}${lastName[0]}'.toUpperCase();
+    } else if (firstName.isNotEmpty) {
+      return firstName[0].toUpperCase();
+    }
+    return '?';
+  }
+
+  String _formatCreatedDate(DateTime date) {
+    final now = DateTime.now();
+    final difference = now.difference(date);
+
+    if (difference.inDays < 1) {
+      return 'today';
+    } else if (difference.inDays < 7) {
+      return '${difference.inDays} days ago';
+    } else if (difference.inDays < 30) {
+      return '${(difference.inDays / 7).round()} weeks ago';
+    } else if (difference.inDays < 365) {
+      return '${(difference.inDays / 30).round()} months ago';
+    } else {
+      return '${(difference.inDays / 365).round()} years ago';
     }
   }
 }
