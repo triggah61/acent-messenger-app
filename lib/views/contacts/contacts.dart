@@ -842,13 +842,17 @@ class _ContactsScreenState extends State<ContactsScreen> {
   }
 
   String _getInitials(String? name) {
+    print('name is : $name');
     if (name == null || name.trim().isEmpty) {
       return '?';
     }
-    final words = name.trim().split(' ');
+
+    final words = name.trim().split(' ').where((w) => w.isNotEmpty).toList();
+
     if (words.length >= 2) {
-      return '${words[0].substring(0, 1).toUpperCase()}${words[1].substring(0, 1).toUpperCase()}';
+      return '${words[0][0].toUpperCase()}${words[1][0].toUpperCase()}';
     }
-    return name.trim().substring(0, 1).toUpperCase();
+
+    return words[0][0].toUpperCase();
   }
 }
