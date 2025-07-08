@@ -27,18 +27,36 @@ class ChatSession {
   });
 
   factory ChatSession.fromJson(Map<String, dynamic> json) {
+    // Handle otherUser field properly for both personal and group sessions
+    Profile? otherUser;
+    if (json['otherUser'] != null &&
+        json['otherUser'] is Map<String, dynamic>) {
+      final otherUserMap = json['otherUser'] as Map<String, dynamic>;
+      // Only create Profile if it has the required fields (not empty object)
+      if (otherUserMap.containsKey('_id') &&
+          otherUserMap['_id'] != null &&
+          otherUserMap.containsKey('phone') &&
+          otherUserMap['phone'] != null) {
+        otherUser = Profile.fromJson(otherUserMap);
+      }
+    }
+
     return ChatSession(
       id: json['_id'] ?? '',
       title: json['title'] ?? '',
       type: json['type'] ?? 'direct',
-      lastMessage: json['lastMessage'] != null ? LastMessage.fromJson(json['lastMessage']) : null,
+      lastMessage: json['lastMessage'] != null
+          ? LastMessage.fromJson(json['lastMessage'])
+          : null,
       createdBy: json['createdBy'],
-      otherUser: json['otherUser'] != null ? Profile.fromJson(json['otherUser']) : null,
+      otherUser: otherUser,
       status: json['status'] ?? 'active',
-      recipients: (json['receipients'] as List? ?? []).map((r) => Recipient.fromJson(r)).toList(),
+      recipients: (json['receipients'] as List? ?? [])
+          .map((r) => Recipient.fromJson(r))
+          .toList(),
       photo: json['photo'],
-      createdAt: json['createdAt'] != null 
-          ? DateTime.parse(json['createdAt']) 
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'])
           : DateTime.now(),
     );
   }
@@ -71,8 +89,8 @@ class LastMessage {
       attachments: json['attachments'] ?? [],
       status: json['status'] ?? 'sent',
       // replyTo: json['replyTo'],
-      createdAt: json['createdAt'] != null 
-          ? DateTime.parse(json['createdAt']) 
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'])
           : DateTime.now(),
     );
   }
@@ -102,4 +120,4 @@ class Recipient {
       id: json['_id'] ?? '',
     );
   }
-} 
+}

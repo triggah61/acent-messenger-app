@@ -150,11 +150,39 @@ class ChatProvider with ChangeNotifier {
     try {
       print(
           "ChatProvider - updateSessionWithNewMessage: Processing message data");
+      print(
+          "ChatProvider - updateSessionWithNewMessage: Message data keys: ${messageData.keys.toList()}");
 
-      final chatSessionId = messageData['chatSession'] as String?;
-      if (chatSessionId == null) {
+      // Handle different chatSession field formats
+      String? chatSessionId;
+
+      // Method 1: Direct chatSessionId field
+      if (messageData['chatSessionId'] != null) {
+        chatSessionId = messageData['chatSessionId'] as String?;
+      }
+      // Method 2: chatSession as String
+      else if (messageData['chatSession'] is String) {
+        chatSessionId = messageData['chatSession'] as String?;
+      }
+      // Method 3: chatSession as Map (extract id)
+      else if (messageData['chatSession'] is Map<String, dynamic>) {
+        final sessionMap = messageData['chatSession'] as Map<String, dynamic>;
+        chatSessionId =
+            sessionMap['_id'] as String? ?? sessionMap['id'] as String?;
+      }
+      // Method 4: session field as backup
+      else if (messageData['session'] is Map<String, dynamic>) {
+        final sessionMap = messageData['session'] as Map<String, dynamic>;
+        chatSessionId =
+            sessionMap['_id'] as String? ?? sessionMap['id'] as String?;
+      }
+
+      print(
+          "ChatProvider - updateSessionWithNewMessage: Extracted chatSessionId: $chatSessionId");
+
+      if (chatSessionId == null || chatSessionId.isEmpty) {
         print(
-            "ChatProvider - updateSessionWithNewMessage: No chatSessionId found");
+            "ChatProvider - updateSessionWithNewMessage: No valid chatSessionId found");
         return;
       }
 

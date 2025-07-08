@@ -35,6 +35,16 @@ class NavigationService {
       final cleanSessionId = _cleanId(chatSessionId);
       debugPrint('NavigationService: Original session ID: $chatSessionId');
       debugPrint('NavigationService: Cleaned session ID: $cleanSessionId');
+      debugPrint('NavigationService: Additional data: $additionalData');
+
+      if (cleanSessionId.isEmpty) {
+        debugPrint('NavigationService: Empty session ID provided');
+        final context = this.context;
+        if (context != null) {
+          _showErrorMessage(context, 'Invalid chat session ID');
+        }
+        return;
+      }
 
       final context = this.context;
       if (context == null) {
@@ -53,12 +63,18 @@ class NavigationService {
         // Fetch the chat session details
         final authService = AuthService();
         final chatService = ChatService(authService);
+        debugPrint(
+            'NavigationService: Fetching chat session with ID: $cleanSessionId');
+
         final session = await chatService.getChatSession(cleanSessionId);
 
         // Hide loading indicator
         Navigator.of(context).pop();
 
         if (session != null) {
+          debugPrint(
+              'NavigationService: Found session: ${session.id}, type: ${session.type}, title: ${session.title}');
+
           // Navigate to the chat details screen
           await Navigator.of(context).push(
             MaterialPageRoute(
@@ -79,25 +95,14 @@ class NavigationService {
         // Hide loading indicator if still showing
         Navigator.of(context).pop();
         debugPrint('NavigationService: Error loading chat session: $e');
+        debugPrint(
+            'NavigationService: Session ID that failed: $cleanSessionId');
         _showErrorMessage(context, 'Error opening chat: ${e.toString()}');
       }
     } catch (e) {
       debugPrint('NavigationService: Navigation error: $e');
+      debugPrint('NavigationService: Failed session ID: $chatSessionId');
     }
-  }
-
-  /// Navigate to group chat
-  Future<void> navigateToGroupChat({
-    required String groupId,
-    String? messageId,
-    Map<String, dynamic>? additionalData,
-  }) async {
-    // Group chats also use the same chat session structure
-    await navigateToChat(
-      chatSessionId: groupId,
-      messageId: messageId,
-      additionalData: additionalData,
-    );
   }
 
   /// Navigate to call screen
@@ -139,11 +144,10 @@ class NavigationService {
           // Navigate to incoming call screen
           await Navigator.of(context).push(
             MaterialPageRoute(
-              builder:
-                  (context) => IncomingCallScreen(
-                    call: call,
-                    notificationData: additionalData,
-                  ),
+              builder: (context) => IncomingCallScreen(
+                call: call,
+                notificationData: additionalData,
+              ),
             ),
           );
         } else {
@@ -168,31 +172,55 @@ class NavigationService {
       debugPrint('NavigationService: Handling notification type: $type');
       debugPrint('NavigationService: Notification data: $data');
 
-      // Clean the session IDs from notification data
-      final chatSessionId = _cleanId(data['chatSessionId'] ?? '');
-      final groupId = _cleanId(data['groupId'] ?? '');
-      final messageId = _cleanId(data['messageId'] ?? '');
+      // Try multiple field names for the session ID to handle different notification formats
+      String sessionId = '';
+
+      // Check all possible field names for session ID
+      final possibleFields = [
+        'chatSessionId',
+        'chatSession',
+        'groupId',
+        'sessionId',
+        '_id'
+      ];
+      for (final field in possibleFields) {
+        final value = _cleanId(data[field]?.toString() ?? '');
+        if (value.isNotEmpty) {
+          sessionId = value;
+          debugPrint(
+              'NavigationService: Found session ID in field "$field": $sessionId');
+          break;
+        }
+      }
+
+      final messageId = _cleanId(data['messageId']?.toString() ?? '');
+
+      debugPrint('NavigationService: Using session ID: $sessionId');
+      debugPrint('NavigationService: Using message ID: $messageId');
 
       switch (type) {
         case 'new_message':
-          await navigateToChat(
-            chatSessionId: chatSessionId,
-            messageId: messageId.isNotEmpty ? messageId : null,
-            additionalData: data,
-          );
-          break;
-
         case 'group_message':
-          await navigateToGroupChat(
-            groupId: chatSessionId.isNotEmpty ? chatSessionId : groupId,
-            messageId: messageId.isNotEmpty ? messageId : null,
-            additionalData: data,
-          );
+          // Both personal and group messages use the same navigation logic
+          if (sessionId.isNotEmpty) {
+            await navigateToChat(
+              chatSessionId: sessionId,
+              messageId: messageId.isNotEmpty ? messageId : null,
+              additionalData: data,
+            );
+          } else {
+            debugPrint(
+                'NavigationService: No valid session ID found in notification data');
+            final context = this.context;
+            if (context != null) {
+              _showErrorMessage(context, 'Invalid message notification data');
+            }
+          }
           break;
 
         case 'incoming_call':
           await navigateToCall(
-            callId: _cleanId(data['callId'] ?? ''),
+            callId: _cleanId(data['callId']?.toString() ?? ''),
             callType: data['callType'] ?? 'voice',
             additionalData: data,
           );
@@ -256,7 +284,9 @@ class NavigationService {
   }
 
   /// Clean ID by removing quotes and trimming whitespace
+  /// Also handles different data types that might come from notification payload
   String _cleanId(String id) {
+    if (id.isEmpty) return '';
     return id.replaceAll('"', '').replaceAll("'", "").trim();
   }
 

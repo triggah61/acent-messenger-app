@@ -25,8 +25,8 @@ class Profile {
 
   factory Profile.fromJson(Map<String, dynamic> json) {
     return Profile(
-      id: json['_id'],
-      phone: json['phone'],
+      id: json['_id'] ?? '',
+      phone: json['phone'] ?? '',
       dialCode: json['dialCode'],
       firstName: json['firstName'],
       lastName: json['lastName'],
@@ -52,4 +52,4 @@ class Profile {
       'dob': dob,
     };
   }
-} 
+}
