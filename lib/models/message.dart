@@ -36,12 +36,13 @@ class Message {
           .toList(),
       status: json['status'] ?? 'sent',
       deletedFor: List<String>.from(json['deletedFor'] ?? []),
-      replyTo: json['replyTo'] != null ? ReplyTo.fromJson(json['replyTo']) : null,
-      createdAt: json['createdAt'] != null 
-          ? DateTime.parse(json['createdAt']) 
+      replyTo:
+          json['replyTo'] != null ? ReplyTo.fromJson(json['replyTo']) : null,
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'])
           : DateTime.now(),
-      updatedAt: json['updatedAt'] != null 
-          ? DateTime.parse(json['updatedAt']) 
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.parse(json['updatedAt'])
           : DateTime.now(),
       reactions: json['reactions'] != null
           ? (json['reactions'] as List)
@@ -71,12 +72,12 @@ class Sender {
 
   factory Sender.fromJson(Map<String, dynamic> json) {
     return Sender(
-      id: json['_id'] ?? '',
-      firstName: json['firstName'] ?? '',
-      lastName: json['lastName'] ?? '',
-      dialCode: json['dialCode'] ?? '',
-      phone: json['phone'] ?? '',
-      photo: json['photo'],
+      id: json['_id'] as String? ?? json['id'] as String? ?? '',
+      firstName: json['firstName'] as String? ?? '',
+      lastName: json['lastName'] as String? ?? '',
+      dialCode: json['dialCode'] as String? ?? '',
+      phone: json['phone'] as String? ?? '',
+      photo: json['photo'] as String?,
     );
   }
 }
@@ -127,11 +128,11 @@ class Attachment {
       url: json['url'] ?? '',
       name: json['name'] ?? '',
       size: json['size'] ?? 0,
-      createdAt: json['createdAt'] != null 
-          ? DateTime.parse(json['createdAt']) 
+      createdAt: json['createdAt'] != null
+          ? DateTime.parse(json['createdAt'])
           : DateTime.now(),
-      updatedAt: json['updatedAt'] != null 
-          ? DateTime.parse(json['updatedAt']) 
+      updatedAt: json['updatedAt'] != null
+          ? DateTime.parse(json['updatedAt'])
           : DateTime.now(),
     );
   }
@@ -177,8 +178,8 @@ class ReactionUser {
       firstName: json['firstName'] ?? '',
       lastName: json['lastName'] ?? '',
       reaction: json['reaction'] ?? '',
-      reactedAt: json['reactedAt'] != null 
-          ? DateTime.parse(json['reactedAt']) 
+      reactedAt: json['reactedAt'] != null
+          ? DateTime.parse(json['reactedAt'])
           : DateTime.now(),
     );
   }

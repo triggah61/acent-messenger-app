@@ -111,7 +111,7 @@ class _ChatListViewState extends State<ChatListView> {
   Future<void> _refreshGroups() async {
     try {
       await context.read<GroupProvider>().refreshSessions();
-      
+
       // Show success message
       if (mounted) {
         // ScaffoldMessenger.of(context).showSnackBar(
@@ -197,6 +197,7 @@ class _ChatListViewState extends State<ChatListView> {
           onRefresh: _refreshGroups,
           child: ListView.builder(
             controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
             itemCount:
                 groupProvider.sessions.length + (groupProvider.hasMore ? 1 : 0),
             itemBuilder: (context, index) {
@@ -296,7 +297,7 @@ class ChatTile extends StatelessWidget {
       ),
     );
   }
-  
+
   String _getInitials(String? title) {
     if (title == null || title.trim().isEmpty) {
       return '?';

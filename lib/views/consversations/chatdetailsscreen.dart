@@ -152,13 +152,20 @@ class _ConversationsState extends State<Conversations> {
         print('Chat: New message received - $data');
         try {
           final message = Message.fromJson(data);
-          if (mounted) {
+          final currentSessionId = widget.session?.id;
+
+          // Only add message if it belongs to the current chat session
+          if (mounted && message.chatSession == currentSessionId) {
             setState(() {
               _messages.insert(0, message);
             });
-            // Note: Session list updates are now handled automatically by GlobalEventProvider
-            // via smart update callbacks, so no need to manually refresh here
+            print('Chat: Message added to current session $currentSessionId');
+          } else {
+            print(
+                'Chat: Message ignored - belongs to session ${message.chatSession}, current session $currentSessionId');
           }
+          // Note: Session list updates are now handled automatically by GlobalEventProvider
+          // via smart update callbacks, so no need to manually refresh here
         } catch (e) {
           print('Error processing new message: $e');
         }
@@ -170,9 +177,14 @@ class _ConversationsState extends State<Conversations> {
         print('Chat: Typing started - $data');
         try {
           final userId = data['userId'] as String?;
+          final chatSessionId = data['chatSessionId'] as String?;
+          final currentSessionId = widget.session?.id;
 
-          // Only show typing indicator for other users, not current user
-          if (mounted && userId != null && userId != _currentUserId) {
+          // Only show typing indicator for other users in the current session
+          if (mounted &&
+              userId != null &&
+              userId != _currentUserId &&
+              chatSessionId == currentSessionId) {
             // Get user name from event data or session participants
             String userName = 'Someone';
 
@@ -220,6 +232,11 @@ class _ConversationsState extends State<Conversations> {
                 });
               }
             });
+            print(
+                'Chat: Typing indicator shown for user $userId in session $currentSessionId');
+          } else {
+            print(
+                'Chat: Typing start ignored - user $userId, session $chatSessionId, current session $currentSessionId');
           }
         } catch (e) {
           print('Error in typing start listener: $e');
@@ -232,9 +249,14 @@ class _ConversationsState extends State<Conversations> {
         print('Chat: Typing stopped - $data');
         try {
           final userId = data['userId'] as String?;
+          final chatSessionId = data['chatSessionId'] as String?;
+          final currentSessionId = widget.session?.id;
 
-          // Only handle typing stop for other users, not current user
-          if (mounted && userId != null && userId != _currentUserId) {
+          // Only handle typing stop for other users in the current session
+          if (mounted &&
+              userId != null &&
+              userId != _currentUserId &&
+              chatSessionId == currentSessionId) {
             setState(() {
               _typingUsers.remove(userId);
               _isTyping = _typingUsers.isNotEmpty;
@@ -244,6 +266,11 @@ class _ConversationsState extends State<Conversations> {
             if (_typingUsers.isEmpty) {
               _typingIndicatorTimer?.cancel();
             }
+            print(
+                'Chat: Typing stopped for user $userId in session $currentSessionId');
+          } else {
+            print(
+                'Chat: Typing stop ignored - user $userId, session $chatSessionId, current session $currentSessionId');
           }
         } catch (e) {
           print('Error in typing stop listener: $e');

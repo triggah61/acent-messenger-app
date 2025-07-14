@@ -77,7 +77,13 @@ class EnvConfig {
 
   // Helper method to get full photo URL
   static String getPhotoUrl(String? photoPath) {
-    if (photoPath == null || photoPath.isEmpty) return '';
+    if (photoPath == null || photoPath.isEmpty) {
+      // Return a placeholder image URL instead of empty string
+      return 'https://via.placeholder.com/150/CCCCCC/FFFFFF?text=No+Image';
+    }
+    if (awsS3Url.isEmpty) {
+      return 'https://via.placeholder.com/150/CCCCCC/FFFFFF?text=No+Image';
+    }
     return '$awsS3Url/$photoPath';
   }
 

@@ -106,8 +106,20 @@ class GroupProvider with ChangeNotifier {
         final List<dynamic> docs = data['docs'];
         print("GroupProvider - fetchSessions: Found ${docs.length} sessions");
 
-        final newSessions =
-            docs.map((doc) => ChatSession.fromJson(doc)).toList();
+        final newSessions = <ChatSession>[];
+        for (var doc in docs) {
+          try {
+            final session = ChatSession.fromJson(doc);
+            newSessions.add(session);
+          } catch (e) {
+            print(
+                "GroupProvider - fetchSessions: Error parsing session ${doc['_id']} - $e");
+            print(
+                "GroupProvider - fetchSessions: Problematic session data: $doc");
+            // Skip this session and continue with others
+            continue;
+          }
+        }
         print(
             "GroupProvider - fetchSessions: Parsed ${newSessions.length} sessions");
 
@@ -216,38 +228,58 @@ class GroupProvider with ChangeNotifier {
       int sessionIndex, Map<String, dynamic> messageData) {
     final session = _sessions[sessionIndex];
 
-    // Create updated last message
-    final updatedLastMessage = LastMessage(
-      id: messageData['_id'] ?? '',
-      sender: messageData['sender'] ?? '',
-      content: messageData['content'] ?? '',
-      attachments: messageData['attachments'] ?? [],
-      status: messageData['status'] ?? 'sent',
-      createdAt: messageData['createdAt'] != null
-          ? DateTime.parse(messageData['createdAt'])
-          : DateTime.now(),
-    );
+    try {
+      // Handle different sender field formats safely
+      String senderId = '';
+      if (messageData['sender'] is String) {
+        senderId = messageData['sender'] as String;
+      } else if (messageData['sender'] is Map<String, dynamic>) {
+        final senderMap = messageData['sender'] as Map<String, dynamic>;
+        senderId =
+            senderMap['_id'] as String? ?? senderMap['id'] as String? ?? '';
+      }
 
-    // Create updated session
-    final updatedSession = ChatSession(
-      id: session.id,
-      title: session.title,
-      type: session.type,
-      lastMessage: updatedLastMessage,
-      createdBy: session.createdBy,
-      otherUser: session.otherUser,
-      status: session.status,
-      recipients: session.recipients,
-      photo: session.photo,
-      createdAt: DateTime.now(), // Update to current time to move to top
-    );
+      // Create updated last message with safe field extraction
+      final updatedLastMessage = LastMessage(
+        id: messageData['_id'] as String? ?? '',
+        sender: senderId,
+        content: messageData['content'] as String? ?? '',
+        attachments: messageData['attachments'] as List<dynamic>? ?? [],
+        status: messageData['status'] as String? ?? 'sent',
+        createdAt: messageData['createdAt'] != null
+            ? DateTime.parse(messageData['createdAt'] as String)
+            : DateTime.now(),
+      );
 
-    // Remove from current position and add to top
-    _sessions.removeAt(sessionIndex);
-    _sessions.insert(0, updatedSession);
+      // Create updated session
+      final updatedSession = ChatSession(
+        id: session.id,
+        title: session.title,
+        type: session.type,
+        lastMessage: updatedLastMessage,
+        createdBy: session.createdBy,
+        otherUser: session.otherUser,
+        status: session.status,
+        recipients: session.recipients,
+        photo: session.photo,
+        createdAt: DateTime.now(), // Update to current time to move to top
+      );
 
-    print(
-        "GroupProvider - _updateExistingSession: Updated session ${session.id} and moved to top");
+      // Remove from current position and add to top
+      _sessions.removeAt(sessionIndex);
+      _sessions.insert(0, updatedSession);
+
+      print(
+          "GroupProvider - _updateExistingSession: Updated session ${session.id} and moved to top");
+    } catch (e) {
+      print(
+          "GroupProvider - _updateExistingSession: Error updating session - $e");
+      print(
+          "GroupProvider - _updateExistingSession: Message data keys: ${messageData.keys.toList()}");
+      // If manual update fails, do a simple timestamp update
+      _sessions.removeAt(sessionIndex);
+      _sessions.insert(0, session);
+    }
   }
 
   Future<void> _handlePotentialNewSession(String chatSessionId) async {

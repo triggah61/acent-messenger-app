@@ -112,8 +112,41 @@ class Recipient {
   });
 
   factory Recipient.fromJson(Map<String, dynamic> json) {
+    // Handle user field safely - it should be a Map but sometimes might be String or null
+    Sender user;
+    try {
+      final userData = json['user'];
+      if (userData is Map<String, dynamic>) {
+        user = Sender.fromJson(userData);
+      } else if (userData is String) {
+        // If user is just an ID string, create a minimal Sender object
+        user = Sender(
+          id: userData,
+          firstName: 'Unknown',
+          lastName: 'User',
+          dialCode: '',
+          phone: '',
+          photo: null,
+        );
+      } else {
+        // Fallback for null or unexpected data types
+        user = Sender.fromJson({});
+      }
+    } catch (e) {
+      print('Error parsing recipient user data: $e');
+      // Create a fallback Sender if parsing fails
+      user = Sender(
+        id: '',
+        firstName: 'Unknown',
+        lastName: 'User',
+        dialCode: '',
+        phone: '',
+        photo: null,
+      );
+    }
+
     return Recipient(
-      user: Sender.fromJson(json['user'] ?? {}),
+      user: user,
       role: json['role'] ?? 'member',
       isMute: json['isMute'] ?? false,
       status: json['status'] ?? 'active',

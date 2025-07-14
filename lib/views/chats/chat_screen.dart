@@ -245,7 +245,7 @@ class _HomeScreenState extends State<HomeScreen> {
                             // child: _buildContactAvatar(contact),
                             child: _buildStatusItem(
                               name: '${contact.firstName} ${contact.lastName}',
-                              imageUrl: Config.getPhotoUrl(contact.photo ?? ''),
+                              imageUrl: Config.getPhotoUrl(contact.photo),
                             ))),
                       ],
                     ),
