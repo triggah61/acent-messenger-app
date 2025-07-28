@@ -1,4 +1,4 @@
-# Acent Messenger Environment Configuration
+# Q Messenger Environment Configuration
 
 # API Configuration
 BASE_API_URL=http://localhost:8000/api

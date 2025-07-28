@@ -205,7 +205,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const Text(
-                'Welcome to Acent Messenger!',
+                'Welcome to Q Messenger!',
                 style: TextStyle(
                   fontSize: 24,
                   fontWeight: FontWeight.bold,

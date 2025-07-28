@@ -1,4 +1,4 @@
-# 🚀 Acent Messenger - Community Edition
+# 🚀 Q Messenger - Community Edition
 
 
 
@@ -77,8 +77,8 @@ xcode-select --install
 
 1. **Clone the Repository**
 ```bash
-git clone https://github.com/triggah61/acent-messenger-app.git
-cd acent-messenger-app
+git clone https://github.com/triggah61/q-messenger-app.git
+cd q-messenger-app
 ```
 
 2. **Install Dependencies**
@@ -428,10 +428,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 🆘 Support
 
 ### **Getting Help**
-- 📧 **Email Support**: support@acentmessenger.com
-- 💬 **Community Chat**: [Join our Discord](https://discord.gg/acentmessenger)
-- 📚 **Documentation**: [Wiki Pages](https://github.com/your-org/acent-messenger/wiki)
-- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/your-org/acent-messenger/issues)
+- 📧 **Email Support**: info@acent.tech
+- 💬 **Community Chat**: [Join our Telegram](https://t.me/AcentOfficialChat)
+- 🐛 **Bug Reports**: [GitHub Issues](https://github.com/triggah61/q-messenger-app/issues)
 
 ### **System Requirements**
 - **iOS**: 12.0+

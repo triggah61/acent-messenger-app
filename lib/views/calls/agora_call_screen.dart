@@ -290,7 +290,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           print('AgoraCallScreen: Microphone permission granted: $micGranted');
           if (!micGranted) {
             throw Exception(
-              'Microphone permission is required for video calls.\n\nTo fix this:\n1. Go to your device Settings\n2. Find "Acent Messenger" in Apps\n3. Enable Microphone permission\n4. Try calling again',
+              'Microphone permission is required for video calls.\n\nTo fix this:\n1. Go to your device Settings\n2. Find "Q Messenger" in Apps\n3. Enable Microphone permission\n4. Try calling again',
             );
           }
         }
@@ -301,7 +301,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
           print('AgoraCallScreen: Camera permission granted: $camGranted');
           if (!camGranted) {
             throw Exception(
-              'Camera permission is required for video calls.\n\nTo fix this:\n1. Go to your device Settings\n2. Find "Acent Messenger" in Apps\n3. Enable Camera permission\n4. Try calling again',
+              'Camera permission is required for video calls.\n\nTo fix this:\n1. Go to your device Settings\n2. Find "Q Messenger" in Apps\n3. Enable Camera permission\n4. Try calling again',
             );
           }
         }
@@ -315,7 +315,7 @@ class _AgoraCallScreenState extends State<AgoraCallScreen> {
         print('AgoraCallScreen: Microphone permission granted: $micGranted');
         if (!micGranted) {
           throw Exception(
-            'Microphone permission is required for voice calls.\n\nTo fix this:\n1. Go to your device Settings\n2. Find "Acent Messenger" in Apps\n3. Enable Microphone permission\n4. Try calling again',
+            'Microphone permission is required for voice calls.\n\nTo fix this:\n1. Go to your device Settings\n2. Find "Q Messenger" in Apps\n3. Enable Microphone permission\n4. Try calling again',
           );
         }
       }

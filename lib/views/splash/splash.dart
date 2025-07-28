@@ -115,16 +115,17 @@ class _SplashScreenState extends State<SplashScreen>
                   ),
                 ],
               ),
-              child: const Icon(
-                Icons.chat_bubble_rounded,
-                size: 80,
-                color: Colors.blueAccent,
-              ),
+              child: Image.asset(
+                'assets/images/app_icon.png',
+                width: 80,
+                height: 80,
+                fit: BoxFit.contain,
+              )
             ),
           ),
           const SizedBox(height: 20),
           Text(
-            "Acent Messenger",
+            "Q Messenger",
             style: GoogleFonts.poppins(
               fontSize: 28,
               fontWeight: FontWeight.bold,

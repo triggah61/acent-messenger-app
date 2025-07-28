@@ -244,12 +244,19 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen>
             color: AppColors.buttonColor,
             child: FadeTransition(
               opacity: _fadeAnimation,
-              child: const Column(
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.start,
                 children: [
-                  SizedBox(height: 100),
+                  SizedBox(height: 90),
+                  Image.asset(
+                    'assets/images/app_icon_white.png',
+                    width: 60,
+                    height: 60,
+                    fit: BoxFit.contain,
+                  ),
+                  SizedBox(height: 10),
                   Text1(
-                    text1: 'Acent Messenger',
+                    text1: 'Q Messenger',
                     color: Colors.white,
                     size: 24,
                   ),

@@ -1,7 +1,7 @@
 # Socket.IO to Pusher Migration Summary
 
 ## Overview
-Successfully migrated the Acent Messenger Flutter app from Socket.IO to Pusher for realtime messaging. The migration maintains the same event names and API structure for minimal code changes.
+Successfully migrated the Q Messenger Flutter app from Socket.IO to Pusher for realtime messaging. The migration maintains the same event names and API structure for minimal code changes.
 
 ## ✅ Completed Tasks
 

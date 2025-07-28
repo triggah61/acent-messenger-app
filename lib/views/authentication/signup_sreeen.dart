@@ -66,7 +66,7 @@ class _SignUpScreenState extends State<SignUpScreen>
                 children: [
                   SizedBox(height: 100), // Add some spacing from the top
                   Text1(
-                    text1: 'Acent Messenger',
+                    text1: 'Q Messenger',
                     color: Colors.white,
                     size: 24,
                   ),

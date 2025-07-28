@@ -1,6 +1,6 @@
 {
-    "name": "acent_messenger",
-    "short_name": "acent_messenger",
+    "name": "q_messenger",
+    "short_name": "q_messenger",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",

@@ -1,6 +1,6 @@
-# Environment Variables Setup for Acent Messenger
+# Environment Variables Setup for Q Messenger
 
-This guide explains how to set up and manage environment variables for the Acent Messenger Flutter app to keep sensitive API keys and configurations secure.
+This guide explains how to set up and manage environment variables for the Q Messenger Flutter app to keep sensitive API keys and configurations secure.
 
 ## Overview
 
