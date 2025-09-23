@@ -18,13 +18,13 @@ import 'package:image_picker/image_picker.dart';
 import '../../providers/auth_provider.dart';
 import '../../constants/colors.dart';
 import '../camera/camera.dart';
-import '../chatcalls/chatcalls.dart';
 import '../calls/agora_call_screen.dart';
 import '../createpoll/createpoll.dart';
 import '../documents/documents.dart';
 import '../gallery/gallery.dart';
 import '../record/record.dart';
 import '../sendlocation/sendlocation.dart';
+import '../voice_mode/voice_mode_screen.dart';
 import 'package:timeago/timeago.dart' as timeago;
 import 'dart:convert';
 import 'dart:async';
@@ -798,6 +798,16 @@ class _ConversationsState extends State<Conversations> {
     );
   }
 
+  /// Navigate to voice mode
+  void _enterVoiceMode() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => VoiceModeScreen(session: widget.session),
+      ),
+    );
+  }
+
   void _showConversationInfo() {
     if (widget.session == null) return;
 
@@ -853,6 +863,11 @@ class _ConversationsState extends State<Conversations> {
             },
           ),
           actions: [
+            IconButton(
+              icon: const Icon(Icons.record_voice_over),
+              onPressed: _enterVoiceMode,
+              tooltip: 'Voice mode',
+            ),
             IconButton(
               icon: const Icon(Icons.video_call),
               onPressed: _initiateVideoCall,

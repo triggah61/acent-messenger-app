@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:acent_messenger/providers/auth_provider.dart';
 import 'package:acent_messenger/services/auth_service.dart';
+import 'package:acent_messenger/services/config_service.dart';
 import 'package:acent_messenger/constants/config.dart';
 import 'package:intl/intl.dart';
 import 'package:http/http.dart' as http;
@@ -17,22 +18,84 @@ class ProfileSetupScreen extends StatefulWidget {
 
 class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
   final AuthService _authService = AuthService();
+  final ConfigService _configService = ConfigService.instance;
   bool _isLoading = false;
   final _formKey = GlobalKey<FormState>();
-  
+
   late TextEditingController _firstNameController;
   late TextEditingController _lastNameController;
   late TextEditingController _usernameController;
   String _gender = 'Male';
   DateTime _birthday = DateTime(2000, 1, 1);
+  Language? _selectedLanguage;
+  List<Language> _supportedLanguages = [];
 
   @override
   void initState() {
     super.initState();
     final profile = Provider.of<AuthProvider>(context, listen: false).profile;
-    _firstNameController = TextEditingController(text: profile?.firstName ?? '');
+    _firstNameController =
+        TextEditingController(text: profile?.firstName ?? '');
     _lastNameController = TextEditingController(text: profile?.lastName ?? '');
     _usernameController = TextEditingController(text: profile?.username ?? '');
+    _loadLanguages();
+  }
+
+  Future<void> _loadLanguages() async {
+    try {
+      final languages = await _configService.getSupportedLanguages();
+      final profile = Provider.of<AuthProvider>(context, listen: false).profile;
+
+      if (languages.isEmpty) {
+        // Fallback to default languages if config fails
+        _supportedLanguages = [
+          Language(code: 'en', name: 'English', nativeName: 'English'),
+          Language(code: 'ko', name: 'Korean', nativeName: '한국어'),
+          Language(code: 'es', name: 'Spanish', nativeName: 'Español'),
+          Language(code: 'fr', name: 'French', nativeName: 'Français'),
+          Language(code: 'de', name: 'German', nativeName: 'Deutsch'),
+        ];
+      } else {
+        _supportedLanguages = languages;
+      }
+
+      setState(() {
+        if (profile?.language != null) {
+          try {
+            _selectedLanguage = _supportedLanguages.firstWhere(
+              (lang) => lang.code == profile!.language,
+            );
+          } catch (e) {
+            // If user's language is not found, default to English or first available
+            _selectedLanguage = _supportedLanguages.firstWhere(
+              (lang) => lang.code == 'en',
+              orElse: () => _supportedLanguages.first,
+            );
+          }
+        } else {
+          // Default to English if available, otherwise first language
+          _selectedLanguage = _supportedLanguages.firstWhere(
+            (lang) => lang.code == 'en',
+            orElse: () => _supportedLanguages.first,
+          );
+        }
+      });
+    } catch (e) {
+      // Fallback to minimal language set if everything fails
+      setState(() {
+        _supportedLanguages = [
+          Language(code: 'en', name: 'English', nativeName: 'English'),
+          Language(code: 'ko', name: 'Korean', nativeName: '한국어'),
+        ];
+        _selectedLanguage = _supportedLanguages.first;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Using default languages. Error: $e')),
+        );
+      }
+    }
   }
 
   @override
@@ -54,7 +117,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
 
     try {
       final token = await _authService.getToken();
-      
+
       if (token == null) {
         throw Exception('Not authenticated');
       }
@@ -71,6 +134,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
           'username': _usernameController.text,
           'gender': _gender,
           'dob': DateFormat('yyyy-MM-dd').format(_birthday),
+          'language': _selectedLanguage?.code ?? 'en',
         }),
       );
 
@@ -146,6 +210,44 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
             });
           }
         },
+      ),
+    );
+  }
+
+  Widget _buildLanguageDropdownField() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: DropdownButtonFormField<Language>(
+        value: _selectedLanguage,
+        decoration: InputDecoration(
+          labelText: 'Language',
+          prefixIcon: const Icon(Icons.language),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+          filled: true,
+          fillColor: Colors.white,
+        ),
+        validator: (value) {
+          if (value == null) {
+            return 'Please select a language';
+          }
+          return null;
+        },
+        items: _supportedLanguages.map((Language language) {
+          return DropdownMenuItem<Language>(
+            value: language,
+            child: Text('${language.nativeName} (${language.name})'),
+          );
+        }).toList(),
+        onChanged: (value) {
+          if (value != null) {
+            setState(() {
+              _selectedLanguage = value;
+            });
+          }
+        },
+        hint: _supportedLanguages.isEmpty
+            ? const Text('Loading languages...')
+            : const Text('Select your language'),
       ),
     );
   }
@@ -260,6 +362,7 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                 },
               ),
               _buildDropdownField(),
+              _buildLanguageDropdownField(),
               _buildDateField(),
               const SizedBox(height: 30),
               SizedBox(
@@ -274,21 +377,22 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
                     ),
                   ),
                   child: _isLoading
-                    ? const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
+                          ),
+                        )
+                      : const Text(
+                          'Continue',
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      )
-                    : const Text(
-                        'Continue',
-                        style: TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
                 ),
               ),
             ],
@@ -297,4 +401,4 @@ class _ProfileSetupScreenState extends State<ProfileSetupScreen> {
       ),
     );
   }
-} 
+}

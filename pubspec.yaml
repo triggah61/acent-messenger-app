@@ -77,6 +77,10 @@ dependencies:
   # Agora packages for calling
   agora_rtc_engine: ^6.3.2
   wakelock_plus: ^1.2.5
+  # Speech to text for voice mode
+  speech_to_text: ^7.3.0
+  # Crypto for cache key generation
+  crypto: ^3.0.3
 
 dev_dependencies:
   flutter_test:

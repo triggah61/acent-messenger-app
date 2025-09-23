@@ -1,6 +1,7 @@
 import 'package:acent_messenger/providers/auth_provider.dart';
 import 'package:acent_messenger/constants/config.dart';
 import 'package:acent_messenger/services/auth_service.dart';
+import 'package:acent_messenger/services/config_service.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -18,9 +19,8 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  
-
   final AuthService _authService = AuthService();
+  final ConfigService _configService = ConfigService.instance;
   bool _isLoading = false;
   bool _isUploadingPhoto = false;
   late TextEditingController _firstNameController;
@@ -28,18 +28,21 @@ class _ProfileScreenState extends State<ProfileScreen> {
   late TextEditingController _usernameController;
   String _gender = 'Male';
   DateTime? _birthday;
+  Language? _selectedLanguage;
+  List<Language> _supportedLanguages = [];
   final ImagePicker _picker = ImagePicker();
 
   @override
   void initState() {
     super.initState();
     final profile = Provider.of<AuthProvider>(context, listen: false).profile;
-    _firstNameController = TextEditingController(text: profile?.firstName ?? '');
+    _firstNameController =
+        TextEditingController(text: profile?.firstName ?? '');
     _lastNameController = TextEditingController(text: profile?.lastName ?? '');
     _usernameController = TextEditingController(text: profile?.username ?? '');
-    
+
     _gender = profile?.gender ?? 'Male';
-    
+
     if (profile?.dob != null) {
       try {
         _birthday = DateTime.parse(profile!.dob!);
@@ -48,6 +51,65 @@ class _ProfileScreenState extends State<ProfileScreen> {
       }
     } else {
       _birthday = null;
+    }
+
+    _loadLanguages();
+  }
+
+  Future<void> _loadLanguages() async {
+    try {
+      final languages = await _configService.getSupportedLanguages();
+      final profile = Provider.of<AuthProvider>(context, listen: false).profile;
+
+      if (languages.isEmpty) {
+        // Fallback to default languages if config fails
+        _supportedLanguages = [
+          Language(code: 'en', name: 'English', nativeName: 'English'),
+          Language(code: 'ko', name: 'Korean', nativeName: '한국어'),
+          Language(code: 'es', name: 'Spanish', nativeName: 'Español'),
+          Language(code: 'fr', name: 'French', nativeName: 'Français'),
+          Language(code: 'de', name: 'German', nativeName: 'Deutsch'),
+        ];
+      } else {
+        _supportedLanguages = languages;
+      }
+
+      setState(() {
+        if (profile?.language != null) {
+          try {
+            _selectedLanguage = _supportedLanguages.firstWhere(
+              (lang) => lang.code == profile!.language,
+            );
+          } catch (e) {
+            // If user's language is not found, default to English or first available
+            _selectedLanguage = _supportedLanguages.firstWhere(
+              (lang) => lang.code == 'en',
+              orElse: () => _supportedLanguages.first,
+            );
+          }
+        } else {
+          // Default to English if available, otherwise first language
+          _selectedLanguage = _supportedLanguages.firstWhere(
+            (lang) => lang.code == 'en',
+            orElse: () => _supportedLanguages.first,
+          );
+        }
+      });
+    } catch (e) {
+      // Fallback to minimal language set if everything fails
+      setState(() {
+        _supportedLanguages = [
+          Language(code: 'en', name: 'English', nativeName: 'English'),
+          Language(code: 'ko', name: 'Korean', nativeName: '한국어'),
+        ];
+        _selectedLanguage = _supportedLanguages.first;
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Using default languages. Error: $e')),
+        );
+      }
     }
   }
 
@@ -77,14 +139,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
     // Basic username validation
     if (!RegExp(r'^[a-zA-Z0-9_]+$').hasMatch(_usernameController.text)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Username can only contain letters, numbers, and underscores')),
+        const SnackBar(
+            content: Text(
+                'Username can only contain letters, numbers, and underscores')),
       );
       return;
     }
 
     if (_usernameController.text.length < 3) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Username must be at least 3 characters long')),
+        const SnackBar(
+            content: Text('Username must be at least 3 characters long')),
       );
       return;
     }
@@ -95,7 +160,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     try {
       final token = await _authService.getToken();
-      
+
       if (token == null) {
         throw Exception('Not authenticated');
       }
@@ -109,6 +174,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
       if (_birthday != null) {
         requestBody['dob'] = DateFormat('yyyy-MM-dd').format(_birthday!);
+      }
+
+      if (_selectedLanguage != null) {
+        requestBody['language'] = _selectedLanguage!.code;
       }
 
       final response = await http.post(
@@ -152,7 +221,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _firstNameController.text = profile?.firstName ?? '';
     _lastNameController.text = profile?.lastName ?? '';
     _usernameController.text = profile?.username ?? '';
-    
+
     _gender = profile?.gender ?? 'Male';
     if (profile?.dob != null) {
       try {
@@ -164,112 +233,133 @@ class _ProfileScreenState extends State<ProfileScreen> {
       _birthday = null;
     }
 
+    // Reload selected language
+    if (profile?.language != null && _supportedLanguages.isNotEmpty) {
+      _selectedLanguage = _supportedLanguages.firstWhere(
+        (lang) => lang.code == profile!.language,
+        orElse: () => _supportedLanguages.first,
+      );
+    }
+
     await showDialog(
       context: context,
       builder: (BuildContext context) {
-        return StatefulBuilder(
-          builder: (context, setDialogState) {
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(16.0),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      'Edit Profile',
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 10),
-                    _buildTextField(
-                      label: 'First Name',
-                      controller: _firstNameController,
-                      icon: Icons.person,
-                    ),
-                    _buildTextField(
-                      label: 'Last Name',
-                      controller: _lastNameController,
-                      icon: Icons.person,
-                    ),
-                    _buildTextField(
-                      label: 'Username',
-                      controller: _usernameController,
-                      icon: Icons.alternate_email,
-                    ),
-                    _buildTextField(
-                      label: 'Phone Number',
-                      initialValue: '${profile?.dialCode ?? ''} ${profile?.phone ?? ''}',
-                      icon: Icons.phone,
-                      keyboardType: TextInputType.phone,
-                      readOnly: true,
-                    ),
-                    _buildDropdownField(
-                      label: 'Gender',
-                      value: _gender,
-                      icon: Icons.wc,
-                      items: ['Male', 'Female', 'Other'],
-                      onChanged: (value) {
-                        if (value != null) {
-                          setDialogState(() {
-                            _gender = value;
-                          });
-                        }
-                      },
-                    ),
-                    _buildDateField(
-                      label: 'Date of Birth',
-                      value: _birthday,
-                      icon: Icons.calendar_today,
-                      onDateSelected: (date) {
+        return StatefulBuilder(builder: (context, setDialogState) {
+          return Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(16.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Edit Profile',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 10),
+                  _buildTextField(
+                    label: 'First Name',
+                    controller: _firstNameController,
+                    icon: Icons.person,
+                  ),
+                  _buildTextField(
+                    label: 'Last Name',
+                    controller: _lastNameController,
+                    icon: Icons.person,
+                  ),
+                  _buildTextField(
+                    label: 'Username',
+                    controller: _usernameController,
+                    icon: Icons.alternate_email,
+                  ),
+                  _buildTextField(
+                    label: 'Phone Number',
+                    initialValue:
+                        '${profile?.dialCode ?? ''} ${profile?.phone ?? ''}',
+                    icon: Icons.phone,
+                    keyboardType: TextInputType.phone,
+                    readOnly: true,
+                  ),
+                  _buildDropdownField(
+                    label: 'Gender',
+                    value: _gender,
+                    icon: Icons.wc,
+                    items: ['Male', 'Female', 'Other'],
+                    onChanged: (value) {
+                      if (value != null) {
                         setDialogState(() {
-                          _birthday = date;
+                          _gender = value;
                         });
-                      },
-                    ),
-                    const SizedBox(height: 20),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                      children: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(context),
-                          child: const Text(
-                            'Cancel',
-                            style: TextStyle(fontSize: 16),
+                      }
+                    },
+                  ),
+                  _buildLanguageDropdownField(
+                    label: 'Language',
+                    value: _selectedLanguage,
+                    icon: Icons.language,
+                    onChanged: (value) {
+                      if (value != null) {
+                        setDialogState(() {
+                          _selectedLanguage = value;
+                        });
+                      }
+                    },
+                  ),
+                  _buildDateField(
+                    label: 'Date of Birth',
+                    value: _birthday,
+                    icon: Icons.calendar_today,
+                    onDateSelected: (date) {
+                      setDialogState(() {
+                        _birthday = date;
+                      });
+                    },
+                  ),
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text(
+                          'Cancel',
+                          style: TextStyle(fontSize: 16),
+                        ),
+                      ),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blue,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 12,
                           ),
                         ),
-                        ElevatedButton(
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.blue,
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 24,
-                              vertical: 12,
-                            ),
-                          ),
-                          onPressed: _isLoading ? null : _updateProfile,
-                          child: _isLoading
-                              ? const SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                                  ),
-                                )
-                              : const Text(
-                                  'Save',
-                                  style: TextStyle(fontSize: 16, color: Colors.white),
+                        onPressed: _isLoading ? null : _updateProfile,
+                        child: _isLoading
+                            ? const SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                      Colors.white),
                                 ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
+                              )
+                            : const Text(
+                                'Save',
+                                style: TextStyle(
+                                    fontSize: 16, color: Colors.white),
+                              ),
+                      ),
+                    ],
+                  ),
+                ],
               ),
-            );
-          }
-        );
+            ),
+          );
+        });
       },
     );
   }
@@ -280,8 +370,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     });
 
     try {
-       final token = await _authService.getToken();
-      
+      final token = await _authService.getToken();
+
       if (token == null) {
         throw Exception('Not authenticated');
       }
@@ -352,6 +442,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  String _getLanguageDisplayName(String languageCode) {
+    final language = _supportedLanguages.firstWhere(
+      (lang) => lang.code == languageCode,
+      orElse: () => Language(
+          code: languageCode, name: languageCode, nativeName: languageCode),
+    );
+    return '${language.nativeName} (${language.name})';
+  }
+
   Widget _buildTextField({
     required String label,
     String? initialValue,
@@ -400,6 +499,32 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  Widget _buildLanguageDropdownField({
+    required String label,
+    required Language? value,
+    required IconData icon,
+    required Function(Language?) onChanged,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: DropdownButtonFormField<Language>(
+        decoration: InputDecoration(
+          labelText: label,
+          prefixIcon: Icon(icon),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+        value: value,
+        items: _supportedLanguages.map((Language language) {
+          return DropdownMenuItem<Language>(
+            value: language,
+            child: Text('${language.nativeName} (${language.name})'),
+          );
+        }).toList(),
+        onChanged: onChanged,
+      ),
+    );
+  }
+
   Widget _buildDateField({
     required String label,
     required DateTime? value,
@@ -413,16 +538,20 @@ class _ProfileScreenState extends State<ProfileScreen> {
           labelText: label,
           prefixIcon: Icon(icon),
           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-          suffixIcon: value != null ? IconButton(
-            icon: Icon(Icons.clear),
-            onPressed: () {
-              onDateSelected(null);
-            },
-          ) : null,
+          suffixIcon: value != null
+              ? IconButton(
+                  icon: Icon(Icons.clear),
+                  onPressed: () {
+                    onDateSelected(null);
+                  },
+                )
+              : null,
         ),
         readOnly: true,
         controller: TextEditingController(
-          text: value != null ? DateFormat('dd/MM/yyyy').format(value) : 'Select date',
+          text: value != null
+              ? DateFormat('dd/MM/yyyy').format(value)
+              : 'Select date',
         ),
         onTap: () async {
           DateTime? pickedDate = await showDatePicker(
@@ -505,7 +634,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ].where((name) => name != null && name.isNotEmpty).join(' ');
 
         final displayGender = profile.gender ?? 'Not specified';
-        final displayBirthday = profile.dob != null 
+        final displayBirthday = profile.dob != null
             ? (() {
                 try {
                   final date = DateTime.parse(profile.dob!);
@@ -515,6 +644,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 }
               })()
             : '-';
+
+        final displayLanguage = profile.language != null
+            ? _getLanguageDisplayName(profile.language!)
+            : 'Not specified';
 
         return Scaffold(
           backgroundColor: Colors.grey[100],
@@ -550,11 +683,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                           : null,
                       child: profile.photo == null
                           ? Text(
-                        '${(profile.firstName?.substring(0, 1).toUpperCase() ?? "")}'
-                            '${(profile.lastName?.substring(0, 1).toUpperCase() ?? "")}',
-                        style: const TextStyle(
-                            fontSize: 36),
-                      )
+                              '${(profile.firstName?.substring(0, 1).toUpperCase() ?? "")}'
+                              '${(profile.lastName?.substring(0, 1).toUpperCase() ?? "")}',
+                              style: const TextStyle(fontSize: 36),
+                            )
                           : null,
                     ),
                     if (_isUploadingPhoto)
@@ -576,7 +708,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 20),
                 Text(
                   fullName.isEmpty ? 'No Name' : fullName,
-                  style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  style: const TextStyle(
+                      fontSize: 22, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 20),
                 Column(
@@ -586,7 +719,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       value: '${profile.dialCode ?? ''} ${profile.phone}',
                       icon: Icons.phone,
                     ),
-                    if (profile.username != null && profile.username!.isNotEmpty)
+                    if (profile.username != null &&
+                        profile.username!.isNotEmpty)
                       _buildProfileInfo(
                         label: 'Username',
                         value: '@${profile.username}',
@@ -603,8 +737,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       icon: Icons.calendar_today,
                     ),
                     _buildProfileInfo(
+                      label: 'Language',
+                      value: displayLanguage,
+                      icon: Icons.language,
+                    ),
+                    _buildProfileInfo(
                       label: 'Status',
-                      value: Config.wordToUpperCase(profile.status ?? 'No status'),
+                      value:
+                          Config.wordToUpperCase(profile.status ?? 'No status'),
                       icon: Icons.info,
                     ),
                   ],
@@ -619,7 +759,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
                         context: context,
                         builder: (context) => AlertDialog(
                           title: const Text('Logout'),
-                          content: const Text('Are you sure you want to logout?'),
+                          content:
+                              const Text('Are you sure you want to logout?'),
                           actions: [
                             TextButton(
                               onPressed: () => Navigator.pop(context, false),
@@ -639,7 +780,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       if (shouldLogout == true && mounted) {
                         await authProvider.logout();
                         if (mounted) {
-                           Navigator.push(
+                          Navigator.push(
                             context,
                             MaterialPageRoute(
                               builder: (context) => const LoginScreen(),

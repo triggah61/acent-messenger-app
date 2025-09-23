@@ -1,8 +1,8 @@
-import 'package:acent_messenger/views/calls/calls.dart';
 import 'package:acent_messenger/views/contacts/contacts.dart';
 import 'package:acent_messenger/views/settings/settings.dart';
 import 'package:acent_messenger/views/status/status.dart';
 import 'package:acent_messenger/views/wallet/wallet_screen.dart';
+import 'package:acent_messenger/views/translator/on_screen_translator.dart';
 import 'package:flutter/material.dart';
 
 import '../views/chats/chat_screen.dart';
@@ -24,6 +24,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
     ContactsScreen(),
     // CallsScreen(),
     StatusScreen(),
+    const OnScreenTranslator(),
     WalletScreen(),
     // SearchScreen(),
     SettingsScreen()
@@ -62,14 +63,18 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
         ),
         child: BottomNavigationBar(
           items: [
-            _buildBottomNavBarItem(Icons.chat, 'Chats'),         // Chats Screen
-            _buildBottomNavBarItem(Icons.group, 'Groups'),       // Groups Screen
-            _buildBottomNavBarItem(Icons.contacts, 'Contacts'),  // Contacts Screen
+            _buildBottomNavBarItem(Icons.chat, 'Chats'), // Chats Screen
+            _buildBottomNavBarItem(Icons.group, 'Groups'), // Groups Screen
+            _buildBottomNavBarItem(
+                Icons.contacts, 'Contacts'), // Contacts Screen
             // _buildBottomNavBarItem(Icons.call, 'Calls'),         // Calls Screen
-            _buildBottomNavBarItem(Icons.update, 'Status'),      // Status Screen
-            _buildBottomNavBarItem(Icons.wallet, 'Wallet'),      // Wallet Screen
+            _buildBottomNavBarItem(Icons.update, 'Status'), // Status Screen
+            _buildBottomNavBarItem(
+                Icons.translate, 'Translator'), // Translator Screen
+            _buildBottomNavBarItem(Icons.wallet, 'Wallet'), // Wallet Screen
             // _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen
-            _buildBottomNavBarItem(Icons.settings, 'Settings'),  // Settings Screen
+            _buildBottomNavBarItem(
+                Icons.settings, 'Settings'), // Settings Screen
           ],
           currentIndex: _selectedIndex,
           selectedItemColor: Colors.white,
@@ -77,7 +82,8 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
           showUnselectedLabels: true,
           onTap: _onItemTapped,
           type: BottomNavigationBarType.fixed,
-          backgroundColor: Colors.transparent, // Transparent background to apply gradient
+          backgroundColor:
+              Colors.transparent, // Transparent background to apply gradient
         ),
       ),
     );

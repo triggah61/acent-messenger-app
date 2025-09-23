@@ -9,6 +9,7 @@ class Profile {
   final String? photo;
   final String? gender;
   final String? dob;
+  final String? language;
 
   Profile({
     required this.id,
@@ -21,6 +22,7 @@ class Profile {
     this.photo,
     this.gender,
     this.dob,
+    this.language,
   });
 
   factory Profile.fromJson(Map<String, dynamic> json) {
@@ -35,6 +37,7 @@ class Profile {
       photo: json['photo'],
       gender: json['gender'],
       dob: json['dob'],
+      language: json['language'],
     );
   }
 
@@ -50,6 +53,7 @@ class Profile {
       'photo': photo,
       'gender': gender,
       'dob': dob,
+      'language': language,
     };
   }
 }
