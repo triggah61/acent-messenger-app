@@ -94,7 +94,7 @@ class TTSService {
       _config = TTSConfig(
         provider: 'elevenlabs',
         settings: {
-          'apiKey': 'sk_8b61f8e610fc6a878989eab9879ed2097fc7d5a575705cc4',
+          'apiKey': 'sk_d44d556a3efa7e2a9f2b8ab4af2ab4aafa2ce047ea90e4ff',
           'baseUrl': 'https://api.elevenlabs.io/v1',
         },
       );

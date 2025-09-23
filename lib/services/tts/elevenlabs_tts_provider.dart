@@ -229,15 +229,35 @@ class ElevenLabsTTSProvider implements TTSProvider {
   @override
   Future<bool> isAvailable() async {
     try {
-      // Simple health check - try to get voices endpoint
+      print('ElevenLabsTTSProvider: Checking availability...');
+      print('ElevenLabsTTSProvider: API Key: ${_apiKey.substring(0, 10)}...');
+      print('ElevenLabsTTSProvider: Base URL: $_baseUrl');
+
+      // Check if API key is present and not empty
+      if (_apiKey.isEmpty) {
+        print('ElevenLabsTTSProvider: API key is empty');
+        return false;
+      }
+
+      // Simple health check - try to get user info endpoint (requires less permissions)
       final response = await http.get(
-        Uri.parse('$_baseUrl/voices'),
+        Uri.parse('$_baseUrl/user'),
         headers: {
           'xi-api-key': _apiKey,
         },
       );
 
-      final available = response.statusCode == 200;
+      print(
+          'ElevenLabsTTSProvider: Availability response status: ${response.statusCode}');
+      print(
+          'ElevenLabsTTSProvider: Availability response body: ${response.body}');
+
+      // Consider available if we get 200 (success) or 401 (valid key but insufficient permissions for this endpoint)
+      // The key is valid if we get 401 with proper error message, not 403 (forbidden) or other errors
+      final available = response.statusCode == 200 ||
+          (response.statusCode == 401 &&
+              response.body.contains('missing_permissions'));
+
       print('ElevenLabsTTSProvider: Availability check - $available');
       return available;
     } catch (e) {
