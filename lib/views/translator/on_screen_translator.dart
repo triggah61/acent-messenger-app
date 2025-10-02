@@ -42,8 +42,6 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
   Language? _targetLanguage;
 
   // Recording state
-  bool _isListening = false;
-  bool _isProcessing = false;
   String _recognizedText = '';
   String _translatedText = '';
 
@@ -52,14 +50,25 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
   bool _hasTranslation = false;
 
   // UI state
-  bool _permissionGranted = false;
   bool _isLoading = true;
+
+  // Continuous STT and Slot-based processing
+  String _transcribedText = ''; // Continuously accumulated text
+  Timer? _silentDetectorTimer; // 3-second silent detection timer
+  bool _isMuted = false; // User mute/unmute control
+  bool _isTTSPlaying = false; // Auto-mute during TTS playback
+  bool _isContinuousListening = false; // Continuous listening state
+  static const Duration _silentTimeout = Duration(seconds: 3);
+
+  // Auto-scroll controller for text display
+  late ScrollController _textScrollController;
 
   @override
   void initState() {
     super.initState();
     _initializeAnimations();
     _initializeServices();
+    _textScrollController = ScrollController();
   }
 
   void _initializeAnimations() {
@@ -127,10 +136,6 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
             'OnScreenTranslator: Language - ${lang.code}: ${lang.name} (${lang.nativeName})');
       }
 
-      // Check microphone permission
-      final hasPermission =
-          await _permissionService.requestMicrophonePermission();
-
       // Initialize TTS service
       print('OnScreenTranslator: Initializing TTS service...');
       await _ttsService.initialize();
@@ -162,17 +167,19 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
         print(
             'OnScreenTranslator: Default target language: ${_targetLanguage?.code}');
 
-        _permissionGranted = hasPermission;
         _isLoading = false;
       });
 
       // Start scale animation
       _scaleController.forward();
+
+      // Don't start listening automatically - wait for user to press Start button
+      print(
+          'OnScreenTranslator: Services initialized. Ready for user to start listening.');
     } catch (e) {
       print('OnScreenTranslator: Error loading languages: $e');
       setState(() {
         _isLoading = false;
-        _permissionGranted = false;
         // Still need some fallback languages for the app to work
         _supportedLanguages = [
           Language(code: 'en', name: 'English', nativeName: 'English'),
@@ -195,87 +202,23 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     _waveController.dispose();
     _fadeController.dispose();
     _scaleController.dispose();
+    _textScrollController.dispose();
+
+    // Clean up continuous listening
+    _stopContinuousListening();
+
     // Stop any ongoing TTS playback
     _ttsService.stop();
+
+    // Cancel silent detector timer
+    _silentDetectorTimer?.cancel();
+
     super.dispose();
   }
 
-  void _startListening() async {
-    if (!_permissionGranted) {
-      final granted = await _permissionService.requestMicrophonePermission();
-      if (!granted) {
-        _showPermissionDialog();
-        return;
-      }
+  Future<void> _performTranslation(String text) async {
+    if (text.isEmpty || _sourceLanguage == null || _targetLanguage == null) {
       setState(() {
-        _permissionGranted = true;
-      });
-    }
-
-    HapticFeedback.mediumImpact();
-
-    setState(() {
-      _isListening = true;
-      _recognizedText = '';
-      _translatedText = '';
-    });
-
-    // Start animations
-    _pulseController.repeat(reverse: true);
-    _waveController.repeat();
-
-    // Initialize speech service
-    try {
-      await _speechService.initialize();
-      _speechService.setOnResult((text) {
-        setState(() {
-          _recognizedText = text;
-        });
-        _fadeController.forward();
-      });
-
-      _speechService.setOnPartialResult((text) {
-        setState(() {
-          _recognizedText = text;
-        });
-      });
-
-      await _speechService.startListening();
-    } catch (e) {
-      _stopListening();
-      _showError('Failed to start listening: $e');
-    }
-  }
-
-  void _stopListening() {
-    HapticFeedback.lightImpact();
-
-    setState(() {
-      _isListening = false;
-      _isProcessing = _recognizedText.isNotEmpty;
-    });
-
-    // Stop animations
-    _pulseController.stop();
-    _pulseController.reset();
-    _waveController.stop();
-    _waveController.reset();
-
-    // Stop speech service
-    _speechService.stopListening();
-
-    // Perform translation processing
-    if (_recognizedText.isNotEmpty) {
-      _performTranslation();
-    }
-  }
-
-  void _performTranslation() async {
-    if (_recognizedText.isEmpty ||
-        _sourceLanguage == null ||
-        _targetLanguage == null) {
-      setState(() {
-        _isProcessing = false;
         _translatedText = '';
         _hasTranslation = false;
       });
@@ -286,8 +229,7 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     if (!TranslationService.isTranslationNeeded(
         _sourceLanguage!.code, _targetLanguage!.code)) {
       setState(() {
-        _isProcessing = false;
-        _translatedText = _recognizedText;
+        _translatedText = text;
         _hasTranslation = true;
       });
       _fadeController.forward();
@@ -302,16 +244,15 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       print('OnScreenTranslator: Starting translation...');
       print(
           'Source: ${_sourceLanguage!.code}, Target: ${_targetLanguage!.code}');
-      print('Content: $_recognizedText');
+      print('Content: $text');
 
       final result = await TranslationService.translateText(
         sourceLanguage: _sourceLanguage!.code,
         targetLanguage: _targetLanguage!.code,
-        content: _recognizedText,
+        content: text,
       );
 
       setState(() {
-        _isProcessing = false;
         _isTranslating = false;
         if (result != null) {
           _translatedText = result.translatedText;
@@ -326,9 +267,11 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       });
 
       _fadeController.forward();
+
+      // Auto-scroll to show translation result
+      _scrollToBottom();
     } catch (e) {
       setState(() {
-        _isProcessing = false;
         _isTranslating = false;
         _translatedText = 'Translation error: $e';
         _hasTranslation = false;
@@ -391,10 +334,16 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       print(
           'OnScreenTranslator: Playing source text in ${_sourceLanguage!.code}');
 
+      // Auto-mute STT during TTS playback
+      _setTTSPlaying(true);
+
       final success = await _ttsService.speak(
         text: _recognizedText,
         languageCode: _sourceLanguage!.code,
       );
+
+      // Auto-unmute STT after TTS playback
+      _setTTSPlaying(false);
 
       if (!success) {
         print('OnScreenTranslator: Failed to play source text');
@@ -403,6 +352,8 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     } catch (e) {
       print('OnScreenTranslator: Error playing source text: $e');
       _showError('Audio playback error: $e');
+      // Ensure STT is unmuted even if TTS fails
+      _setTTSPlaying(false);
     }
   }
 
@@ -435,10 +386,16 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       print(
           'OnScreenTranslator: Playing translated text in ${_targetLanguage!.code}');
 
+      // Auto-mute STT during TTS playback
+      _setTTSPlaying(true);
+
       final success = await _ttsService.speak(
         text: _translatedText,
         languageCode: _targetLanguage!.code,
       );
+
+      // Auto-unmute STT after TTS playback
+      _setTTSPlaying(false);
 
       if (!success) {
         print('OnScreenTranslator: Failed to play translated text');
@@ -447,39 +404,300 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     } catch (e) {
       print('OnScreenTranslator: Error playing translated text: $e');
       _showError('Audio playback error: $e');
+      // Ensure STT is unmuted even if TTS fails
+      _setTTSPlaying(false);
     }
   }
 
-  void _showPermissionDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
-          children: [
-            Icon(Icons.mic_off, color: Colors.red),
-            SizedBox(width: 8),
-            Text('Microphone Permission'),
-          ],
+  // ==================== CONTINUOUS STT AND SLOT-BASED PROCESSING ====================
+
+  /// Start continuous listening when screen opens
+  Future<void> _startContinuousListening() async {
+    if (_isContinuousListening) return;
+
+    print('OnScreenTranslator: Starting continuous listening...');
+
+    try {
+      await _speechService.initialize();
+
+      // Set up speech recognition callbacks
+      _speechService.setOnResult((text) {
+        _onSpeechResult(text);
+      });
+
+      _speechService.setOnPartialResult((text) {
+        _onSpeechPartialResult(text);
+      });
+
+      // Start continuous listening
+      await _speechService.startListening();
+
+      setState(() {
+        _isContinuousListening = true;
+      });
+
+      // Start animations
+      _pulseController.repeat(reverse: true);
+      _waveController.repeat();
+
+      // Start the first slot
+      _startNewSlot();
+
+      print('OnScreenTranslator: Continuous listening started successfully');
+    } catch (e) {
+      print('OnScreenTranslator: Failed to start continuous listening: $e');
+      _showError('Failed to start continuous listening: $e');
+    }
+  }
+
+  /// Stop continuous listening when screen closes
+  void _stopContinuousListening() {
+    if (!_isContinuousListening) return;
+
+    print('OnScreenTranslator: Stopping continuous listening...');
+
+    _speechService.stopListening();
+    _silentDetectorTimer?.cancel();
+
+    setState(() {
+      _isContinuousListening = false;
+      _transcribedText = '';
+    });
+
+    print('OnScreenTranslator: Continuous listening stopped');
+  }
+
+  /// Start a new slot - reset transcribedText and prepare for new speech
+  void _startNewSlot() {
+    print('OnScreenTranslator: Starting new slot...');
+
+    setState(() {
+      _transcribedText = '';
+      _recognizedText = '';
+      // Don't clear translated text immediately - let it stay until new translation
+      _isTranslating = false;
+    });
+
+    // Cancel any existing silent detector timer
+    _silentDetectorTimer?.cancel();
+
+    // Ensure continuous listening is still active
+    if (_isContinuousListening && !_isMuted && !_isTTSPlaying) {
+      _ensureContinuousListening();
+    }
+
+    print('OnScreenTranslator: New slot started');
+  }
+
+  /// Ensure continuous listening is active
+  void _ensureContinuousListening() async {
+    try {
+      // Check if speech service is still listening
+      final isListening = _speechService.isListening;
+      if (!isListening) {
+        print('OnScreenTranslator: Speech service stopped, restarting...');
+        await _speechService.startListening();
+        print('OnScreenTranslator: Speech service restarted successfully');
+      }
+    } catch (e) {
+      print('OnScreenTranslator: Error ensuring continuous listening: $e');
+      // Try to restart continuous listening
+      try {
+        await _startContinuousListening();
+      } catch (restartError) {
+        print(
+            'OnScreenTranslator: Failed to restart continuous listening: $restartError');
+      }
+    }
+  }
+
+  /// Handle final speech recognition result
+  void _onSpeechResult(String text) {
+    if (_isMuted || _isTTSPlaying) return;
+
+    print('OnScreenTranslator: Speech result: "$text"');
+
+    if (text.trim().isNotEmpty) {
+      setState(() {
+        _transcribedText = text.trim();
+        _recognizedText = text.trim();
+        // Clear previous translation when new speech is detected
+        _translatedText = '';
+        _hasTranslation = false;
+      });
+
+      // Auto-scroll to show new text
+      _scrollToBottom();
+
+      // Reset silent detector timer
+      _resetSilentDetectorTimer();
+    }
+  }
+
+  /// Handle partial speech recognition result
+  void _onSpeechPartialResult(String text) {
+    if (_isMuted || _isTTSPlaying) return;
+
+    if (text.trim().isNotEmpty) {
+      setState(() {
+        _transcribedText = text.trim();
+        _recognizedText = text.trim();
+        // Clear previous translation when new speech is detected
+        _translatedText = '';
+        _hasTranslation = false;
+      });
+
+      // Auto-scroll to show new text
+      _scrollToBottom();
+
+      // Reset silent detector timer on new text
+      _resetSilentDetectorTimer();
+    }
+  }
+
+  /// Reset the silent detector timer
+  void _resetSilentDetectorTimer() {
+    _silentDetectorTimer?.cancel();
+
+    if (_transcribedText.isNotEmpty) {
+      _silentDetectorTimer = Timer(_silentTimeout, () {
+        print('OnScreenTranslator: Silent timeout reached, processing slot...');
+        _processCurrentSlot();
+      });
+
+      print('OnScreenTranslator: Silent detector timer reset (3 seconds)');
+    }
+  }
+
+  /// Process the current slot - send transcribedText for translation
+  void _processCurrentSlot() async {
+    if (_transcribedText.isEmpty || _isTranslating) return;
+
+    print('OnScreenTranslator: Processing slot with text: "$_transcribedText"');
+
+    setState(() {
+      _isTranslating = true;
+    });
+
+    try {
+      await _performTranslation(_transcribedText);
+      print(
+          'OnScreenTranslator: Slot processing completed, starting new slot...');
+    } catch (e) {
+      print('OnScreenTranslator: Error processing slot: $e');
+      _showError('Translation failed: $e');
+    } finally {
+      setState(() {
+        _isTranslating = false;
+      });
+
+      // Start new slot after processing is complete
+      _startNewSlot();
+    }
+  }
+
+  /// Toggle mute/unmute for user control
+  void _toggleMute() {
+    setState(() {
+      _isMuted = !_isMuted;
+    });
+
+    if (_isMuted) {
+      print('OnScreenTranslator: User muted STT');
+      _silentDetectorTimer?.cancel();
+    } else {
+      print('OnScreenTranslator: User unmuted STT');
+      // Ensure continuous listening is active when unmuting
+      if (_isContinuousListening && !_isTTSPlaying) {
+        _ensureContinuousListening();
+      }
+      if (_transcribedText.isNotEmpty) {
+        _resetSilentDetectorTimer();
+      }
+    }
+
+    HapticFeedback.lightImpact();
+  }
+
+  /// Auto-mute during TTS playback
+  void _setTTSPlaying(bool isPlaying) {
+    setState(() {
+      _isTTSPlaying = isPlaying;
+    });
+
+    if (isPlaying) {
+      print('OnScreenTranslator: Auto-muting STT during TTS playback');
+      _silentDetectorTimer?.cancel();
+    } else {
+      print('OnScreenTranslator: Auto-unmuting STT after TTS playback');
+      // Ensure continuous listening is active after TTS playback
+      if (_isContinuousListening && !_isMuted) {
+        _ensureContinuousListening();
+      }
+      if (_transcribedText.isNotEmpty && !_isMuted) {
+        _resetSilentDetectorTimer();
+      }
+    }
+  }
+
+  /// Auto-scroll to bottom of text display
+  void _scrollToBottom() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_textScrollController.hasClients) {
+        _textScrollController.animateTo(
+          _textScrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  /// Handle Start button press - begin continuous listening
+  Future<void> _handleStartListening() async {
+    try {
+      // Check microphone permission first
+      final hasPermission =
+          await _permissionService.requestMicrophonePermission();
+      if (!hasPermission) {
+        _showError('Microphone permission is required to start listening');
+        return;
+      }
+
+      // Start continuous listening
+      await _startContinuousListening();
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Listening started! Speak to begin translation.'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.green,
         ),
-        content: const Text(
-          'The translator needs microphone access to listen to your voice. Please grant permission in settings.',
+      );
+    } catch (e) {
+      print('OnScreenTranslator: Error starting listening: $e');
+      _showError('Failed to start listening: $e');
+    }
+  }
+
+  /// Handle Stop button press - stop continuous listening
+  Future<void> _handleStopListening() async {
+    try {
+      _stopContinuousListening();
+
+      // Show success message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Listening stopped.'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.orange,
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _permissionService.openSettings();
-            },
-            child: const Text('Settings'),
-          ),
-        ],
-      ),
-    );
+      );
+    } catch (e) {
+      print('OnScreenTranslator: Error stopping listening: $e');
+      _showError('Failed to stop listening: $e');
+    }
   }
 
   void _showError(String message) {
@@ -758,32 +976,48 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
   Widget _buildMicrophoneSection() {
     return Column(
       children: [
-        // Status Text
-        if (_isListening || _isProcessing)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-            decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
-              borderRadius: BorderRadius.circular(20),
-            ),
-            child: Text(
-              _isListening ? 'Listening...' : 'Processing...',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
+        // Status Display
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.2),
+            borderRadius: BorderRadius.circular(20),
           ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _isContinuousListening
+                    ? (_isMuted ? Icons.mic_off : Icons.mic)
+                    : Icons.play_circle_outline,
+                color: Colors.white,
+                size: 16,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                _isContinuousListening
+                    ? (_isMuted
+                        ? 'Muted'
+                        : (_isTTSPlaying ? 'TTS Playing' : 'Listening...'))
+                    : 'Ready to Start',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
 
         const SizedBox(height: 20),
 
-        // Microphone Button with Sound Waves
+        // Start/Stop Button with Sound Waves
         Stack(
           alignment: Alignment.center,
           children: [
-            // Sound waves animation
-            if (_isListening)
+            // Sound waves animation (only when listening)
+            if (_isContinuousListening && !_isMuted && !_isTTSPlaying)
               ...List.generate(3, (index) {
                 return AnimatedBuilder(
                   animation: _waveAnimation,
@@ -808,15 +1042,19 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                 );
               }),
 
-            // Microphone button
+            // Start/Stop Button
             GestureDetector(
-              onLongPressStart: (_) => _startListening(),
-              onLongPressEnd: (_) => _stopListening(),
+              onTap: _isContinuousListening
+                  ? _handleStopListening
+                  : _handleStartListening,
               child: AnimatedBuilder(
                 animation: _pulseAnimation,
                 builder: (context, child) {
                   return Transform.scale(
-                    scale: _isListening ? _pulseAnimation.value : 1.0,
+                    scale:
+                        (_isContinuousListening && !_isMuted && !_isTTSPlaying)
+                            ? _pulseAnimation.value
+                            : 1.0,
                     child: Container(
                       width: 100,
                       height: 100,
@@ -824,14 +1062,33 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                         gradient: LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: _isListening
-                              ? [Colors.red.shade400, Colors.red.shade600]
-                              : [Colors.white, Colors.white.withOpacity(0.9)],
+                          colors: _isContinuousListening
+                              ? (_isMuted
+                                  ? [
+                                      Colors.orange.shade400,
+                                      Colors.orange.shade600
+                                    ]
+                                  : _isTTSPlaying
+                                      ? [
+                                          Colors.blue.shade400,
+                                          Colors.blue.shade600
+                                        ]
+                                      : [
+                                          Colors.green.shade400,
+                                          Colors.green.shade600
+                                        ])
+                              : [Colors.blue.shade400, Colors.blue.shade600],
                         ),
                         shape: BoxShape.circle,
                         boxShadow: [
                           BoxShadow(
-                            color: (_isListening ? Colors.red : Colors.white)
+                            color: (_isContinuousListening
+                                    ? (_isMuted
+                                        ? Colors.orange
+                                        : _isTTSPlaying
+                                            ? Colors.blue
+                                            : Colors.green)
+                                    : Colors.blue)
                                 .withOpacity(0.3),
                             blurRadius: 20,
                             offset: const Offset(0, 8),
@@ -839,11 +1096,15 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                         ],
                       ),
                       child: Icon(
-                        _isListening ? Icons.mic : Icons.mic_none,
+                        _isContinuousListening
+                            ? (_isMuted
+                                ? Icons.mic_off
+                                : _isTTSPlaying
+                                    ? Icons.volume_up
+                                    : Icons.stop)
+                            : Icons.play_arrow,
                         size: 40,
-                        color: _isListening
-                            ? Colors.white
-                            : const Color(0xFF667eea),
+                        color: Colors.white,
                       ),
                     ),
                   );
@@ -857,55 +1118,136 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
 
         // Instructions
         Text(
-          _isListening
-              ? 'Release to stop recording'
-              : _isProcessing
-                  ? 'Processing...'
-                  : _isTranslating
-                      ? 'Translating...'
-                      : 'Press and hold to start recording',
+          _isContinuousListening
+              ? (_isMuted
+                  ? 'Tap unmute to resume listening'
+                  : _isTTSPlaying
+                      ? 'TTS is playing...'
+                      : _isTranslating
+                          ? 'Translating...'
+                          : 'Speaking... (auto-translates after 3s silence)')
+              : 'Tap the play button to start listening',
           style: TextStyle(
             color: Colors.white.withOpacity(0.8),
             fontSize: 16,
           ),
         ),
+
+        const SizedBox(height: 20),
+
+        // Action Buttons (only show when listening)
+        if (_isContinuousListening)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            children: [
+              // Mute/Unmute Button
+              _buildActionButton(
+                icon: _isMuted ? Icons.volume_off : Icons.volume_up,
+                label: _isMuted ? 'Unmute' : 'Mute',
+                onTap: _toggleMute,
+                isActive: _isMuted,
+              ),
+
+              // Play Source Text Button
+              _buildActionButton(
+                icon: Icons.play_arrow,
+                label: 'Play Source',
+                onTap: _playSourceText,
+                isActive: _recognizedText.isNotEmpty,
+              ),
+
+              // Play Translated Text Button
+              _buildActionButton(
+                icon: Icons.play_arrow,
+                label: 'Play Translation',
+                onTap: _playTranslatedText,
+                isActive: _hasTranslation,
+              ),
+            ],
+          ),
       ],
     );
   }
 
+  Widget _buildActionButton({
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+    required bool isActive,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: isActive
+              ? Colors.white.withOpacity(0.3)
+              : Colors.white.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(25),
+          border: Border.all(
+            color: Colors.white.withOpacity(0.3),
+            width: 1,
+          ),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              icon,
+              color: Colors.white,
+              size: 24,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildTextDisplaySection() {
-    return Column(
-      children: [
-        // Source Text Card
-        if (_recognizedText.isNotEmpty)
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: _buildTextCard(
-              title: 'Recognized Text',
-              text: _recognizedText,
-              language: _sourceLanguage,
-              onPlay: _playSourceText,
-              color: const Color(0xFF667eea),
+    return SingleChildScrollView(
+      controller: _textScrollController,
+      child: Column(
+        children: [
+          // Source Text Card
+          if (_recognizedText.isNotEmpty)
+            FadeTransition(
+              opacity: _fadeAnimation,
+              child: _buildTextCard(
+                title: 'Recognized Text',
+                text: _recognizedText,
+                language: _sourceLanguage,
+                onPlay: _playSourceText,
+                color: const Color(0xFF667eea),
+              ),
             ),
-          ),
 
-        if (_recognizedText.isNotEmpty &&
-            (_translatedText.isNotEmpty || _isTranslating))
-          const SizedBox(height: 20),
+          if (_recognizedText.isNotEmpty &&
+              (_translatedText.isNotEmpty || _isTranslating))
+            const SizedBox(height: 20),
 
-        // Translated Text Card
-        if (_translatedText.isNotEmpty || _isTranslating)
-          FadeTransition(
-            opacity: _fadeAnimation,
-            child: _buildTextCard(
-              title: 'Translation',
-              text: _isTranslating ? 'Translating...' : _translatedText,
-              language: _targetLanguage,
-              onPlay: _hasTranslation ? () => _playTranslatedText() : () {},
-              color: const Color(0xFF764ba2),
+          // Translated Text Card
+          if (_translatedText.isNotEmpty || _isTranslating)
+            FadeTransition(
+              opacity: _fadeAnimation,
+              child: _buildTextCard(
+                title: 'Translation',
+                text: _isTranslating ? 'Translating...' : _translatedText,
+                language: _targetLanguage,
+                onPlay: _hasTranslation ? () => _playTranslatedText() : () {},
+                color: const Color(0xFF764ba2),
+              ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
   }
 
