@@ -2,11 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:typed_data';
-import 'dart:io';
 import 'package:record/record.dart';
-import 'package:path_provider/path_provider.dart';
 
-import '../../services/config_service.dart' as config_service;
+import '../../services/config_service.dart';
 import '../../services/google_stt_service.dart';
 import '../../services/permission_service.dart';
 import '../../services/translation_service.dart';
@@ -22,8 +20,7 @@ class OnScreenTranslator extends StatefulWidget {
 class _OnScreenTranslatorState extends State<OnScreenTranslator>
     with TickerProviderStateMixin {
   // Services
-  final config_service.ConfigService _configService =
-      config_service.ConfigService.instance;
+  final ConfigService _configService = ConfigService.instance;
   final GoogleSttService _googleSttService = GoogleSttService.instance;
   final PermissionService _permissionService = PermissionService.instance;
   final TTSService _ttsService = TTSService();
@@ -106,19 +103,10 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       }
 
       // Load supported languages
-      final configLanguages = await _configService.getSupportedLanguages();
-      if (configLanguages.isEmpty) {
+      final languages = await _configService.getSupportedLanguages();
+      if (languages.isEmpty) {
         throw Exception('No supported languages found');
       }
-
-      // Convert to local Language model
-      final languages = configLanguages
-          .map((lang) => Language(
-                code: lang.code,
-                name: lang.name,
-                nativeName: lang.nativeName,
-              ))
-          .toList();
 
       // Initialize Google STT service
       final sttInitialized = await _googleSttService.initialize();
@@ -156,13 +144,6 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
   Future<void> _startRecording() async {
     try {
       if (await _audioRecorder.hasPermission()) {
-        // Generate a proper file path for recording
-        final Directory appDir = await getApplicationDocumentsDirectory();
-        final String filePath =
-            '${appDir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.wav';
-
-        debugPrint('OnScreenTranslator: Recording to: $filePath');
-
         // Start recording
         await _audioRecorder.start(
           const RecordConfig(
@@ -170,7 +151,6 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
             sampleRate: 16000,
             numChannels: 1,
           ),
-          path: filePath,
         );
 
         setState(() {
@@ -295,30 +275,16 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
 
   Future<Uint8List?> _readAudioFile(String path) async {
     try {
+      // For now, we'll implement a simple file reader
+      // In production, you'd use proper file reading
+      // This is a placeholder that needs platform-specific implementation
       debugPrint('OnScreenTranslator: Reading audio file from: $path');
 
-      if (path.isEmpty) {
-        debugPrint('OnScreenTranslator: Audio path is empty');
-        return null;
-      }
+      // TODO: Implement proper audio file reading
+      // For web: use File API
+      // For mobile: use dart:io File
 
-      // Read the audio file using dart:io
-      final File audioFile = File(path);
-
-      if (!await audioFile.exists()) {
-        debugPrint('OnScreenTranslator: Audio file does not exist: $path');
-        return null;
-      }
-
-      final Uint8List audioBytes = await audioFile.readAsBytes();
-      debugPrint(
-          'OnScreenTranslator: Read ${audioBytes.length} bytes from audio file');
-
-      // Clean up the file after reading
-      await audioFile.delete();
-      debugPrint('OnScreenTranslator: Deleted temporary audio file');
-
-      return audioBytes;
+      return null; // Placeholder
     } catch (e) {
       debugPrint('OnScreenTranslator: Error reading audio file: $e');
       return null;

@@ -79,8 +79,10 @@ dependencies:
   wakelock_plus: ^1.2.5
   # Speech to text for voice mode
   speech_to_text: ^7.3.0
+  # Audio recording for on-screen translator
   # Crypto for cache key generation
   crypto: ^3.0.3
+  record: ^6.1.2
 
 dev_dependencies:
   flutter_test:
