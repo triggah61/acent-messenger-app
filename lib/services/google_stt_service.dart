@@ -103,15 +103,17 @@ class GoogleSttService {
     }
   }
 
-  /// Transcribe audio with speaker diarization
+  /// Transcribe audio with speaker diarization and multi-language support
   ///
   /// [audioBytes] - The audio file bytes (WAV, FLAC, or OGG format recommended)
-  /// [languageCode] - The language code (e.g., 'en-US', 'es-ES')
+  /// [languageCode] - The primary language code (e.g., 'en-US', 'es-ES')
+  /// [alternativeLanguages] - Additional language codes to detect (optional)
   /// [minSpeakers] - Minimum number of speakers to detect
   /// [maxSpeakers] - Maximum number of speakers to detect
   Future<DiarizationResult?> transcribeWithDiarization({
     required Uint8List audioBytes,
     required String languageCode,
+    List<String>? alternativeLanguages,
     int minSpeakers = 2,
     int maxSpeakers = 6,
   }) async {
@@ -129,21 +131,30 @@ class GoogleSttService {
       final String audioContent = base64Encode(audioBytes);
 
       // Prepare the request body for Google Speech-to-Text API
-      final Map<String, dynamic> requestBody = {
-        'config': {
-          'encoding': 'LINEAR16', // Adjust based on your audio format
-          'sampleRateHertz': 16000, // Adjust based on your audio
-          'languageCode': languageCode,
-          'enableAutomaticPunctuation': true,
-          'enableWordTimeOffsets': true,
-          'diarizationConfig': {
-            'enableSpeakerDiarization': true,
-            'minSpeakerCount': minSpeakers,
-            'maxSpeakerCount': maxSpeakers,
-          },
-          'model':
-              'latest_long', // Use the latest long model for better accuracy
+      final Map<String, dynamic> config = {
+        'encoding': 'LINEAR16', // Adjust based on your audio format
+        'sampleRateHertz': 16000, // Adjust based on your audio
+        'languageCode': languageCode,
+        'enableAutomaticPunctuation': true,
+        'enableWordTimeOffsets': true,
+        'diarizationConfig': {
+          'enableSpeakerDiarization': true,
+          'minSpeakerCount': minSpeakers,
+          'maxSpeakerCount': maxSpeakers,
         },
+        'model': 'latest_long', // Use the latest long model for better accuracy
+      };
+
+      // Add alternative languages if provided (for multi-language conversations)
+      if (alternativeLanguages != null && alternativeLanguages.isNotEmpty) {
+        config['alternativeLanguageCodes'] = alternativeLanguages;
+        debugPrint('GoogleSttService: Using multi-language detection');
+        debugPrint(
+            'Primary: $languageCode, Alternatives: $alternativeLanguages');
+      }
+
+      final Map<String, dynamic> requestBody = {
+        'config': config,
         'audio': {
           'content': audioContent,
         },
@@ -218,12 +229,23 @@ class GoogleSttService {
         double totalConfidence = 0.0;
         int wordCount = 0;
 
+        debugPrint('GoogleSttService: Processing ${words.length} words');
+
         for (final word in words) {
           final wordMap = word as Map<String, dynamic>;
-          final speakerTag = wordMap['speakerTag'] ?? 0;
+          // Google STT uses 1-based speaker tags, convert to 0-based (1 → 0, 2 → 1, etc.)
+          final googleSpeakerTag = wordMap['speakerTag'] ?? 1;
+          final speakerTag =
+              googleSpeakerTag - 1; // Convert to 0-based indexing
           final wordText = wordMap['word'] ?? '';
           final startTime = _parseTime(wordMap['startTime']);
           final endTime = _parseTime(wordMap['endTime']);
+
+          // Debug log first few words to see speaker assignment
+          if (words.indexOf(word) < 5) {
+            debugPrint(
+                'GoogleSttService: Word "${wordText}" - Google tag: $googleSpeakerTag, Our tag: $speakerTag');
+          }
 
           if (speakerTag != currentSpeaker && currentText.isNotEmpty) {
             // Save the current segment
@@ -269,6 +291,13 @@ class GoogleSttService {
 
       debugPrint(
           'GoogleSttService: Parsed ${segments.length} segments from $uniqueSpeakers speakers');
+
+      // Debug log each segment
+      for (int i = 0; i < segments.length; i++) {
+        final seg = segments[i];
+        debugPrint(
+            'GoogleSttService: Segment $i - Speaker ${seg.speakerTag}: "${seg.text.substring(0, seg.text.length > 50 ? 50 : seg.text.length)}..."');
+      }
 
       return DiarizationResult(
         segments: segments,

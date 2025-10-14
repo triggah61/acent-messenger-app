@@ -9,7 +9,6 @@ import 'package:path_provider/path_provider.dart';
 import '../../services/config_service.dart' as config_service;
 import '../../services/google_stt_service.dart';
 import '../../services/permission_service.dart';
-import '../../services/translation_service.dart';
 import '../../services/tts_service.dart';
 
 class OnScreenTranslator extends StatefulWidget {
@@ -39,7 +38,11 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
 
   // Languages
   List<Language> _supportedLanguages = [];
-  Language? _targetLanguage;
+
+  // Speaker-specific languages (fixed to 2 speakers)
+  Map<int, Language> _speakerLanguages = {};
+  final int _numberOfSpeakers = 2; // Fixed to 2 speakers
+  bool _showSpeakerSetup = true; // Show setup UI before recording
 
   // Recording state
   bool _isRecording = false;
@@ -129,12 +132,19 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       // Initialize TTS service
       await _ttsService.initialize();
 
+      // Initialize default speaker languages
+      final defaultEnglish = languages.firstWhere(
+        (lang) => lang.code == 'en',
+        orElse: () => languages.first,
+      );
+
       setState(() {
         _supportedLanguages = languages;
-        _targetLanguage = languages.firstWhere(
-          (lang) => lang.code == 'en',
-          orElse: () => languages.first,
-        );
+        // Set default languages for speakers
+        _speakerLanguages = {
+          0: defaultEnglish, // Speaker 1 (index 0)
+          1: defaultEnglish, // Speaker 2 (index 1)
+        };
         _isInitialized = true;
       });
 
@@ -231,16 +241,37 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       debugPrint(
           'OnScreenTranslator: Audio file size: ${audioBytes.length} bytes');
 
-      // Get target language code
-      final targetLangCode = _targetLanguage?.code ?? 'en';
-      final languageCode = _getGoogleLanguageCode(targetLangCode);
+      // Collect language codes in speaker order (Speaker 0's language first, then Speaker 1's)
+      final List<String> orderedLanguages = [];
+      for (int i = 0; i < _numberOfSpeakers; i++) {
+        final language = _speakerLanguages[i];
+        if (language != null) {
+          final googleLangCode = _getGoogleLanguageCode(language.code);
+          if (!orderedLanguages.contains(googleLangCode)) {
+            orderedLanguages.add(googleLangCode);
+          }
+        }
+      }
 
-      // Transcribe with speaker diarization
+      final String primaryLanguage =
+          orderedLanguages.isNotEmpty ? orderedLanguages.first : 'en-US';
+      final List<String>? alternativeLanguages =
+          orderedLanguages.length > 1 ? orderedLanguages.sublist(1) : null;
+
+      debugPrint(
+          'OnScreenTranslator: Speaker 0 language: ${_speakerLanguages[0]?.code}');
+      debugPrint(
+          'OnScreenTranslator: Speaker 1 language: ${_speakerLanguages[1]?.code}');
+      debugPrint(
+          'OnScreenTranslator: Using languages: Primary=$primaryLanguage, Alternatives=$alternativeLanguages');
+
+      // Transcribe with speaker diarization and multi-language support
       final result = await _googleSttService.transcribeWithDiarization(
         audioBytes: audioBytes,
-        languageCode: languageCode,
-        minSpeakers: 2,
-        maxSpeakers: 6,
+        languageCode: primaryLanguage,
+        alternativeLanguages: alternativeLanguages,
+        minSpeakers: _numberOfSpeakers,
+        maxSpeakers: _numberOfSpeakers,
       );
 
       if (result == null) {
@@ -250,33 +281,23 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       debugPrint(
           'OnScreenTranslator: Transcription complete: ${result.segments.length} segments, ${result.speakerCount} speakers');
 
-      // Process each segment and translate if needed
+      // Process each segment - Google STT already transcribed in correct language
       for (final segment in result.segments) {
-        String translatedText = segment.text;
-
-        // Translate to target language if needed
-        if (targetLangCode != 'en') {
-          // Detect source language and translate
-          final translationResult = await TranslationService.translateText(
-            sourceLanguage: 'en', // Assume English source
-            targetLanguage: targetLangCode,
-            content: segment.text,
-          );
-
-          if (translationResult != null) {
-            translatedText = translationResult.translatedText;
-          }
-        }
+        // Google STT with multi-language support already provides text in the detected language
+        // No additional translation needed as each speaker speaks in their configured language
 
         // Add message to the list
         setState(() {
           _messages.add(TranscriptMessage(
             originalText: segment.text,
-            translatedText: translatedText,
+            translatedText:
+                segment.text, // Already in correct language from Google STT
             speakerTag: segment.speakerTag,
             timestamp: DateTime.now(),
             startTime: segment.startTime,
             endTime: segment.endTime,
+            detectedLanguage:
+                _speakerLanguages[segment.speakerTag]?.code ?? 'en',
           ));
         });
 
@@ -360,11 +381,10 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
 
   Future<void> _playMessage(TranscriptMessage message) async {
     try {
-      final targetLangCode = _targetLanguage?.code ?? 'en';
-
+      // Use the detected language for TTS playback
       await _ttsService.speak(
         text: message.translatedText,
-        languageCode: targetLangCode,
+        languageCode: message.detectedLanguage,
       );
     } catch (e) {
       debugPrint('OnScreenTranslator: Error playing message: $e');
@@ -415,12 +435,22 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       );
     }
 
+    // Show speaker setup screen if not configured
+    if (_showSpeakerSetup) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0A0E21),
+        appBar: _buildAppBar(),
+        body: _buildSpeakerSetupScreen(),
+      );
+    }
+
+    // Show main translator screen
     return Scaffold(
       backgroundColor: const Color(0xFF0A0E21),
       appBar: _buildAppBar(),
       body: Column(
         children: [
-          _buildLanguageSelector(),
+          _buildSpeakerInfoBar(),
           Expanded(child: _buildMessagesList()),
           _buildRecordingControls(),
         ],
@@ -455,51 +485,239 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     );
   }
 
-  Widget _buildLanguageSelector() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            blurRadius: 10,
-            offset: const Offset(0, 5),
+  Widget _buildSpeakerSetupScreen() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Title
+          const Text(
+            'Speaker Language Setup',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 24,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Configure the language for each speaker in the conversation',
+            style: TextStyle(
+              color: Colors.white54,
+              fontSize: 14,
+            ),
+          ),
+          const SizedBox(height: 32),
+
+          // Number of speakers selector (commented out - fixed to 2 speakers)
+          // _buildNumberOfSpeakersSelector(),
+          // const SizedBox(height: 24),
+
+          // Speaker language selectors (2 speakers only)
+          ...List.generate(_numberOfSpeakers, (index) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: _buildSpeakerLanguageCard(index),
+            );
+          }),
+
+          const SizedBox(height: 32),
+
+          // Start button
+          SizedBox(
+            width: double.infinity,
+            height: 56,
+            child: ElevatedButton(
+              onPressed: _startConversation,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF00D9FF),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.play_arrow, color: Colors.white, size: 28),
+                  SizedBox(width: 8),
+                  Text(
+                    'Start Conversation',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
         ],
       ),
-      margin: const EdgeInsets.all(16),
-      child: Row(
+    );
+  }
+
+  // Number of speakers selector (COMMENTED OUT - Fixed to 2 speakers)
+  /*
+  Widget _buildNumberOfSpeakersSelector() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1D1E33),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+            color: const Color(0xFF00D9FF).withOpacity(0.3), width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.translate, color: Color(0xFF00D9FF), size: 24),
-          const SizedBox(width: 12),
+          const Row(
+            children: [
+              Icon(Icons.people, color: Color(0xFF00D9FF), size: 24),
+              SizedBox(width: 12),
+              Text(
+                'Number of Speakers',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          Row(
+            children: List.generate(5, (index) {
+              final speakerCount = index + 2; // 2-6 speakers
+              final isSelected = _numberOfSpeakers == speakerCount;
+              return Expanded(
+                child: Padding(
+                  padding: EdgeInsets.only(right: index < 4 ? 8 : 0),
+                  child: GestureDetector(
+                    onTap: () {
+                      // Number selection disabled - fixed to 2 speakers
+                    },
+                    child: Container(
+                      height: 50,
+                      decoration: BoxDecoration(
+                        color: isSelected
+                            ? const Color(0xFF00D9FF)
+                            : const Color(0xFF0A0E21),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: isSelected
+                              ? const Color(0xFF00D9FF)
+                              : Colors.white24,
+                          width: 2,
+                        ),
+                      ),
+                      child: Center(
+                        child: Text(
+                          '$speakerCount',
+                          style: TextStyle(
+                            color: isSelected ? Colors.white : Colors.white54,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+          ),
+        ],
+      ),
+    );
+  }
+  */
+
+  Widget _buildSpeakerLanguageCard(int speakerIndex) {
+    final speakerColor = _getSpeakerColor(speakerIndex);
+    final selectedLanguage =
+        _speakerLanguages[speakerIndex] ?? _supportedLanguages.first;
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1D1E33),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: speakerColor.withOpacity(0.5), width: 2),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: speakerColor,
+                child: Text(
+                  'S${speakerIndex + 1}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Text(
+                'Speaker ${speakerIndex + 1}',
+                style: TextStyle(
+                  color: speakerColor,
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
           const Text(
-            'Translate to:',
+            'Select Language:',
             style: TextStyle(
               color: Colors.white70,
-              fontSize: 16,
+              fontSize: 14,
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
+          const SizedBox(height: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0A0E21),
+              borderRadius: BorderRadius.circular(12),
+              border:
+                  Border.all(color: speakerColor.withOpacity(0.3), width: 1),
+            ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<Language>(
-                value: _targetLanguage,
+                value: selectedLanguage,
                 dropdownColor: const Color(0xFF1D1E33),
+                isExpanded: true,
                 style: const TextStyle(color: Colors.white, fontSize: 16),
-                icon:
-                    const Icon(Icons.arrow_drop_down, color: Color(0xFF00D9FF)),
+                icon: Icon(Icons.arrow_drop_down, color: speakerColor),
                 items: _supportedLanguages.map((Language language) {
                   return DropdownMenuItem<Language>(
                     value: language,
-                    child: Text(language.nativeName),
+                    child: Row(
+                      children: [
+                        Text(language.nativeName),
+                        const SizedBox(width: 8),
+                        Text(
+                          '(${language.name})',
+                          style: const TextStyle(
+                              color: Colors.white54, fontSize: 12),
+                        ),
+                      ],
+                    ),
                   );
                 }).toList(),
                 onChanged: (Language? newValue) {
                   if (newValue != null) {
                     setState(() {
-                      _targetLanguage = newValue;
+                      _speakerLanguages[speakerIndex] = newValue;
                     });
                   }
                 },
@@ -509,6 +727,85 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
         ],
       ),
     );
+  }
+
+  Widget _buildSpeakerInfoBar() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1D1E33),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.2),
+            blurRadius: 10,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          ...List.generate(_numberOfSpeakers, (index) {
+            final speakerColor = _getSpeakerColor(index);
+            final language = _speakerLanguages[index];
+            return Expanded(
+              child: Container(
+                margin: EdgeInsets.only(
+                    right: index < _numberOfSpeakers - 1 ? 8 : 0),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                decoration: BoxDecoration(
+                  color: speakerColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                      color: speakerColor.withOpacity(0.3), width: 1),
+                ),
+                child: Column(
+                  children: [
+                    CircleAvatar(
+                      radius: 12,
+                      backgroundColor: speakerColor,
+                      child: Text(
+                        'S${index + 1}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      language?.code.toUpperCase() ?? 'EN',
+                      style: TextStyle(
+                        color: speakerColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.settings, size: 20),
+            color: const Color(0xFF00D9FF),
+            onPressed: () {
+              setState(() {
+                _showSpeakerSetup = true;
+              });
+            },
+            tooltip: 'Change speaker settings',
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _startConversation() {
+    setState(() {
+      _showSpeakerSetup = false;
+    });
   }
 
   Widget _buildMessagesList() {
@@ -614,6 +911,23 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                       color: speakerColor,
                       fontSize: 14,
                       fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: speakerColor.withOpacity(0.2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      message.detectedLanguage.toUpperCase(),
+                      style: TextStyle(
+                        color: speakerColor,
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   const Spacer(),
@@ -791,6 +1105,7 @@ class TranscriptMessage {
   final DateTime timestamp;
   final double startTime;
   final double endTime;
+  final String detectedLanguage;
 
   TranscriptMessage({
     required this.originalText,
@@ -799,6 +1114,7 @@ class TranscriptMessage {
     required this.timestamp,
     required this.startTime,
     required this.endTime,
+    required this.detectedLanguage,
   });
 }
 
