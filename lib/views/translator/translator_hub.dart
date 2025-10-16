@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'on_screen_translator.dart';
 import 'stereo_translator.dart';
+import 'alternating_translator.dart';
 
 class TranslatorHub extends StatelessWidget {
   const TranslatorHub({super.key});
@@ -15,7 +16,7 @@ class TranslatorHub extends StatelessWidget {
         automaticallyImplyLeading: false,
       ),
       body: SafeArea(
-        child: Padding(
+        child: SingleChildScrollView(
           padding: const EdgeInsets.all(20.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -50,7 +51,7 @@ class TranslatorHub extends StatelessWidget {
                 },
               ),
 
-              const SizedBox(height: 24),
+              const SizedBox(height: 20),
 
               // Stereo Translator Card
               _buildTranslatorCard(
@@ -69,6 +70,29 @@ class TranslatorHub extends StatelessWidget {
                   );
                 },
               ),
+
+              const SizedBox(height: 20),
+
+              // Alternating Translator Card
+              _buildTranslatorCard(
+                context,
+                title: 'Alternating Translator',
+                description:
+                    'Alternate between phone and Bluetooth audio routing for seamless conversation flow',
+                icon: Icons.swap_horiz,
+                color: const Color(0xFF4CAF50),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AlternatingTranslator(),
+                    ),
+                  );
+                },
+              ),
+
+              // Add bottom padding for better scrolling experience
+              const SizedBox(height: 40),
             ],
           ),
         ),
@@ -87,7 +111,7 @@ class TranslatorHub extends StatelessWidget {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           color: const Color(0xFF1D1E33),
           borderRadius: BorderRadius.circular(16),
@@ -103,8 +127,8 @@ class TranslatorHub extends StatelessWidget {
         child: Column(
           children: [
             Container(
-              width: 80,
-              height: 80,
+              width: 70,
+              height: 70,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 gradient: LinearGradient(
@@ -126,29 +150,32 @@ class TranslatorHub extends StatelessWidget {
               child: Icon(
                 icon,
                 color: Colors.white,
-                size: 40,
+                size: 35,
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Text(
               title,
               style: TextStyle(
                 color: color,
-                fontSize: 20,
+                fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
               textAlign: TextAlign.center,
             ),
-            const SizedBox(height: 8),
+            const SizedBox(height: 6),
             Text(
               description,
               style: const TextStyle(
                 color: Colors.white70,
-                fontSize: 14,
+                fontSize: 13,
+                height: 1.3,
               ),
               textAlign: TextAlign.center,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
@@ -156,15 +183,15 @@ class TranslatorHub extends StatelessWidget {
                   'Tap to open',
                   style: TextStyle(
                     color: color,
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 6),
                 Icon(
                   Icons.arrow_forward,
                   color: color,
-                  size: 16,
+                  size: 14,
                 ),
               ],
             ),

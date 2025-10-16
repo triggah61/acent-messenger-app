@@ -9,6 +9,8 @@ import 'package:audioplayers/audioplayers.dart';
 import '../../services/config_service.dart' as config_service;
 import '../../services/permission_service.dart';
 import '../../services/bluetooth_service.dart';
+import '../../services/audio_channel_service.dart';
+import '../../services/channel_audio_player.dart';
 
 class StereoTranslator extends StatefulWidget {
   const StereoTranslator({super.key});
@@ -25,8 +27,9 @@ class _StereoTranslatorState extends State<StereoTranslator>
   final PermissionService _permissionService = PermissionService.instance;
   final BluetoothService _bluetoothService = BluetoothService();
   final AudioRecorder _audioRecorder = AudioRecorder();
-  final AudioPlayer _leftAudioPlayer = AudioPlayer();
-  final AudioPlayer _rightAudioPlayer = AudioPlayer();
+  final AudioChannelService _audioChannelService = AudioChannelService();
+  final ChannelAudioPlayer _leftChannelPlayer = ChannelAudioPlayer();
+  final ChannelAudioPlayer _rightChannelPlayer = ChannelAudioPlayer();
 
   // Animation controllers
   late AnimationController _pulseController;
@@ -285,21 +288,54 @@ class _StereoTranslatorState extends State<StereoTranslator>
 
   Future<void> _processStereoAudio(String stereoAudioPath) async {
     try {
-      debugPrint('StereoTranslator: Processing stereo audio...');
+      debugPrint('StereoTranslator: Processing stereo audio: $stereoAudioPath');
 
-      // TODO: Implement actual stereo channel separation
-      // For now, using the same file for both channels
-      setState(() {
-        _leftAudioPath = stereoAudioPath;
-        _rightAudioPath = stereoAudioPath;
-      });
+      // Show processing indicator
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Separating stereo channels...'),
+            backgroundColor: Colors.blue,
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Recording saved! You can now play back each channel.'),
-          backgroundColor: Colors.green,
-        ),
-      );
+      // Separate stereo channels using AudioChannelService
+      final channelFiles =
+          await _audioChannelService.separateStereoChannels(stereoAudioPath);
+
+      if (channelFiles != null) {
+        setState(() {
+          _leftAudioPath = channelFiles.leftChannelPath;
+          _rightAudioPath = channelFiles.rightChannelPath;
+        });
+
+        debugPrint('StereoTranslator: Channels separated successfully');
+        debugPrint('Left: $_leftAudioPath');
+        debugPrint('Right: $_rightAudioPath');
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                  '✓ Channels separated! You can now play each earbud separately.'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+        }
+
+        // Clean up the original stereo file
+        try {
+          await File(stereoAudioPath).delete();
+          debugPrint('StereoTranslator: Cleaned up stereo file');
+        } catch (e) {
+          debugPrint('StereoTranslator: Failed to delete stereo file: $e');
+        }
+      } else {
+        _showError('Failed to separate audio channels');
+      }
     } catch (e) {
       debugPrint('StereoTranslator: Error processing stereo audio: $e');
       _showError('Failed to process audio: $e');
@@ -307,18 +343,35 @@ class _StereoTranslatorState extends State<StereoTranslator>
   }
 
   Future<void> _playLeftChannel() async {
-    if (_leftAudioPath == null) return;
+    if (_leftAudioPath == null) {
+      _showError('No left channel audio recorded');
+      return;
+    }
 
     try {
       if (_isPlayingLeft) {
-        await _leftAudioPlayer.stop();
+        await _leftChannelPlayer.stop();
         setState(() {
           _isPlayingLeft = false;
         });
+        debugPrint('StereoTranslator: Stopped left channel playback');
       } else {
-        await _leftAudioPlayer.play(DeviceFileSource(_leftAudioPath!));
+        // Play on LEFT channel only (balance = -1.0)
+        await _leftChannelPlayer.playOnChannel(
+            _leftAudioPath!, AudioChannel.left);
         setState(() {
           _isPlayingLeft = true;
+        });
+        debugPrint(
+            'StereoTranslator: Playing left channel on LEFT earbud only');
+
+        // Listen for completion
+        _leftChannelPlayer.onPlayerComplete.listen((_) {
+          if (mounted) {
+            setState(() {
+              _isPlayingLeft = false;
+            });
+          }
         });
       }
     } catch (e) {
@@ -328,18 +381,35 @@ class _StereoTranslatorState extends State<StereoTranslator>
   }
 
   Future<void> _playRightChannel() async {
-    if (_rightAudioPath == null) return;
+    if (_rightAudioPath == null) {
+      _showError('No right channel audio recorded');
+      return;
+    }
 
     try {
       if (_isPlayingRight) {
-        await _rightAudioPlayer.stop();
+        await _rightChannelPlayer.stop();
         setState(() {
           _isPlayingRight = false;
         });
+        debugPrint('StereoTranslator: Stopped right channel playback');
       } else {
-        await _rightAudioPlayer.play(DeviceFileSource(_rightAudioPath!));
+        // Play on RIGHT channel only (balance = 1.0)
+        await _rightChannelPlayer.playOnChannel(
+            _rightAudioPath!, AudioChannel.right);
         setState(() {
           _isPlayingRight = true;
+        });
+        debugPrint(
+            'StereoTranslator: Playing right channel on RIGHT earbud only');
+
+        // Listen for completion
+        _rightChannelPlayer.onPlayerComplete.listen((_) {
+          if (mounted) {
+            setState(() {
+              _isPlayingRight = false;
+            });
+          }
         });
       }
     } catch (e) {
@@ -413,8 +483,8 @@ class _StereoTranslatorState extends State<StereoTranslator>
     _pulseController.dispose();
     _waveController.dispose();
     _audioRecorder.dispose();
-    _leftAudioPlayer.dispose();
-    _rightAudioPlayer.dispose();
+    _leftChannelPlayer.dispose();
+    _rightChannelPlayer.dispose();
     super.dispose();
   }
 
