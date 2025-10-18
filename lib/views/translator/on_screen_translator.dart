@@ -1,13 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
-import 'dart:typed_data';
 import 'dart:io';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../services/config_service.dart' as config_service;
-import '../../services/google_stt_service.dart';
+import '../../services/sherpa_whisper_service.dart';
 import '../../services/permission_service.dart';
 import '../../services/tts_service.dart';
 
@@ -23,7 +22,7 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
   // Services
   final config_service.ConfigService _configService =
       config_service.ConfigService.instance;
-  final GoogleSttService _googleSttService = GoogleSttService.instance;
+  final SherpaWhisperService _sherpaWhisperService = SherpaWhisperService();
   final PermissionService _permissionService = PermissionService.instance;
   final TTSService _ttsService = TTSService();
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -49,11 +48,21 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
   bool _isProcessing = false;
   bool _isInitialized = false;
 
-  // Diarization results
+  // Enhanced diarization results with speaker information
   List<TranscriptMessage> _messages = [];
+
+  // Real-time transcription results
+  String _transcribedText = '';
+  double _confidence = 0.0;
+  String _detectedLanguage = 'en';
+  int _currentSpeakerId = 0;
 
   // Scroll controller for messages
   late ScrollController _scrollController;
+
+  // Stream subscriptions for cleanup
+  StreamSubscription<SherpaWhisperResult>? _transcriptionSubscription;
+  StreamSubscription<List<SpeakerSegment>>? _diarizationSubscription;
 
   // Speaker colors for UI
   final List<Color> _speakerColors = [
@@ -64,6 +73,10 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     const Color(0xFFD50000), // Red
     const Color(0xFF6A1B9A), // Deep Purple
   ];
+
+  // Speaker tracking
+  final Map<int, String> _speakerNames = {};
+  final Map<int, double> _speakerConfidences = {};
 
   @override
   void initState() {
@@ -123,10 +136,10 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
               ))
           .toList();
 
-      // Initialize Google STT service
-      final sttInitialized = await _googleSttService.initialize();
-      if (!sttInitialized) {
-        throw Exception('Failed to initialize Google Speech-to-Text');
+      // Initialize Sherpa-ONNX Whisper service with speaker diarization
+      final sherpaInitialized = await _sherpaWhisperService.initialize();
+      if (!sherpaInitialized) {
+        throw Exception('Failed to initialize Sherpa-ONNX Whisper service');
       }
 
       // Initialize TTS service
@@ -148,7 +161,12 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
         _isInitialized = true;
       });
 
-      debugPrint('OnScreenTranslator: Services initialized successfully');
+      // Initialize speaker names
+      _speakerNames[0] = 'Speaker 1';
+      _speakerNames[1] = 'Speaker 2';
+
+      debugPrint(
+          'OnScreenTranslator: Services initialized successfully with speaker diarization');
     } catch (e) {
       debugPrint('OnScreenTranslator: Initialization error: $e');
       _showError('Failed to initialize translator: $e');
@@ -165,23 +183,58 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
 
   Future<void> _startRecording() async {
     try {
+      if (_sherpaWhisperService.isRecovering) {
+        _showError('Service is recovering from a crash. Please wait a moment.');
+        return;
+      }
+
       if (await _audioRecorder.hasPermission()) {
-        // Generate a proper file path for recording
-        final Directory appDir = await getApplicationDocumentsDirectory();
-        final String filePath =
-            '${appDir.path}/recording_${DateTime.now().millisecondsSinceEpoch}.wav';
+        debugPrint(
+            'OnScreenTranslator: Starting transcription with speaker diarization');
 
-        debugPrint('OnScreenTranslator: Recording to: $filePath');
+        // Start Sherpa-ONNX real-time transcription with speaker diarization
+        await _sherpaWhisperService.startRealtimeTranscription();
 
-        // Start recording
-        await _audioRecorder.start(
-          const RecordConfig(
-            encoder: AudioEncoder.wav,
-            sampleRate: 16000,
-            numChannels: 1,
-          ),
-          path: filePath,
-        );
+        // Listen to transcription results
+        _transcriptionSubscription =
+            _sherpaWhisperService.transcriptionStream.listen((result) {
+          setState(() {
+            _transcribedText = result.text;
+            _confidence = result.confidence;
+            _detectedLanguage = result.language;
+            _currentSpeakerId = result.speakerId;
+          });
+
+          // Add message to list if we have meaningful text
+          if (result.text.trim().isNotEmpty && result.text.length > 2) {
+            _addTranscriptMessage(result);
+          }
+        });
+
+        // Listen to speaker diarization results
+        _diarizationSubscription =
+            _sherpaWhisperService.diarizationStream.listen((segments) {
+          debugPrint(
+              'OnScreenTranslator: Received ${segments.length} speaker segments');
+
+          // Update speaker confidences
+          for (final segment in segments) {
+            _speakerConfidences[segment.speakerId] = segment.confidence;
+          }
+
+          // Update speaker names if needed
+          for (final segment in segments) {
+            if (!_speakerNames.containsKey(segment.speakerId)) {
+              _speakerNames[segment.speakerId] =
+                  'Speaker ${segment.speakerId + 1}';
+            }
+          }
+
+          setState(() {});
+        });
+
+        // Start audio recording for real-time processing
+        await _startAudioRecording();
 
         setState(() {
           _isRecording = true;
@@ -190,7 +243,8 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
         _pulseController.repeat(reverse: true);
         _waveController.repeat();
 
-        debugPrint('OnScreenTranslator: Recording started');
+        debugPrint(
+            'OnScreenTranslator: Transcription with speaker diarization started');
       } else {
         _showError('Microphone permission denied');
       }
@@ -200,183 +254,142 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     }
   }
 
+  /// Add transcript message with speaker information
+  void _addTranscriptMessage(SherpaWhisperResult result) {
+    final message = TranscriptMessage(
+      originalText: result.text,
+      translatedText:
+          result.text, // For now, no translation - just transcription
+      speakerTag: result.speakerId,
+      timestamp: DateTime.now(),
+      startTime: result.startTime.toDouble(),
+      endTime: result.endTime.toDouble(),
+      detectedLanguage: result.language,
+    );
+
+    setState(() {
+      _messages.insert(0, message); // Add to top of list
+
+      // Limit messages to prevent memory issues
+      if (_messages.length > 100) {
+        _messages = _messages.take(100).toList();
+      }
+    });
+
+    // Auto-scroll to top
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          0.0,
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeOut,
+        );
+      }
+    });
+  }
+
+  /// Start audio recording for real-time processing
+  Future<void> _startAudioRecording() async {
+    try {
+      final Directory appDir = await getApplicationDocumentsDirectory();
+      final String filePath =
+          '${appDir.path}/realtime_recording_${DateTime.now().millisecondsSinceEpoch}.wav';
+
+      debugPrint('OnScreenTranslator: Starting audio recording: $filePath');
+
+      // Start recording with streaming
+      await _audioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          numChannels: 1,
+        ),
+        path: filePath,
+      );
+
+      // Start processing audio chunks in real-time
+      _processAudioChunks(filePath);
+    } catch (e) {
+      debugPrint('OnScreenTranslator: Error starting audio recording: $e');
+      rethrow;
+    }
+  }
+
+  /// Process audio chunks in real-time
+  void _processAudioChunks(String audioPath) {
+    debugPrint(
+        'OnScreenTranslator: Starting audio chunk processing for: $audioPath');
+
+    Timer.periodic(const Duration(seconds: 2), (timer) async {
+      if (!_isRecording) {
+        debugPrint('OnScreenTranslator: Recording stopped, canceling timer');
+        timer.cancel();
+        return;
+      }
+
+      try {
+        // Read current audio file
+        final file = File(audioPath);
+        if (await file.exists()) {
+          final fileSize = await file.length();
+          debugPrint('OnScreenTranslator: Audio file size: $fileSize bytes');
+
+          if (fileSize > 1024) {
+            final audioBytes = await file.readAsBytes();
+            debugPrint(
+                'OnScreenTranslator: Processing audio chunk: ${audioBytes.length} bytes');
+
+            // Process chunk with Sherpa-ONNX (includes transcription and diarization)
+            await _sherpaWhisperService.processAudioChunk(audioBytes);
+          } else {
+            debugPrint(
+                'OnScreenTranslator: Audio file too small ($fileSize bytes), skipping');
+          }
+        } else {
+          debugPrint(
+              'OnScreenTranslator: Audio file does not exist: $audioPath');
+        }
+      } catch (e) {
+        debugPrint('OnScreenTranslator: Error processing audio chunk: $e');
+      }
+    });
+  }
+
   Future<void> _stopRecording() async {
     try {
-      // Stop recording and get the audio path
+      debugPrint(
+          'OnScreenTranslator: Stopping transcription with speaker diarization');
+
+      // Stop audio recording first
       final String? audioPath = await _audioRecorder.stop();
+      debugPrint(
+          'OnScreenTranslator: Audio recording stopped, path: $audioPath');
+
+      // Stop Sherpa-ONNX real-time transcription
+      await _sherpaWhisperService.stopRealtimeTranscription();
+
+      // Cancel stream subscriptions
+      await _transcriptionSubscription?.cancel();
+      await _diarizationSubscription?.cancel();
+      _transcriptionSubscription = null;
+      _diarizationSubscription = null;
 
       setState(() {
         _isRecording = false;
+        _transcribedText = '';
+        _currentSpeakerId = 0;
       });
 
       _pulseController.stop();
       _pulseController.reset();
       _waveController.stop();
 
-      if (audioPath != null) {
-        debugPrint(
-            'OnScreenTranslator: Recording stopped, processing audio...');
-        await _processAudio(audioPath);
-      } else {
-        _showError('No audio recorded');
-      }
+      debugPrint(
+          'OnScreenTranslator: Transcription with speaker diarization stopped');
     } catch (e) {
       debugPrint('OnScreenTranslator: Error stopping recording: $e');
       _showError('Failed to stop recording: $e');
     }
-  }
-
-  Future<void> _processAudio(String audioPath) async {
-    setState(() {
-      _isProcessing = true;
-    });
-
-    try {
-      // Read the audio file
-      final audioBytes = await _readAudioFile(audioPath);
-      if (audioBytes == null) {
-        throw Exception('Failed to read audio file');
-      }
-
-      debugPrint(
-          'OnScreenTranslator: Audio file size: ${audioBytes.length} bytes');
-
-      // Collect language codes in speaker order (Speaker 0's language first, then Speaker 1's)
-      final List<String> orderedLanguages = [];
-      for (int i = 0; i < _numberOfSpeakers; i++) {
-        final language = _speakerLanguages[i];
-        if (language != null) {
-          final googleLangCode = _getGoogleLanguageCode(language.code);
-          if (!orderedLanguages.contains(googleLangCode)) {
-            orderedLanguages.add(googleLangCode);
-          }
-        }
-      }
-
-      final String primaryLanguage =
-          orderedLanguages.isNotEmpty ? orderedLanguages.first : 'en-US';
-      final List<String>? alternativeLanguages =
-          orderedLanguages.length > 1 ? orderedLanguages.sublist(1) : null;
-
-      debugPrint(
-          'OnScreenTranslator: Speaker 0 language: ${_speakerLanguages[0]?.code}');
-      debugPrint(
-          'OnScreenTranslator: Speaker 1 language: ${_speakerLanguages[1]?.code}');
-      debugPrint(
-          'OnScreenTranslator: Using languages: Primary=$primaryLanguage, Alternatives=$alternativeLanguages');
-
-      // Transcribe with speaker diarization and multi-language support
-      final result = await _googleSttService.transcribeWithDiarization(
-        audioBytes: audioBytes,
-        languageCode: primaryLanguage,
-        alternativeLanguages: alternativeLanguages,
-        minSpeakers: _numberOfSpeakers,
-        maxSpeakers: _numberOfSpeakers,
-      );
-
-      if (result == null) {
-        throw Exception('Failed to transcribe audio');
-      }
-
-      debugPrint(
-          'OnScreenTranslator: Transcription complete: ${result.segments.length} segments, ${result.speakerCount} speakers');
-
-      // Process each segment - Google STT already transcribed in correct language
-      for (final segment in result.segments) {
-        // Google STT with multi-language support already provides text in the detected language
-        // No additional translation needed as each speaker speaks in their configured language
-
-        // Add message to the list
-        setState(() {
-          _messages.add(TranscriptMessage(
-            originalText: segment.text,
-            translatedText:
-                segment.text, // Already in correct language from Google STT
-            speakerTag: segment.speakerTag,
-            timestamp: DateTime.now(),
-            startTime: segment.startTime,
-            endTime: segment.endTime,
-            detectedLanguage:
-                _speakerLanguages[segment.speakerTag]?.code ?? 'en',
-          ));
-        });
-
-        // Auto-scroll to bottom
-        _scrollToBottom();
-      }
-    } catch (e) {
-      debugPrint('OnScreenTranslator: Error processing audio: $e');
-      _showError('Failed to process audio: $e');
-    } finally {
-      setState(() {
-        _isProcessing = false;
-      });
-    }
-  }
-
-  Future<Uint8List?> _readAudioFile(String path) async {
-    try {
-      debugPrint('OnScreenTranslator: Reading audio file from: $path');
-
-      if (path.isEmpty) {
-        debugPrint('OnScreenTranslator: Audio path is empty');
-        return null;
-      }
-
-      // Read the audio file using dart:io
-      final File audioFile = File(path);
-
-      if (!await audioFile.exists()) {
-        debugPrint('OnScreenTranslator: Audio file does not exist: $path');
-        return null;
-      }
-
-      final Uint8List audioBytes = await audioFile.readAsBytes();
-      debugPrint(
-          'OnScreenTranslator: Read ${audioBytes.length} bytes from audio file');
-
-      // Clean up the file after reading
-      await audioFile.delete();
-      debugPrint('OnScreenTranslator: Deleted temporary audio file');
-
-      return audioBytes;
-    } catch (e) {
-      debugPrint('OnScreenTranslator: Error reading audio file: $e');
-      return null;
-    }
-  }
-
-  String _getGoogleLanguageCode(String code) {
-    // Map common language codes to Google STT language codes
-    const Map<String, String> languageMap = {
-      'en': 'en-US',
-      'es': 'es-ES',
-      'fr': 'fr-FR',
-      'de': 'de-DE',
-      'it': 'it-IT',
-      'pt': 'pt-PT',
-      'ru': 'ru-RU',
-      'zh': 'zh-CN',
-      'ja': 'ja-JP',
-      'ko': 'ko-KR',
-      'ar': 'ar-SA',
-      'hi': 'hi-IN',
-      'ms': 'ms-MY',
-    };
-
-    return languageMap[code] ?? 'en-US';
-  }
-
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeOut,
-        );
-      }
-    });
   }
 
   Future<void> _playMessage(TranscriptMessage message) async {
@@ -412,13 +425,27 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     return _speakerColors[speakerTag % _speakerColors.length];
   }
 
+  String _getSpeakerName(int speakerId) {
+    return _speakerNames[speakerId] ?? 'Speaker ${speakerId + 1}';
+  }
+
+  double _getSpeakerConfidence(int speakerId) {
+    return _speakerConfidences[speakerId] ?? 0.0;
+  }
+
   @override
   void dispose() {
+    // Stop any ongoing recording and transcription before disposing
+    if (_isRecording) {
+      _stopRecording();
+    }
+
     _pulseController.dispose();
     _waveController.dispose();
     _scrollController.dispose();
     _audioRecorder.dispose();
     _ttsService.dispose();
+    _sherpaWhisperService.cleanup();
     super.dispose();
   }
 
@@ -451,6 +478,7 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       body: Column(
         children: [
           _buildSpeakerInfoBar(),
+          _buildRealtimeTranscriptionDisplay(),
           Expanded(child: _buildMessagesList()),
           _buildRecordingControls(),
         ],
@@ -508,11 +536,63 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
               fontSize: 14,
             ),
           ),
-          const SizedBox(height: 32),
+          const SizedBox(height: 16),
 
-          // Number of speakers selector (commented out - fixed to 2 speakers)
-          // _buildNumberOfSpeakersSelector(),
-          // const SizedBox(height: 24),
+          // Speaker diarization info
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1D1E33),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: const Color(0xFF00D9FF).withOpacity(0.3),
+                width: 1,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.people,
+                  color: Color(0xFF00D9FF),
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Speaker Diarization',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Automatically identifies and separates 2 speakers',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  _sherpaWhisperService.isDiarizationAvailable
+                      ? Icons.check_circle
+                      : Icons.warning,
+                  color: _sherpaWhisperService.isDiarizationAvailable
+                      ? Colors.green
+                      : Colors.orange,
+                  size: 20,
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 24),
 
           // Speaker language selectors (2 speakers only)
           ...List.generate(_numberOfSpeakers, (index) {
@@ -557,82 +637,6 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       ),
     );
   }
-
-  // Number of speakers selector (COMMENTED OUT - Fixed to 2 speakers)
-  /*
-  Widget _buildNumberOfSpeakersSelector() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-            color: const Color(0xFF00D9FF).withOpacity(0.3), width: 1),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Row(
-            children: [
-              Icon(Icons.people, color: Color(0xFF00D9FF), size: 24),
-              SizedBox(width: 12),
-              Text(
-                'Number of Speakers',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: List.generate(5, (index) {
-              final speakerCount = index + 2; // 2-6 speakers
-              final isSelected = _numberOfSpeakers == speakerCount;
-              return Expanded(
-                child: Padding(
-                  padding: EdgeInsets.only(right: index < 4 ? 8 : 0),
-                  child: GestureDetector(
-                    onTap: () {
-                      // Number selection disabled - fixed to 2 speakers
-                    },
-                    child: Container(
-                      height: 50,
-                      decoration: BoxDecoration(
-                        color: isSelected
-                            ? const Color(0xFF00D9FF)
-                            : const Color(0xFF0A0E21),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: isSelected
-                              ? const Color(0xFF00D9FF)
-                              : Colors.white24,
-                          width: 2,
-                        ),
-                      ),
-                      child: Center(
-                        child: Text(
-                          '$speakerCount',
-                          style: TextStyle(
-                            color: isSelected ? Colors.white : Colors.white54,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }),
-          ),
-        ],
-      ),
-    );
-  }
-  */
 
   Widget _buildSpeakerLanguageCard(int speakerIndex) {
     final speakerColor = _getSpeakerColor(speakerIndex);
@@ -729,6 +733,105 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     );
   }
 
+  Widget _buildRealtimeTranscriptionDisplay() {
+    if (!_isRecording || _transcribedText.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final speakerColor = _getSpeakerColor(_currentSpeakerId);
+    final speakerName = _getSpeakerName(_currentSpeakerId);
+    final speakerConfidence = _getSpeakerConfidence(_currentSpeakerId);
+
+    return Container(
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1D1E33),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: speakerColor.withOpacity(0.3),
+          width: 2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 12,
+                backgroundColor: speakerColor,
+                child: Text(
+                  'S${_currentSpeakerId + 1}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                speakerName,
+                style: TextStyle(
+                  color: speakerColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Icon(
+                Icons.mic,
+                color: speakerColor,
+                size: 16,
+              ),
+              const Spacer(),
+              Text(
+                '${(_confidence * 100).toStringAsFixed(0)}%',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _transcribedText,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 16,
+              height: 1.4,
+            ),
+          ),
+          if (_detectedLanguage.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Text(
+                  'Language: $_detectedLanguage',
+                  style: TextStyle(
+                    color: Colors.white70,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Text(
+                  'Speaker Confidence: ${(speakerConfidence * 100).toStringAsFixed(0)}%',
+                  style: TextStyle(
+                    color: speakerColor,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildSpeakerInfoBar() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -747,16 +850,24 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
           ...List.generate(_numberOfSpeakers, (index) {
             final speakerColor = _getSpeakerColor(index);
             final language = _speakerLanguages[index];
+            final confidence = _getSpeakerConfidence(index);
+            final isActive = _currentSpeakerId == index && _isRecording;
+
             return Expanded(
               child: Container(
                 margin: EdgeInsets.only(
                     right: index < _numberOfSpeakers - 1 ? 8 : 0),
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                 decoration: BoxDecoration(
-                  color: speakerColor.withOpacity(0.1),
+                  color: isActive
+                      ? speakerColor.withOpacity(0.2)
+                      : speakerColor.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                      color: speakerColor.withOpacity(0.3), width: 1),
+                      color: isActive
+                          ? speakerColor
+                          : speakerColor.withOpacity(0.3),
+                      width: isActive ? 2 : 1),
                 ),
                 child: Column(
                   children: [
@@ -781,6 +892,16 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                         fontWeight: FontWeight.bold,
                       ),
                     ),
+                    if (confidence > 0) ...[
+                      const SizedBox(height: 2),
+                      Text(
+                        '${(confidence * 100).toStringAsFixed(0)}%',
+                        style: TextStyle(
+                          color: speakerColor,
+                          fontSize: 8,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -836,6 +957,56 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                 fontSize: 14,
               ),
             ),
+            const SizedBox(height: 16),
+            if (_sherpaWhisperService.isRecovering)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.refresh, color: Colors.orange, size: 16),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Recovering from crash...',
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else if (_sherpaWhisperService.isDiarizationAvailable)
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.green.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.green.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.check_circle,
+                        color: Colors.green, size: 16),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Speaker Diarization Active',
+                      style: TextStyle(
+                        color: Colors.green,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
       );
@@ -865,6 +1036,8 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
 
   Widget _buildMessageBubble(TranscriptMessage message) {
     final speakerColor = _getSpeakerColor(message.speakerTag);
+    final speakerName = _getSpeakerName(message.speakerTag);
+    final speakerConfidence = _getSpeakerConfidence(message.speakerTag);
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -880,7 +1053,7 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Speaker header
+            // Speaker header with enhanced information
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               decoration: BoxDecoration(
@@ -906,7 +1079,7 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    'Speaker ${message.speakerTag + 1}',
+                    speakerName,
                     style: TextStyle(
                       color: speakerColor,
                       fontSize: 14,
@@ -930,6 +1103,25 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                       ),
                     ),
                   ),
+                  if (speakerConfidence > 0) ...[
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: speakerColor.withOpacity(0.2),
+                        borderRadius: BorderRadius.circular(6),
+                      ),
+                      child: Text(
+                        '${(speakerConfidence * 100).toStringAsFixed(0)}%',
+                        style: TextStyle(
+                          color: speakerColor,
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                  ],
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.volume_up, size: 20),
@@ -968,6 +1160,33 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                       fontSize: 16,
                       height: 1.4,
                     ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.access_time,
+                        size: 12,
+                        color: Colors.white54,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${message.timestamp.hour.toString().padLeft(2, '0')}:${message.timestamp.minute.toString().padLeft(2, '0')}',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 11,
+                        ),
+                      ),
+                      const Spacer(),
+                      if (message.startTime > 0 && message.endTime > 0)
+                        Text(
+                          '${message.startTime.toStringAsFixed(1)}s - ${message.endTime.toStringAsFixed(1)}s',
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 11,
+                          ),
+                        ),
+                    ],
                   ),
                 ],
               ),
@@ -1026,18 +1245,40 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
                 },
               ),
               const SizedBox(height: 16),
-              Text(
-                _isRecording ? 'Recording...' : 'Processing...',
-                style: const TextStyle(
-                  color: Color(0xFF00D9FF),
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  if (_currentSpeakerId >= 0 && _isRecording) ...[
+                    CircleAvatar(
+                      radius: 8,
+                      backgroundColor: _getSpeakerColor(_currentSpeakerId),
+                      child: Text(
+                        'S${_currentSpeakerId + 1}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 8,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                  Text(
+                    _isRecording ? 'Recording...' : 'Processing...',
+                    style: const TextStyle(
+                      color: Color(0xFF00D9FF),
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
               ),
               const SizedBox(height: 16),
             ],
             GestureDetector(
-              onTap: _isProcessing ? null : _toggleRecording,
+              onTap: (_isProcessing || _sherpaWhisperService.isRecovering)
+                  ? null
+                  : _toggleRecording,
               child: AnimatedBuilder(
                 animation: _pulseAnimation,
                 builder: (context, child) {
@@ -1084,12 +1325,42 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
             ),
             const SizedBox(height: 12),
             Text(
-              _isRecording ? 'Tap to stop recording' : 'Tap to start recording',
-              style: const TextStyle(
-                color: Colors.white54,
+              _sherpaWhisperService.isRecovering
+                  ? 'Service is recovering...'
+                  : (_isRecording
+                      ? 'Tap to stop recording'
+                      : 'Tap to start recording'),
+              style: TextStyle(
+                color: _sherpaWhisperService.isRecovering
+                    ? Colors.orange
+                    : Colors.white54,
                 fontSize: 14,
+                fontWeight: _sherpaWhisperService.isRecovering
+                    ? FontWeight.bold
+                    : FontWeight.normal,
               ),
             ),
+            if (_sherpaWhisperService.isRecovering) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Crash count: ${_sherpaWhisperService.crashCount}',
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ] else if (_sherpaWhisperService.isDiarizationAvailable) ...[
+              const SizedBox(height: 8),
+              Text(
+                'Speaker diarization active',
+                style: TextStyle(
+                  color: Colors.green,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -1097,7 +1368,7 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
   }
 }
 
-/// Model for a transcript message with speaker information
+/// Enhanced transcript message with speaker information
 class TranscriptMessage {
   final String originalText;
   final String translatedText;

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'on_screen_translator.dart';
 import 'stereo_translator.dart';
 import 'alternating_translator.dart';
+import 'native_stt_translator.dart';
 
 class TranslatorHub extends StatelessWidget {
   const TranslatorHub({super.key});
@@ -86,6 +87,26 @@ class TranslatorHub extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (context) => const AlternatingTranslator(),
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 20),
+
+              // Native STT Translator Card
+              _buildTranslatorCard(
+                context,
+                title: 'Native STT Translation',
+                description:
+                    'Record 2 speakers, auto-separate their voices, and play back each speaker individually',
+                icon: Icons.speaker_notes,
+                color: const Color(0xFFFF9800),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const NativeSTTTranslator(),
                     ),
                   );
                 },

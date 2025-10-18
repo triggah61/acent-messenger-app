@@ -83,6 +83,11 @@ dependencies:
   # Crypto for cache key generation
   crypto: ^3.0.3
   record: ^6.1.2
+  # Whisper integration dependencies
+  path_provider: ^2.1.3
+  web_socket_channel: ^2.4.0
+  # whisper_ggml: ^1.7.0 # Removed due to native crashes
+  sherpa_onnx: ^1.10.7 # Most reliable in-device Whisper solution
 
 dev_dependencies:
   flutter_test:
@@ -117,6 +122,8 @@ flutter:
     - assets/images/
     - assets/sounds/
     - assets/icons/crypto/
+    - assets/models/
+    - assets/models/sherpa_onnx/ # Added for Sherpa-ONNX Whisper models
     - .env
 
   # An image asset can refer to one or more resolution-variant files.

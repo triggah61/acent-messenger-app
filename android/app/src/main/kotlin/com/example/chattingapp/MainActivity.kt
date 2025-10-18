@@ -7,9 +7,11 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private val BLUETOOTH_CHANNEL = "bluetooth_audio_service"
     private val AUDIO_PROFILE_CHANNEL = "audio_profile_service"
+    private val WHISPER_CHANNEL = "whisper_service"
     
     private lateinit var bluetoothService: BluetoothAudioService
     private lateinit var audioProfileService: AudioProfileService
+    private lateinit var whisperService: WhisperService
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -54,10 +56,39 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+
+        // Initialize Whisper service
+        whisperService = WhisperService(this)
+        
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, WHISPER_CHANNEL).setMethodCallHandler { call, result ->
+            when (call.method) {
+                "initialize" -> {
+                    whisperService.initialize(result)
+                }
+                "transcribe" -> {
+                    val arguments = call.arguments as Map<String, Any>
+                    whisperService.transcribe(result, arguments)
+                }
+                "startRealtimeTranscription" -> {
+                    whisperService.startRealtimeTranscription(result)
+                }
+                "stopRealtimeTranscription" -> {
+                    whisperService.stopRealtimeTranscription(result)
+                }
+                "processAudioChunk" -> {
+                    val arguments = call.arguments as Map<String, Any>
+                    whisperService.processAudioChunk(result, arguments)
+                }
+                else -> {
+                    result.notImplemented()
+                }
+            }
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         audioProfileService.cleanup()
+        whisperService.cleanup()
     }
 }
