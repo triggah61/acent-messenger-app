@@ -102,6 +102,8 @@ class TranslationService {
       'ko': 'Korean',
       'ar': 'Arabic',
       'hi': 'Hindi',
+      'bn': 'Bengali',
+      'ur': 'Urdu',
       'ms': 'Malay',
     };
 

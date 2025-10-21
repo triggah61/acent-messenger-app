@@ -10,6 +10,7 @@ import 'package:audioplayers/audioplayers.dart';
 import '../../services/config_service.dart';
 import '../../services/permission_service.dart';
 import '../../services/google_stt_service.dart';
+import '../../services/translation_service.dart';
 
 /// Google STT Translation - Records 2 speakers, performs on-device diarization,
 /// and separates audio into individual speaker files for playback
@@ -564,9 +565,96 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           'GoogleSTTTranslator: Total transcriptions: ${_transcriptions.length}');
       debugPrint(
           'GoogleSTTTranslator: Transcription keys: ${_transcriptions.keys.toList()}');
+
+      // Start translation after transcription is complete
+      await _translateTranscriptions();
     } catch (e) {
       debugPrint('GoogleSTTTranslator: Transcription error: $e');
       throw Exception('Failed to transcribe audio: $e');
+    }
+  }
+
+  /// Translate transcriptions between speakers
+  Future<void> _translateTranscriptions() async {
+    try {
+      debugPrint('GoogleSTTTranslator: Starting translation process...');
+
+      // Get speaker languages
+      final speaker1Language = _speakerLanguages[0];
+      final speaker2Language = _speakerLanguages[1];
+
+      if (speaker1Language == null || speaker2Language == null) {
+        debugPrint('GoogleSTTTranslator: Speaker languages not configured');
+        return;
+      }
+
+      final speaker1LangCode = speaker1Language.code;
+      final speaker2LangCode = speaker2Language.code;
+
+      debugPrint('GoogleSTTTranslator: Speaker 1 language: $speaker1LangCode');
+      debugPrint('GoogleSTTTranslator: Speaker 2 language: $speaker2LangCode');
+
+      // Check if translation is needed
+      if (!TranslationService.isTranslationNeeded(
+          speaker1LangCode, speaker2LangCode)) {
+        debugPrint(
+            'GoogleSTTTranslator: No translation needed - same language');
+        return;
+      }
+
+      // Translate Speaker 1's text to Speaker 2's language
+      if (_transcriptions[0] != null && _transcriptions[0]!.isNotEmpty) {
+        debugPrint(
+            'GoogleSTTTranslator: Translating Speaker 1 text to $speaker2LangCode...');
+        final result1 = await TranslationService.translateText(
+          sourceLanguage: speaker1LangCode,
+          targetLanguage: speaker2LangCode,
+          content: _transcriptions[0]!,
+        );
+
+        if (result1 != null && result1.translatedText.isNotEmpty) {
+          _translations[0] = result1.translatedText;
+          debugPrint(
+              'GoogleSTTTranslator: Speaker 1 translation: "${result1.translatedText}"');
+        } else {
+          debugPrint('GoogleSTTTranslator: Speaker 1 translation failed');
+        }
+      }
+
+      // Translate Speaker 2's text to Speaker 1's language
+      if (_transcriptions[1] != null && _transcriptions[1]!.isNotEmpty) {
+        debugPrint(
+            'GoogleSTTTranslator: Translating Speaker 2 text to $speaker1LangCode...');
+        final result2 = await TranslationService.translateText(
+          sourceLanguage: speaker2LangCode,
+          targetLanguage: speaker1LangCode,
+          content: _transcriptions[1]!,
+        );
+
+        if (result2 != null && result2.translatedText.isNotEmpty) {
+          _translations[1] = result2.translatedText;
+          debugPrint(
+              'GoogleSTTTranslator: Speaker 2 translation: "${result2.translatedText}"');
+        } else {
+          debugPrint('GoogleSTTTranslator: Speaker 2 translation failed');
+        }
+      }
+
+      debugPrint('GoogleSTTTranslator: Translation process completed');
+      debugPrint(
+          '  Speaker 1 translation: ${_translations[0] ?? "No translation"}');
+      debugPrint(
+          '  Speaker 2 translation: ${_translations[1] ?? "No translation"}');
+
+      // Update UI to show translations are available
+      if (mounted) {
+        setState(() {
+          // Trigger UI update to show translation toggle buttons
+        });
+      }
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Translation error: $e');
+      // Don't throw - translation failure shouldn't break the app
     }
   }
 
@@ -1744,6 +1832,14 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     );
   }
 
+  /// Get the target language name for translation display
+  String _getTargetLanguageName(int speakerIndex) {
+    // If this is Speaker 1, the target language is Speaker 2's language
+    // If this is Speaker 2, the target language is Speaker 1's language
+    final targetSpeakerIndex = speakerIndex == 0 ? 1 : 0;
+    return _speakerLanguages[targetSpeakerIndex]?.name ?? 'Unknown';
+  }
+
   Widget _buildMessageBubble({
     required int speakerIndex,
     required Color speakerColor,
@@ -1858,7 +1954,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               const SizedBox(width: 4),
               Text(
                 isTranslated
-                    ? 'Translated to ${_speakerLanguages[speakerIndex]?.name ?? 'Unknown'}'
+                    ? 'Translated to ${_getTargetLanguageName(speakerIndex)}'
                     : 'Original: ${_speakerLanguages[speakerIndex]?.name ?? 'Unknown'}',
                 style: TextStyle(
                   color: speakerColor.withValues(alpha: 0.7),
