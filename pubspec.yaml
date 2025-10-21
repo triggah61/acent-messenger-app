@@ -123,7 +123,8 @@ flutter:
     - assets/sounds/
     - assets/icons/crypto/
     - assets/models/
-    - assets/models/sherpa_onnx/ # Added for Sherpa-ONNX Whisper models
+    - assets/models/sherpa_onnx/ # Added for Sherpa-ONNX Whisper models (English-only)
+    - assets/models/whisper/sherpa-onnx-whisper-small/ # Multilingual Whisper SMALL (better accuracy!)
     - .env
 
   # An image asset can refer to one or more resolution-variant files.

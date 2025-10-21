@@ -39,7 +39,8 @@
         android:label="Q Messenger"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:requestLegacyExternalStorage="true">
+        android:requestLegacyExternalStorage="true"
+        android:largeHeap="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

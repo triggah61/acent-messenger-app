@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'on_screen_translator.dart';
 import 'stereo_translator.dart';
-import 'alternating_translator.dart';
+import 'google_stt_translator.dart';
 import 'native_stt_translator.dart';
 
 class TranslatorHub extends StatelessWidget {
@@ -74,19 +74,19 @@ class TranslatorHub extends StatelessWidget {
 
               const SizedBox(height: 20),
 
-              // Alternating Translator Card
+              // Google STT Translator Card
               _buildTranslatorCard(
                 context,
-                title: 'Alternating Translator',
+                title: 'Google STT Translation',
                 description:
-                    'Alternate between phone and Bluetooth audio routing for seamless conversation flow',
-                icon: Icons.swap_horiz,
+                    'Record 2 speakers with Google STT diarization, auto-separate voices, and play back each speaker',
+                icon: Icons.cloud_queue,
                 color: const Color(0xFF4CAF50),
                 onTap: () {
                   Navigator.push(
                     context,
                     MaterialPageRoute(
-                      builder: (context) => const AlternatingTranslator(),
+                      builder: (context) => const GoogleSTTTranslator(),
                     ),
                   );
                 },

@@ -48,3 +48,18 @@ app.*.map.json
 .env
 
 /assets/models
+
+# Java heap dump files (generated during debugging/crashes)
+*.hprof
+java_pid*.hprof
+
+# Android build artifacts
+android/app/.cxx/
+android/.gradle/
+android/app/build/
+android/build/
+
+# CMake build files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake

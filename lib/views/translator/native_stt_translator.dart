@@ -9,6 +9,7 @@ import 'package:audioplayers/audioplayers.dart';
 
 import '../../services/config_service.dart';
 import '../../services/permission_service.dart';
+import '../../services/multilang_whisper_service.dart';
 
 /// Native STT Translation - Records 2 speakers, performs diarization,
 /// and separates audio into individual speaker files for playback
@@ -24,6 +25,7 @@ class _NativeSTTTranslatorState extends State<NativeSTTTranslator>
   // Services
   final ConfigService _configService = ConfigService.instance;
   final PermissionService _permissionService = PermissionService.instance;
+  final MultiLangWhisperService _whisperService = MultiLangWhisperService();
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _speaker1Player = AudioPlayer();
   final AudioPlayer _speaker2Player = AudioPlayer();
@@ -55,6 +57,9 @@ class _NativeSTTTranslatorState extends State<NativeSTTTranslator>
 
   // Speaker segments from diarization
   List<SpeakerSegment> _speakerSegments = [];
+
+  // Transcription results
+  Map<int, String> _transcriptions = {}; // speakerId -> transcribed text
 
   // Playback state
   bool _isPlayingSpeaker1 = false;
@@ -104,6 +109,13 @@ class _NativeSTTTranslatorState extends State<NativeSTTTranslator>
     try {
       // Request microphone permission
       await _permissionService.requestMicrophonePermission();
+
+      // Initialize Whisper STT service
+      final whisperInitialized = await _whisperService.initialize();
+      if (!whisperInitialized) {
+        debugPrint(
+            'NativeSTTTranslator: Whisper initialization failed - transcription will be unavailable');
+      }
 
       // Load languages from backend
       final languages = await _configService.getSupportedLanguages();
@@ -249,6 +261,14 @@ class _NativeSTTTranslatorState extends State<NativeSTTTranslator>
       await _separateAudioBySpeaker(audioPath);
 
       setState(() {
+        _processingProgress = 0.75;
+        _processingStatus = 'Transcribing audio...';
+      });
+
+      // Step 4: Transcribe separated audio files
+      await _transcribeSeparatedAudio();
+
+      setState(() {
         _processingProgress = 1.0;
         _processingStatus = 'Processing complete!';
       });
@@ -261,7 +281,7 @@ class _NativeSTTTranslatorState extends State<NativeSTTTranslator>
       });
 
       _showSuccess(
-          'Audio separated successfully! ${_speakerSegments.length} segments found.');
+          'Audio separated and transcribed successfully! ${_speakerSegments.length} segments found.');
     } catch (e) {
       debugPrint('NativeSTTTranslator: Error processing audio: $e');
       setState(() {
@@ -976,6 +996,95 @@ class _NativeSTTTranslatorState extends State<NativeSTTTranslator>
     return header;
   }
 
+  /// Transcribe separated audio files using Whisper STT
+  Future<void> _transcribeSeparatedAudio() async {
+    if (!_whisperService.isInitialized) {
+      debugPrint(
+          'NativeSTTTranslator: Whisper service not initialized, skipping transcription');
+      return;
+    }
+
+    try {
+      debugPrint(
+          'NativeSTTTranslator: Starting transcription for separated audio files...');
+
+      // Clear previous transcriptions
+      _transcriptions.clear();
+
+      // Transcribe both speakers concurrently
+      final transcriptionTasks = <Future<void>>[];
+
+      // Transcribe Speaker 1
+      if (_speaker1AudioPath != null &&
+          await File(_speaker1AudioPath!).exists()) {
+        final language1 = _speakerLanguages[0];
+        if (language1 != null) {
+          debugPrint('🎯 NativeSTTTranslator: Speaker 1 Language Details:');
+          debugPrint('   - Name: ${language1.name}');
+          debugPrint('   - Native Name: ${language1.nativeName}');
+          debugPrint('   - Code: "${language1.code}"');
+          debugPrint('   - Audio Path: $_speaker1AudioPath');
+          transcriptionTasks.add(
+              _transcribeSpeakerAudio(0, _speaker1AudioPath!, language1.code));
+        }
+      }
+
+      // Transcribe Speaker 2
+      if (_speaker2AudioPath != null &&
+          await File(_speaker2AudioPath!).exists()) {
+        final language2 = _speakerLanguages[1];
+        if (language2 != null) {
+          debugPrint('🎯 NativeSTTTranslator: Speaker 2 Language Details:');
+          debugPrint('   - Name: ${language2.name}');
+          debugPrint('   - Native Name: ${language2.nativeName}');
+          debugPrint('   - Code: "${language2.code}"');
+          debugPrint('   - Audio Path: $_speaker2AudioPath');
+          transcriptionTasks.add(
+              _transcribeSpeakerAudio(1, _speaker2AudioPath!, language2.code));
+        }
+      }
+
+      // Wait for all transcriptions to complete
+      if (transcriptionTasks.isNotEmpty) {
+        await Future.wait(transcriptionTasks);
+        debugPrint(
+            'NativeSTTTranslator: All transcriptions completed successfully');
+      } else {
+        debugPrint('NativeSTTTranslator: No audio files to transcribe');
+      }
+
+      setState(() {});
+    } catch (e) {
+      debugPrint('NativeSTTTranslator: Error in transcription: $e');
+      // Don't throw - transcription is optional, audio separation still succeeded
+    }
+  }
+
+  /// Transcribe audio for a specific speaker
+  Future<void> _transcribeSpeakerAudio(
+      int speakerId, String audioPath, String languageCode) async {
+    try {
+      debugPrint(
+          'NativeSTTTranslator: Transcribing Speaker ${speakerId + 1} audio...');
+
+      final transcription =
+          await _whisperService.transcribeAudio(audioPath, languageCode);
+
+      if (transcription.isNotEmpty) {
+        _transcriptions[speakerId] = transcription;
+        debugPrint(
+            'NativeSTTTranslator: Speaker ${speakerId + 1} transcription: "$transcription"');
+      } else {
+        debugPrint(
+            'NativeSTTTranslator: No transcription generated for Speaker ${speakerId + 1}');
+      }
+    } catch (e) {
+      debugPrint(
+          'NativeSTTTranslator: Error transcribing Speaker ${speakerId + 1}: $e');
+      // Don't throw - allow other speaker transcription to continue
+    }
+  }
+
   Future<void> _playSpeaker1Audio() async {
     try {
       if (_speaker1AudioPath == null) return;
@@ -1427,6 +1536,7 @@ class _NativeSTTTranslatorState extends State<NativeSTTTranslator>
     required VoidCallback onTap,
   }) {
     final speakerColor = _speakerColors[speakerIndex % _speakerColors.length];
+    final transcription = _transcriptions[speakerIndex];
 
     return GestureDetector(
       onTap: onTap,
@@ -1450,51 +1560,101 @@ class _NativeSTTTranslatorState extends State<NativeSTTTranslator>
                 ]
               : [],
         ),
-        child: Row(
+        child: Column(
           children: [
-            Container(
-              width: 60,
-              height: 60,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: speakerColor.withValues(alpha: 0.2),
-              ),
-              child: Icon(
-                isPlaying ? Icons.pause : Icons.play_arrow,
-                color: speakerColor,
-                size: 30,
-              ),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    _speakerNames[speakerIndex] ??
-                        'Speaker ${speakerIndex + 1}',
-                    style: TextStyle(
-                      color: speakerColor,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
+            Row(
+              children: [
+                Container(
+                  width: 60,
+                  height: 60,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: speakerColor.withValues(alpha: 0.2),
                   ),
-                  const SizedBox(height: 4),
-                  Text(
-                    isPlaying ? 'Playing...' : 'Tap to play',
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 14,
-                    ),
+                  child: Icon(
+                    isPlaying ? Icons.pause : Icons.play_arrow,
+                    color: speakerColor,
+                    size: 30,
                   ),
-                ],
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _speakerNames[speakerIndex] ??
+                            'Speaker ${speakerIndex + 1}',
+                        style: TextStyle(
+                          color: speakerColor,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        isPlaying ? 'Playing...' : 'Tap to play',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                Icon(
+                  Icons.volume_up,
+                  color: isPlaying ? speakerColor : Colors.white54,
+                  size: 24,
+                ),
+              ],
+            ),
+            // Show transcription if available
+            if (transcription != null && transcription.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: speakerColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: speakerColor.withValues(alpha: 0.2),
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(
+                          Icons.subtitles,
+                          color: speakerColor,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Transcription:',
+                          style: TextStyle(
+                            color: speakerColor,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      transcription,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        height: 1.4,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            Icon(
-              Icons.volume_up,
-              color: isPlaying ? speakerColor : Colors.white54,
-              size: 24,
-            ),
+            ],
           ],
         ),
       ),

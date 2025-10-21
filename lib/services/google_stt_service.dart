@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'config_service.dart';
@@ -142,7 +141,8 @@ class GoogleSttService {
           'minSpeakerCount': minSpeakers,
           'maxSpeakerCount': maxSpeakers,
         },
-        'model': 'latest_long', // Use the latest long model for better accuracy
+        'model': _getSupportedModel(
+            languageCode), // Use appropriate model for language
       };
 
       // Add alternative languages if provided (for multi-language conversations)
@@ -185,6 +185,52 @@ class GoogleSttService {
     } catch (e) {
       debugPrint('GoogleSttService: Error during transcription: $e');
       return null;
+    }
+  }
+
+  /// Get the appropriate model for the given language code
+  String _getSupportedModel(String languageCode) {
+    // For languages that support latest_long model
+    final supportedLanguages = [
+      'en-US',
+      'en-GB',
+      'en-AU',
+      'en-CA',
+      'en-IN',
+      'es-ES',
+      'es-MX',
+      'es-AR',
+      'es-CO',
+      'es-PE',
+      'fr-FR',
+      'fr-CA',
+      'de-DE',
+      'it-IT',
+      'pt-BR',
+      'pt-PT',
+      'ru-RU',
+      'ja-JP',
+      'ko-KR',
+      'zh-CN',
+      'zh-TW',
+      'nl-NL',
+      'sv-SE',
+      'da-DK',
+      'no-NO',
+      'fi-FI',
+      'pl-PL',
+      'tr-TR',
+      'ar-SA',
+      'hi-IN'
+    ];
+
+    if (supportedLanguages.contains(languageCode)) {
+      debugPrint('GoogleSttService: Using latest_long model for $languageCode');
+      return 'latest_long';
+    } else {
+      debugPrint(
+          'GoogleSttService: Using default model for $languageCode (latest_long not supported)');
+      return 'default';
     }
   }
 
