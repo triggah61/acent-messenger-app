@@ -3,8 +3,9 @@ import 'package:flutter/services.dart';
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:record/record.dart';
+import 'package:path_provider/path_provider.dart';
 
-import '../../services/config_service.dart';
+import '../../services/config_service.dart' as config_service;
 import '../../services/google_stt_service.dart';
 import '../../services/permission_service.dart';
 import '../../services/translation_service.dart';
@@ -20,10 +21,11 @@ class OnScreenTranslator extends StatefulWidget {
 class _OnScreenTranslatorState extends State<OnScreenTranslator>
     with TickerProviderStateMixin {
   // Services
-  final ConfigService _configService = ConfigService.instance;
+  final config_service.ConfigService _configService =
+      config_service.ConfigService.instance;
   final GoogleSttService _googleSttService = GoogleSttService.instance;
   final PermissionService _permissionService = PermissionService.instance;
-  final TTSService _ttsService = TTSService();
+  final TtsService _ttsService = TtsService();
   final AudioRecorder _audioRecorder = AudioRecorder();
 
   // Animation controllers
@@ -35,8 +37,8 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
   late Animation<double> _waveAnimation;
 
   // Languages
-  List<Language> _supportedLanguages = [];
-  Language? _targetLanguage;
+  List<config_service.Language> _supportedLanguages = [];
+  config_service.Language? _targetLanguage;
 
   // Recording state
   bool _isRecording = false;
@@ -145,12 +147,17 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     try {
       if (await _audioRecorder.hasPermission()) {
         // Start recording
+        final directory = await getApplicationDocumentsDirectory();
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final audioPath = '${directory.path}/recording_$timestamp.wav';
+
         await _audioRecorder.start(
           const RecordConfig(
             encoder: AudioEncoder.wav,
             sampleRate: 16000,
             numChannels: 1,
           ),
+          path: audioPath,
         );
 
         setState(() {
@@ -329,8 +336,8 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       final targetLangCode = _targetLanguage?.code ?? 'en';
 
       await _ttsService.speak(
-        text: message.translatedText,
-        languageCode: targetLangCode,
+        message.translatedText,
+        targetLangCode,
       );
     } catch (e) {
       debugPrint('OnScreenTranslator: Error playing message: $e');
@@ -450,19 +457,20 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
           const SizedBox(width: 12),
           Expanded(
             child: DropdownButtonHideUnderline(
-              child: DropdownButton<Language>(
+              child: DropdownButton<config_service.Language>(
                 value: _targetLanguage,
                 dropdownColor: const Color(0xFF1D1E33),
                 style: const TextStyle(color: Colors.white, fontSize: 16),
                 icon:
                     const Icon(Icons.arrow_drop_down, color: Color(0xFF00D9FF)),
-                items: _supportedLanguages.map((Language language) {
-                  return DropdownMenuItem<Language>(
+                items:
+                    _supportedLanguages.map((config_service.Language language) {
+                  return DropdownMenuItem<config_service.Language>(
                     value: language,
                     child: Text(language.nativeName),
                   );
                 }).toList(),
-                onChanged: (Language? newValue) {
+                onChanged: (config_service.Language? newValue) {
                   if (newValue != null) {
                     setState(() {
                       _targetLanguage = newValue;
@@ -766,25 +774,4 @@ class TranscriptMessage {
     required this.startTime,
     required this.endTime,
   });
-}
-
-/// Language model (should match the existing Language class)
-class Language {
-  final String code;
-  final String name;
-  final String nativeName;
-
-  Language({
-    required this.code,
-    required this.name,
-    required this.nativeName,
-  });
-
-  factory Language.fromJson(Map<String, dynamic> json) {
-    return Language(
-      code: json['code'] ?? '',
-      name: json['name'] ?? '',
-      nativeName: json['nativeName'] ?? json['name'] ?? '',
-    );
-  }
 }

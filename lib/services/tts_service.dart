@@ -1,274 +1,238 @@
-import 'dart:convert';
-import 'package:http/http.dart' as http;
-import '../constants/config.dart';
-import 'auth_service.dart';
-import 'tts/tts_provider.dart';
-import 'tts/elevenlabs_tts_provider.dart';
+import 'package:flutter/foundation.dart';
+import 'package:flutter_tts/flutter_tts.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:audioplayers/audioplayers.dart';
+import 'dart:io';
 
-/// Main TTS service that manages different TTS providers
-/// Supports easy switching between providers (ElevenLabs, Google, Azure, etc.)
-class TTSService {
-  static final TTSService _instance = TTSService._internal();
-  factory TTSService() => _instance;
-  TTSService._internal();
+/// Text-to-Speech service for generating audio from translated text
+class TtsService {
+  static final TtsService _instance = TtsService._internal();
+  factory TtsService() => _instance;
+  TtsService._internal();
 
-  static TTSService get instance => _instance;
-
-  TTSProvider? _currentProvider;
-  TTSConfig? _config;
+  FlutterTts? _flutterTts;
+  AudioPlayer? _audioPlayer;
   bool _isInitialized = false;
+  bool _isPlaying = false;
+  String? _currentAudioPath;
 
-  final AuthService _authService = AuthService();
-
-  /// Initialize the TTS service with backend configuration
+  /// Initialize the TTS service
   Future<void> initialize() async {
     if (_isInitialized) return;
 
     try {
-      print('TTSService: Initializing...');
+      _flutterTts = FlutterTts();
+      _audioPlayer = AudioPlayer();
 
-      // Get TTS configuration from backend
-      await _loadConfig();
+      // Set up TTS parameters
+      await _flutterTts!.setLanguage("en-US");
+      await _flutterTts!.setSpeechRate(0.5);
+      await _flutterTts!.setVolume(1.0);
+      await _flutterTts!.setPitch(1.0);
 
-      // Initialize the appropriate provider
-      await _initializeProvider();
+      // Set up completion handler
+      _flutterTts!.setCompletionHandler(() {
+        _isPlaying = false;
+        debugPrint('TtsService: TTS playback completed');
+      });
+
+      // Set up error handler
+      _flutterTts!.setErrorHandler((message) {
+        _isPlaying = false;
+        debugPrint('TtsService: TTS error: $message');
+      });
+
+      // Set up audio player completion handler
+      _audioPlayer!.onPlayerComplete.listen((event) {
+        _isPlaying = false;
+        debugPrint('TtsService: Audio file playback completed');
+      });
 
       _isInitialized = true;
-      print(
-          'TTSService: Initialized successfully with provider: ${_currentProvider?.providerName}');
+      debugPrint('TtsService: Initialized successfully');
     } catch (e) {
-      print('TTSService: Initialization failed: $e');
-      // Don't throw - allow app to continue without TTS
-      _isInitialized = false;
-    }
-  }
-
-  /// Load TTS configuration from backend
-  Future<void> _loadConfig() async {
-    try {
-      print('TTSService: Getting authentication token...');
-      final token = await _authService.getToken();
-      if (token == null) {
-        throw Exception('No authentication token');
-      }
-      print('TTSService: Token obtained successfully');
-
-      print(
-          'TTSService: Fetching config from: ${Config.baseApiUrl}/config/get');
-      final response = await http.get(
-        Uri.parse('${Config.baseApiUrl}/config/get'),
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': 'Bearer $token',
-        },
-      );
-
-      print('TTSService: Config response status: ${response.statusCode}');
-      if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        final configData = data['data'] as Map<String, dynamic>;
-        print('TTSService: Config data keys: ${configData.keys.toList()}');
-
-        // Extract TTS configuration
-        _config = TTSConfig(
-          provider: configData['ttsProvider'] ?? 'elevenlabs',
-          settings: {
-            'apiKey': configData['elevenlabsApiKey'] ?? '',
-            'baseUrl': configData['elevenlabsBaseUrl'] ??
-                'https://api.elevenlabs.io/v1',
-            ...configData['ttsSettings'] ?? {},
-          },
-        );
-
-        print('TTSService: ✅ Config loaded - Provider: ${_config!.provider}');
-        print(
-            'TTSService: API Key present: ${_config!.settings['apiKey']?.isNotEmpty ?? false}');
-      } else {
-        print('TTSService: ❌ Failed to load config: ${response.statusCode}');
-        print('TTSService: Response body: ${response.body}');
-        throw Exception('Failed to load config: ${response.statusCode}');
-      }
-    } catch (e) {
-      print('TTSService: ❌ Error loading config: $e');
-      // Use default configuration
-      _config = TTSConfig(
-        provider: 'elevenlabs',
-        settings: {
-          'apiKey': 'sk_d44d556a3efa7e2a9f2b8ab4af2ab4aafa2ce047ea90e4ff',
-          'baseUrl': 'https://api.elevenlabs.io/v1',
-        },
-      );
-      print('TTSService: Using default configuration');
-    }
-  }
-
-  /// Initialize the appropriate TTS provider based on configuration
-  Future<void> _initializeProvider() async {
-    if (_config == null) {
-      throw Exception('TTS configuration not loaded');
-    }
-
-    try {
-      print('TTSService: Initializing provider: ${_config!.provider}');
-      switch (_config!.provider.toLowerCase()) {
-        case 'elevenlabs':
-          print('TTSService: Creating ElevenLabs provider...');
-          _currentProvider = ElevenLabsTTSProvider(
-            apiKey: _config!.settings['apiKey'] ?? '',
-            baseUrl:
-                _config!.settings['baseUrl'] ?? 'https://api.elevenlabs.io/v1',
-          );
-          print('TTSService: ElevenLabs provider created');
-          break;
-
-        // Future providers can be added here:
-        // case 'google':
-        //   _currentProvider = GoogleTTSProvider(config: _config!.settings);
-        //   break;
-        // case 'azure':
-        //   _currentProvider = AzureTTSProvider(config: _config!.settings);
-        //   break;
-
-        default:
-          throw Exception('Unsupported TTS provider: ${_config!.provider}');
-      }
-
-      print('TTSService: Calling provider.initialize()...');
-      await _currentProvider!.initialize();
-      print('TTSService: Provider initialized successfully');
-
-      // Verify provider is available
-      print('TTSService: Checking provider availability...');
-      final isAvailable = await _currentProvider!.isAvailable();
-      print('TTSService: Provider available: $isAvailable');
-      if (!isAvailable) {
-        throw Exception('TTS provider ${_config!.provider} is not available');
-      }
-    } catch (e) {
-      print('TTSService: ❌ Provider initialization failed: $e');
-      _currentProvider = null;
+      debugPrint('TtsService: Initialization error: $e');
       rethrow;
     }
   }
 
-  /// Convert text to speech using the current provider
-  Future<bool> speak({
-    required String text,
-    required String languageCode,
-    String? voiceId,
-    double? speed,
-    double? pitch,
-  }) async {
-    print(
-        'TTSService: speak() called with text: "${text.substring(0, text.length > 50 ? 50 : text.length)}..."');
-    print('TTSService: _isInitialized: $_isInitialized');
-    print('TTSService: _currentProvider: ${_currentProvider?.providerName}');
+  /// Generate audio file from text and return the file path
+  Future<String?> generateAudioFile(String text, String languageCode) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
 
-    if (!_isInitialized || _currentProvider == null) {
-      print('TTSService: ❌ Service not initialized or provider unavailable');
-      print(
-          'TTSService: _isInitialized: $_isInitialized, _currentProvider: $_currentProvider');
-      return false;
+    if (text.isEmpty) {
+      debugPrint('TtsService: Empty text provided');
+      return null;
     }
 
     try {
-      print('TTSService: ✅ Speaking text in $languageCode');
+      // Map language code to TTS language
+      final ttsLanguage = _mapLanguageToTtsCode(languageCode);
+      debugPrint('TtsService: Generating audio for language: $ttsLanguage');
+      debugPrint('TtsService: Text: "$text"');
 
-      await _currentProvider!.speak(
-        text: text,
-        languageCode: languageCode,
-        voiceId: voiceId,
-        speed: speed,
-        pitch: pitch,
-      );
+      // Set language for TTS
+      await _flutterTts!.setLanguage(ttsLanguage);
 
-      print('TTSService: ✅ Speech completed successfully');
-      return true;
+      // Generate unique filename
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final fileName = 'tts_${languageCode}_$timestamp.wav';
+
+      // Get app documents directory
+      final directory = await getApplicationDocumentsDirectory();
+      final audioPath = '${directory.path}/$fileName';
+
+      // Generate audio file
+      final result = await _flutterTts!.synthesizeToFile(text, audioPath);
+
+      if (result == 1) {
+        debugPrint('TtsService: Audio file generated successfully: $audioPath');
+        return audioPath;
+      } else {
+        debugPrint('TtsService: Failed to generate audio file');
+        return null;
+      }
     } catch (e) {
-      print('TTSService: ❌ Error in speak: $e');
-      return false;
+      debugPrint('TtsService: Error generating audio file: $e');
+      return null;
     }
   }
 
-  /// Stop current speech
+  /// Play audio file
+  Future<void> playAudioFile(String audioPath) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+
+    try {
+      if (_isPlaying) {
+        await stop();
+      }
+
+      // Check if file exists
+      final file = File(audioPath);
+      if (!await file.exists()) {
+        debugPrint('TtsService: Audio file does not exist: $audioPath');
+        return;
+      }
+
+      _currentAudioPath = audioPath;
+      _isPlaying = true;
+
+      debugPrint('TtsService: Playing audio file: $audioPath');
+
+      // Use AudioPlayer to play the audio file
+      await _audioPlayer!.play(DeviceFileSource(audioPath));
+    } catch (e) {
+      _isPlaying = false;
+      debugPrint('TtsService: Error playing audio file: $e');
+    }
+  }
+
+  /// Play text directly (without saving to file)
+  Future<void> speak(String text, String languageCode) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+
+    if (text.isEmpty) {
+      debugPrint('TtsService: Empty text provided');
+      return;
+    }
+
+    try {
+      if (_isPlaying) {
+        await stop();
+      }
+
+      // Map language code to TTS language
+      final ttsLanguage = _mapLanguageToTtsCode(languageCode);
+      debugPrint('TtsService: Speaking text in language: $ttsLanguage');
+      debugPrint('TtsService: Text: "$text"');
+
+      // Set language for TTS
+      await _flutterTts!.setLanguage(ttsLanguage);
+
+      _isPlaying = true;
+      await _flutterTts!.speak(text);
+    } catch (e) {
+      _isPlaying = false;
+      debugPrint('TtsService: Error speaking text: $e');
+    }
+  }
+
+  /// Stop current TTS playback
   Future<void> stop() async {
-    if (_currentProvider != null) {
-      await _currentProvider!.stop();
+    if (!_isInitialized) return;
+
+    try {
+      // Stop both TTS and audio player
+      await _flutterTts!.stop();
+      await _audioPlayer!.stop();
+      _isPlaying = false;
+      _currentAudioPath = null;
+      debugPrint('TtsService: TTS playback stopped');
+    } catch (e) {
+      debugPrint('TtsService: Error stopping TTS: $e');
     }
   }
 
-  /// Get available voices for a language
-  Future<List<TTSVoice>> getVoicesForLanguage(String languageCode) async {
-    if (!_isInitialized || _currentProvider == null) {
-      return [];
+  /// Check if TTS is currently playing
+  bool get isPlaying => _isPlaying;
+
+  /// Get current audio path
+  String? get currentAudioPath => _currentAudioPath;
+
+  /// Map language code to TTS language code
+  String _mapLanguageToTtsCode(String languageCode) {
+    final Map<String, String> languageMap = {
+      'en': 'en-US',
+      'es': 'es-ES',
+      'fr': 'fr-FR',
+      'de': 'de-DE',
+      'it': 'it-IT',
+      'pt': 'pt-PT',
+      'ru': 'ru-RU',
+      'ja': 'ja-JP',
+      'ko': 'ko-KR',
+      'zh': 'zh-CN',
+      'ar': 'ar-SA',
+      'hi': 'hi-IN',
+      'bn': 'bn-IN', // Bengali
+      'ur': 'ur-PK', // Urdu
+      'ms': 'ms-MY', // Malay
+    };
+
+    return languageMap[languageCode.toLowerCase()] ?? 'en-US';
+  }
+
+  /// Get available TTS languages
+  Future<List<String>> getAvailableLanguages() async {
+    if (!_isInitialized) {
+      await initialize();
     }
 
     try {
-      return await _currentProvider!.getVoicesForLanguage(languageCode);
+      final languages = await _flutterTts!.getLanguages;
+      debugPrint('TtsService: Available languages: $languages');
+      return languages.cast<String>();
     } catch (e) {
-      print('TTSService: Error getting voices: $e');
-      return [];
+      debugPrint('TtsService: Error getting available languages: $e');
+      return ['en-US']; // Default fallback
     }
   }
 
-  /// Check if TTS is available and working
-  Future<bool> isAvailable() async {
-    if (!_isInitialized || _currentProvider == null) {
-      return false;
-    }
-
-    return await _currentProvider!.isAvailable();
-  }
-
-  /// Get current provider name
-  String? get currentProvider => _currentProvider?.providerName;
-
-  /// Switch to a different TTS provider
-  Future<void> switchProvider(
-      String providerName, Map<String, dynamic> settings) async {
-    try {
-      print('TTSService: Switching to provider: $providerName');
-
-      // Dispose current provider
-      if (_currentProvider != null) {
-        await _currentProvider!.dispose();
-      }
-
-      // Update configuration
-      _config = TTSConfig(
-        provider: providerName,
-        settings: settings,
-      );
-
-      // Initialize new provider
-      await _initializeProvider();
-
-      print('TTSService: Successfully switched to $providerName');
-    } catch (e) {
-      print('TTSService: Error switching provider: $e');
-      throw Exception('Failed to switch TTS provider: $e');
-    }
-  }
-
-  /// Dispose the TTS service
-  Future<void> dispose() async {
-    if (_currentProvider != null) {
-      await _currentProvider!.dispose();
-      _currentProvider = null;
-    }
+  /// Dispose resources
+  void dispose() {
+    _flutterTts?.stop();
+    _audioPlayer?.stop();
+    _flutterTts = null;
+    _audioPlayer = null;
     _isInitialized = false;
-    print('TTSService: Disposed successfully');
-  }
-
-  /// Reload configuration from backend
-  Future<void> reloadConfig() async {
-    try {
-      await _loadConfig();
-      if (_config != null) {
-        await _initializeProvider();
-      }
-    } catch (e) {
-      print('TTSService: Error reloading config: $e');
-    }
+    _isPlaying = false;
+    _currentAudioPath = null;
+    debugPrint('TtsService: Disposed');
   }
 }

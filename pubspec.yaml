@@ -88,6 +88,8 @@ dependencies:
   web_socket_channel: ^2.4.0
   # whisper_ggml: ^1.7.0 # Removed due to native crashes
   sherpa_onnx: ^1.10.7 # Most reliable in-device Whisper solution
+  # Text-to-speech for translation audio playback
+  flutter_tts: ^3.8.3
 
 dev_dependencies:
   flutter_test:

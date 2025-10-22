@@ -24,7 +24,7 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
       config_service.ConfigService.instance;
   final SherpaWhisperService _sherpaWhisperService = SherpaWhisperService();
   final PermissionService _permissionService = PermissionService.instance;
-  final TTSService _ttsService = TTSService();
+  final TtsService _ttsService = TtsService();
   final AudioRecorder _audioRecorder = AudioRecorder();
 
   // Animation controllers
@@ -396,8 +396,8 @@ class _OnScreenTranslatorState extends State<OnScreenTranslator>
     try {
       // Use the detected language for TTS playback
       await _ttsService.speak(
-        text: message.translatedText,
-        languageCode: message.detectedLanguage,
+        message.translatedText,
+        message.detectedLanguage,
       );
     } catch (e) {
       debugPrint('OnScreenTranslator: Error playing message: $e');

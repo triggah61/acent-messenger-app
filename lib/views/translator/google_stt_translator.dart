@@ -11,6 +11,7 @@ import '../../services/config_service.dart';
 import '../../services/permission_service.dart';
 import '../../services/google_stt_service.dart';
 import '../../services/translation_service.dart';
+import '../../services/tts_service.dart';
 
 /// Google STT Translation - Records 2 speakers, performs on-device diarization,
 /// and separates audio into individual speaker files for playback
@@ -27,6 +28,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   final ConfigService _configService = ConfigService.instance;
   final PermissionService _permissionService = PermissionService.instance;
   final GoogleSttService _googleSttService = GoogleSttService();
+  final TtsService _ttsService = TtsService();
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _speaker1Player = AudioPlayer();
   final AudioPlayer _speaker2Player = AudioPlayer();
@@ -55,6 +57,14 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   String? _recordedAudioPath;
   String? _speaker1AudioPath;
   String? _speaker2AudioPath;
+
+  // TTS audio file paths (translated text to speech)
+  String? _speaker1TtsAudioPath; // Speaker 1's translated text as audio
+  String? _speaker2TtsAudioPath; // Speaker 2's translated text as audio
+
+  // TTS playback states
+  bool _isPlayingTts1 = false; // Playing Speaker 1's translated audio
+  bool _isPlayingTts2 = false; // Playing Speaker 2's translated audio
 
   // Speaker segments from diarization
   List<SpeakerSegment> _speakerSegments = [];
@@ -94,6 +104,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   Future<void> _initializeServices() async {
     try {
       await _googleSttService.initialize();
+      await _ttsService.initialize();
       final languages = await _configService.getSupportedLanguages();
       final defaultEnglish = languages.firstWhere(
         (lang) => lang.code == 'en',
@@ -220,6 +231,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         // Clear previous results
         _speaker1AudioPath = null;
         _speaker2AudioPath = null;
+        _speaker1TtsAudioPath = null;
+        _speaker2TtsAudioPath = null;
         _speakerSegments = [];
         _transcriptions.clear();
         _translations.clear();
@@ -227,6 +240,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           0: false,
           1: false,
         };
+        _isPlayingTts1 = false;
+        _isPlayingTts2 = false;
       });
 
       _pulseController.repeat(reverse: true);
@@ -646,6 +661,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint(
           '  Speaker 2 translation: ${_translations[1] ?? "No translation"}');
 
+      // Generate TTS audio for translated text
+      await _generateTtsAudio();
+
       // Update UI to show translations are available
       if (mounted) {
         setState(() {
@@ -655,6 +673,48 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     } catch (e) {
       debugPrint('GoogleSTTTranslator: Translation error: $e');
       // Don't throw - translation failure shouldn't break the app
+    }
+  }
+
+  /// Generate TTS audio files for translated text
+  Future<void> _generateTtsAudio() async {
+    try {
+      debugPrint('GoogleSTTTranslator: Starting TTS audio generation...');
+
+      // Generate TTS audio for Speaker 1's translated text (for Speaker 2 to hear)
+      if (_translations[0] != null && _translations[0]!.isNotEmpty) {
+        final speaker2Language = _speakerLanguages[1];
+        if (speaker2Language != null) {
+          debugPrint(
+              'GoogleSTTTranslator: Generating TTS for Speaker 1 translation in ${speaker2Language.code}...');
+          _speaker1TtsAudioPath = await _ttsService.generateAudioFile(
+            _translations[0]!,
+            speaker2Language.code,
+          );
+          debugPrint(
+              'GoogleSTTTranslator: Speaker 1 TTS audio path: $_speaker1TtsAudioPath');
+        }
+      }
+
+      // Generate TTS audio for Speaker 2's translated text (for Speaker 1 to hear)
+      if (_translations[1] != null && _translations[1]!.isNotEmpty) {
+        final speaker1Language = _speakerLanguages[0];
+        if (speaker1Language != null) {
+          debugPrint(
+              'GoogleSTTTranslator: Generating TTS for Speaker 2 translation in ${speaker1Language.code}...');
+          _speaker2TtsAudioPath = await _ttsService.generateAudioFile(
+            _translations[1]!,
+            speaker1Language.code,
+          );
+          debugPrint(
+              'GoogleSTTTranslator: Speaker 2 TTS audio path: $_speaker2TtsAudioPath');
+        }
+      }
+
+      debugPrint('GoogleSTTTranslator: TTS audio generation completed');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: TTS audio generation error: $e');
+      // Don't throw - TTS failure shouldn't break the app
     }
   }
 
@@ -693,6 +753,76 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     } catch (e) {
       debugPrint('GoogleSTTTranslator: Speaker 2 playback error: $e');
       _showErrorDialog('Failed to play Speaker 2 audio: $e');
+    }
+  }
+
+  /// Play TTS audio for Speaker 1's translated text
+  Future<void> _playSpeaker1TtsAudio() async {
+    try {
+      if (_speaker1TtsAudioPath == null || _speaker1TtsAudioPath!.isEmpty) {
+        debugPrint('GoogleSTTTranslator: No TTS audio available for Speaker 1');
+        return;
+      }
+
+      if (_isPlayingTts1) {
+        await _ttsService.stop();
+        setState(() {
+          _isPlayingTts1 = false;
+        });
+      } else {
+        // Stop other TTS playback
+        if (_isPlayingTts2) {
+          await _ttsService.stop();
+          setState(() {
+            _isPlayingTts2 = false;
+          });
+        }
+
+        await _ttsService.playAudioFile(_speaker1TtsAudioPath!);
+        setState(() {
+          _isPlayingTts1 = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Speaker 1 TTS playback error: $e');
+      setState(() {
+        _isPlayingTts1 = false;
+      });
+    }
+  }
+
+  /// Play TTS audio for Speaker 2's translated text
+  Future<void> _playSpeaker2TtsAudio() async {
+    try {
+      if (_speaker2TtsAudioPath == null || _speaker2TtsAudioPath!.isEmpty) {
+        debugPrint('GoogleSTTTranslator: No TTS audio available for Speaker 2');
+        return;
+      }
+
+      if (_isPlayingTts2) {
+        await _ttsService.stop();
+        setState(() {
+          _isPlayingTts2 = false;
+        });
+      } else {
+        // Stop other TTS playback
+        if (_isPlayingTts1) {
+          await _ttsService.stop();
+          setState(() {
+            _isPlayingTts1 = false;
+          });
+        }
+
+        await _ttsService.playAudioFile(_speaker2TtsAudioPath!);
+        setState(() {
+          _isPlayingTts2 = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Speaker 2 TTS playback error: $e');
+      setState(() {
+        _isPlayingTts2 = false;
+      });
     }
   }
 
@@ -1293,6 +1423,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _audioRecorder.dispose();
     _speaker1Player.dispose();
     _speaker2Player.dispose();
+    _ttsService.dispose();
     super.dispose();
   }
 
@@ -1963,6 +2094,80 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                 ),
               ),
             ],
+          ),
+          // TTS play button for translated text (show in counter speaker's bubble)
+          if (isTranslated &&
+              translation != null &&
+              translation.isNotEmpty) ...[
+            const SizedBox(height: 12),
+            _buildTtsPlayButton(speakerIndex, speakerColor),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Build TTS play button for translated text
+  Widget _buildTtsPlayButton(int speakerIndex, Color speakerColor) {
+    // Determine which TTS audio to play based on speaker index
+    final isPlayingTts = speakerIndex == 0 ? _isPlayingTts1 : _isPlayingTts2;
+    final ttsAudioPath =
+        speakerIndex == 0 ? _speaker1TtsAudioPath : _speaker2TtsAudioPath;
+    final onTtsTap =
+        speakerIndex == 0 ? _playSpeaker1TtsAudio : _playSpeaker2TtsAudio;
+
+    // Get the target language name for the TTS audio
+    final targetLanguageName = _getTargetLanguageName(speakerIndex);
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: speakerColor.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: speakerColor.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.volume_up,
+            color: speakerColor,
+            size: 16,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Listen in $targetLanguageName',
+              style: TextStyle(
+                color: speakerColor,
+                fontSize: 12,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          GestureDetector(
+            onTap: ttsAudioPath != null && ttsAudioPath.isNotEmpty
+                ? onTtsTap
+                : null,
+            child: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: speakerColor.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: speakerColor.withValues(alpha: 0.4),
+                  width: 1,
+                ),
+              ),
+              child: Icon(
+                isPlayingTts ? Icons.stop : Icons.play_arrow,
+                color: speakerColor,
+                size: 16,
+              ),
+            ),
           ),
         ],
       ),
