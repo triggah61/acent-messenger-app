@@ -88,10 +88,44 @@ class TtsService {
       final result = await _flutterTts!.synthesizeToFile(text, audioPath);
 
       if (result == 1) {
-        debugPrint('TtsService: Audio file generated successfully: $audioPath');
-        return audioPath;
+        debugPrint('TtsService: Audio file generation started: $audioPath');
+
+        // Wait for the file to be completely written
+        bool fileReady = false;
+        int attempts = 0;
+        const maxAttempts = 30; // 30 seconds timeout
+        const checkInterval = Duration(milliseconds: 1000);
+
+        while (!fileReady && attempts < maxAttempts) {
+          await Future.delayed(checkInterval);
+          attempts++;
+
+          final file = File(audioPath);
+          if (await file.exists()) {
+            final fileSize = await file.length();
+            debugPrint(
+                'TtsService: File check attempt $attempts - Size: $fileSize bytes');
+
+            if (fileSize > 0) {
+              fileReady = true;
+              debugPrint(
+                  'TtsService: Audio file generated successfully: $audioPath (Size: $fileSize bytes)');
+            }
+          } else {
+            debugPrint(
+                'TtsService: File check attempt $attempts - File does not exist yet');
+          }
+        }
+
+        if (fileReady) {
+          return audioPath;
+        } else {
+          debugPrint(
+              'TtsService: Audio file generation timeout after $maxAttempts attempts');
+          return null;
+        }
       } else {
-        debugPrint('TtsService: Failed to generate audio file');
+        debugPrint('TtsService: Failed to start audio file generation');
         return null;
       }
     } catch (e) {

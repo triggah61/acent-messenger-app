@@ -12,6 +12,7 @@ import '../../services/permission_service.dart';
 import '../../services/google_stt_service.dart';
 import '../../services/translation_service.dart';
 import '../../services/tts_service.dart';
+import '../../services/enhanced_tts_service_robust.dart';
 
 /// Google STT Translation - Records 2 speakers, performs on-device diarization,
 /// and separates audio into individual speaker files for playback
@@ -29,6 +30,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   final PermissionService _permissionService = PermissionService.instance;
   final GoogleSttService _googleSttService = GoogleSttService();
   final TtsService _ttsService = TtsService();
+  final EnhancedTtsServiceRobust _stereoTtsService = EnhancedTtsServiceRobust();
   final AudioRecorder _audioRecorder = AudioRecorder();
   final AudioPlayer _speaker1Player = AudioPlayer();
   final AudioPlayer _speaker2Player = AudioPlayer();
@@ -61,10 +63,14 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   // TTS audio file paths (translated text to speech)
   String? _speaker1TtsAudioPath; // Speaker 1's translated text as audio
   String? _speaker2TtsAudioPath; // Speaker 2's translated text as audio
+  String? _cachedStereoAudioPath; // Cached stereo audio file path
 
   // TTS playback states
   bool _isPlayingTts1 = false; // Playing Speaker 1's translated audio
   bool _isPlayingTts2 = false; // Playing Speaker 2's translated audio
+
+  // Stereo audio playback state
+  bool _isPlayingStereo = false;
 
   // Speaker segments from diarization
   List<SpeakerSegment> _speakerSegments = [];
@@ -105,6 +111,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     try {
       await _googleSttService.initialize();
       await _ttsService.initialize();
+      await _stereoTtsService.initialize();
       final languages = await _configService.getSupportedLanguages();
       final defaultEnglish = languages.firstWhere(
         (lang) => lang.code == 'en',
@@ -233,7 +240,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _speaker2AudioPath = null;
         _speaker1TtsAudioPath = null;
         _speaker2TtsAudioPath = null;
+        _cachedStereoAudioPath = null;
         _speakerSegments = [];
+        _isPlayingStereo = false;
         _transcriptions.clear();
         _translations.clear();
         _showTranslation = {
@@ -682,39 +691,281 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint('GoogleSTTTranslator: Starting TTS audio generation...');
 
       // Generate TTS audio for Speaker 1's translated text (for Speaker 2 to hear)
+      debugPrint('GoogleSTTTranslator: Checking Speaker 1 translation...');
+      debugPrint('  Translation[0]: ${_translations[0]}');
+      debugPrint('  Translation[0] is not null: ${_translations[0] != null}');
+      debugPrint(
+          '  Translation[0] is not empty: ${_translations[0]?.isNotEmpty ?? false}');
+
       if (_translations[0] != null && _translations[0]!.isNotEmpty) {
         final speaker2Language = _speakerLanguages[1];
+        debugPrint(
+            '  Speaker2Language: ${speaker2Language?.name} (${speaker2Language?.code})');
         if (speaker2Language != null) {
           debugPrint(
               'GoogleSTTTranslator: Generating TTS for Speaker 1 translation in ${speaker2Language.code}...');
-          _speaker1TtsAudioPath = await _ttsService.generateAudioFile(
-            _translations[0]!,
-            speaker2Language.code,
-          );
+          debugPrint('  Text to convert: "${_translations[0]}"');
+
+          // Try TTS generation with retry mechanism
+          bool ttsSuccess = false;
+          int retryCount = 0;
+          const maxRetries = 3;
+
+          while (!ttsSuccess && retryCount < maxRetries) {
+            try {
+              _speaker1TtsAudioPath = await _ttsService.generateAudioFile(
+                _translations[0]!,
+                speaker2Language.code,
+              );
+              debugPrint(
+                  'GoogleSTTTranslator: Speaker 1 TTS audio path (attempt ${retryCount + 1}): $_speaker1TtsAudioPath');
+
+              // Verify the file was actually created and has content
+              if (_speaker1TtsAudioPath != null) {
+                final file = File(_speaker1TtsAudioPath!);
+                final exists = await file.exists();
+                final size = exists ? await file.length() : 0;
+                debugPrint(
+                    'GoogleSTTTranslator: Speaker 1 TTS file verification (attempt ${retryCount + 1}):');
+                debugPrint('  File exists: $exists');
+                debugPrint('  File size: $size bytes');
+
+                if (exists && size > 0) {
+                  ttsSuccess = true;
+                  debugPrint(
+                      'GoogleSTTTranslator: Speaker 1 TTS file generation successful');
+                } else {
+                  debugPrint(
+                      'GoogleSTTTranslator: Speaker 1 TTS file generation failed - file is empty or missing (attempt ${retryCount + 1})');
+                  _speaker1TtsAudioPath = null;
+                  retryCount++;
+                  if (retryCount < maxRetries) {
+                    debugPrint(
+                        'GoogleSTTTranslator: Retrying Speaker 1 TTS generation...');
+                    await Future.delayed(const Duration(milliseconds: 1000));
+                  }
+                }
+              } else {
+                debugPrint(
+                    'GoogleSTTTranslator: Speaker 1 TTS generation returned null (attempt ${retryCount + 1})');
+                retryCount++;
+                if (retryCount < maxRetries) {
+                  debugPrint(
+                      'GoogleSTTTranslator: Retrying Speaker 1 TTS generation...');
+                  await Future.delayed(const Duration(milliseconds: 1000));
+                }
+              }
+            } catch (e) {
+              debugPrint(
+                  'GoogleSTTTranslator: Speaker 1 TTS generation error (attempt ${retryCount + 1}): $e');
+              retryCount++;
+              if (retryCount < maxRetries) {
+                debugPrint(
+                    'GoogleSTTTranslator: Retrying Speaker 1 TTS generation...');
+                await Future.delayed(const Duration(milliseconds: 1000));
+              }
+            }
+          }
+
+          if (!ttsSuccess) {
+            debugPrint(
+                'GoogleSTTTranslator: Speaker 1 TTS generation failed after $maxRetries attempts');
+            _speaker1TtsAudioPath = null;
+          }
+        } else {
           debugPrint(
-              'GoogleSTTTranslator: Speaker 1 TTS audio path: $_speaker1TtsAudioPath');
+              'GoogleSTTTranslator: Speaker 2 language is null, cannot generate TTS for Speaker 1');
         }
+      } else {
+        debugPrint(
+            'GoogleSTTTranslator: Speaker 1 translation is null or empty, skipping TTS generation');
       }
 
       // Generate TTS audio for Speaker 2's translated text (for Speaker 1 to hear)
+      debugPrint('GoogleSTTTranslator: Checking Speaker 2 translation...');
+      debugPrint('  Translation[1]: ${_translations[1]}');
+      debugPrint('  Translation[1] is not null: ${_translations[1] != null}');
+      debugPrint(
+          '  Translation[1] is not empty: ${_translations[1]?.isNotEmpty ?? false}');
+
       if (_translations[1] != null && _translations[1]!.isNotEmpty) {
         final speaker1Language = _speakerLanguages[0];
+        debugPrint(
+            '  Speaker1Language: ${speaker1Language?.name} (${speaker1Language?.code})');
         if (speaker1Language != null) {
           debugPrint(
               'GoogleSTTTranslator: Generating TTS for Speaker 2 translation in ${speaker1Language.code}...');
-          _speaker2TtsAudioPath = await _ttsService.generateAudioFile(
-            _translations[1]!,
-            speaker1Language.code,
-          );
+          debugPrint('  Text to convert: "${_translations[1]}"');
+
+          // Try TTS generation with retry mechanism
+          bool ttsSuccess = false;
+          int retryCount = 0;
+          const maxRetries = 3;
+
+          while (!ttsSuccess && retryCount < maxRetries) {
+            try {
+              _speaker2TtsAudioPath = await _ttsService.generateAudioFile(
+                _translations[1]!,
+                speaker1Language.code,
+              );
+              debugPrint(
+                  'GoogleSTTTranslator: Speaker 2 TTS audio path (attempt ${retryCount + 1}): $_speaker2TtsAudioPath');
+
+              // Verify the file was actually created and has content
+              if (_speaker2TtsAudioPath != null) {
+                final file = File(_speaker2TtsAudioPath!);
+                final exists = await file.exists();
+                final size = exists ? await file.length() : 0;
+                debugPrint(
+                    'GoogleSTTTranslator: Speaker 2 TTS file verification (attempt ${retryCount + 1}):');
+                debugPrint('  File exists: $exists');
+                debugPrint('  File size: $size bytes');
+
+                if (exists && size > 0) {
+                  ttsSuccess = true;
+                  debugPrint(
+                      'GoogleSTTTranslator: Speaker 2 TTS file generation successful');
+                } else {
+                  debugPrint(
+                      'GoogleSTTTranslator: Speaker 2 TTS file generation failed - file is empty or missing (attempt ${retryCount + 1})');
+                  _speaker2TtsAudioPath = null;
+                  retryCount++;
+                  if (retryCount < maxRetries) {
+                    debugPrint(
+                        'GoogleSTTTranslator: Retrying Speaker 2 TTS generation...');
+                    await Future.delayed(const Duration(milliseconds: 1000));
+                  }
+                }
+              } else {
+                debugPrint(
+                    'GoogleSTTTranslator: Speaker 2 TTS generation returned null (attempt ${retryCount + 1})');
+                retryCount++;
+                if (retryCount < maxRetries) {
+                  debugPrint(
+                      'GoogleSTTTranslator: Retrying Speaker 2 TTS generation...');
+                  await Future.delayed(const Duration(milliseconds: 1000));
+                }
+              }
+            } catch (e) {
+              debugPrint(
+                  'GoogleSTTTranslator: Speaker 2 TTS generation error (attempt ${retryCount + 1}): $e');
+              retryCount++;
+              if (retryCount < maxRetries) {
+                debugPrint(
+                    'GoogleSTTTranslator: Retrying Speaker 2 TTS generation...');
+                await Future.delayed(const Duration(milliseconds: 1000));
+              }
+            }
+          }
+
+          if (!ttsSuccess) {
+            debugPrint(
+                'GoogleSTTTranslator: Speaker 2 TTS generation failed after $maxRetries attempts');
+            _speaker2TtsAudioPath = null;
+          }
+        } else {
           debugPrint(
-              'GoogleSTTTranslator: Speaker 2 TTS audio path: $_speaker2TtsAudioPath');
+              'GoogleSTTTranslator: Speaker 1 language is null, cannot generate TTS for Speaker 2');
         }
+      } else {
+        debugPrint(
+            'GoogleSTTTranslator: Speaker 2 translation is null or empty, skipping TTS generation');
       }
+
+      // Add a small delay to ensure file system operations complete
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Generate stereo audio file immediately after TTS generation
+      await _generateStereoAudioFile();
 
       debugPrint('GoogleSTTTranslator: TTS audio generation completed');
     } catch (e) {
       debugPrint('GoogleSTTTranslator: TTS audio generation error: $e');
       // Don't throw - TTS failure shouldn't break the app
+    }
+  }
+
+  /// Generate stereo audio file from TTS audio files
+  /// This method creates the stereo file once and caches it for reuse
+  Future<void> _generateStereoAudioFile() async {
+    try {
+      debugPrint(
+          'GoogleSTTTranslator: Starting stereo audio file generation...');
+      debugPrint('  Speaker1TtsAudioPath: $_speaker1TtsAudioPath');
+      debugPrint('  Speaker2TtsAudioPath: $_speaker2TtsAudioPath');
+
+      // Check if we have both TTS audio files
+      if (_speaker1TtsAudioPath == null || _speaker2TtsAudioPath == null) {
+        debugPrint(
+            'GoogleSTTTranslator: Cannot generate stereo audio - missing TTS files');
+        debugPrint(
+            '  Speaker1TtsAudioPath is null: ${_speaker1TtsAudioPath == null}');
+        debugPrint(
+            '  Speaker2TtsAudioPath is null: ${_speaker2TtsAudioPath == null}');
+        return;
+      }
+
+      // Check if both files exist
+      final leftFile = File(_speaker1TtsAudioPath!);
+      final rightFile = File(_speaker2TtsAudioPath!);
+
+      final leftExists = await leftFile.exists();
+      final rightExists = await rightFile.exists();
+
+      debugPrint('GoogleSTTTranslator: TTS file existence check:');
+      debugPrint('  Left file exists: $leftExists');
+      debugPrint('  Right file exists: $rightExists');
+
+      if (!leftExists || !rightExists) {
+        debugPrint(
+            'GoogleSTTTranslator: Cannot generate stereo audio - TTS files do not exist');
+        if (!leftExists) {
+          debugPrint('  Left TTS file missing: $_speaker1TtsAudioPath');
+        }
+        if (!rightExists) {
+          debugPrint('  Right TTS file missing: $_speaker2TtsAudioPath');
+        }
+        return;
+      }
+
+      // Check file sizes
+      final leftSize = await leftFile.length();
+      final rightSize = await rightFile.length();
+      debugPrint('GoogleSTTTranslator: TTS file sizes:');
+      debugPrint('  Left file size: $leftSize bytes');
+      debugPrint('  Right file size: $rightSize bytes');
+
+      debugPrint('GoogleSTTTranslator: Generating stereo audio file...');
+      debugPrint('  Left TTS file: $_speaker1TtsAudioPath');
+      debugPrint('  Right TTS file: $_speaker2TtsAudioPath');
+
+      // Generate stereo audio file using the robust service
+      _cachedStereoAudioPath =
+          await _stereoTtsService.createTrueStereoAudioFile(
+        _speaker1TtsAudioPath!,
+        _speaker2TtsAudioPath!,
+        outputFileName:
+            'cached_stereo_${DateTime.now().millisecondsSinceEpoch}.wav',
+      );
+
+      if (_cachedStereoAudioPath != null) {
+        debugPrint(
+            'GoogleSTTTranslator: Stereo audio file generated and cached: $_cachedStereoAudioPath');
+
+        // Verify the cached file exists
+        final cachedFile = File(_cachedStereoAudioPath!);
+        final cachedExists = await cachedFile.exists();
+        final cachedSize = cachedExists ? await cachedFile.length() : 0;
+        debugPrint('GoogleSTTTranslator: Cached stereo file verification:');
+        debugPrint('  File exists: $cachedExists');
+        debugPrint('  File size: $cachedSize bytes');
+      } else {
+        debugPrint(
+            'GoogleSTTTranslator: Failed to generate stereo audio file - returned null');
+      }
+    } catch (e, stackTrace) {
+      debugPrint('GoogleSTTTranslator: Error generating stereo audio file: $e');
+      debugPrint('GoogleSTTTranslator: Stack trace: $stackTrace');
     }
   }
 
@@ -823,6 +1074,90 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       setState(() {
         _isPlayingTts2 = false;
       });
+    }
+  }
+
+  /// Play stereo audio with both speakers' translated text
+  /// Left channel: Speaker 1's translated text (for Speaker 2 to hear)
+  /// Right channel: Speaker 2's translated text (for Speaker 1 to hear)
+  Future<void> _playStereoAudio() async {
+    try {
+      // Check if we have translations for both speakers
+      if (_translations[0] == null ||
+          _translations[0]!.isEmpty ||
+          _translations[1] == null ||
+          _translations[1]!.isEmpty) {
+        debugPrint(
+            'GoogleSTTTranslator: No translations available for stereo audio');
+        _showErrorDialog('No translations available for stereo audio playback');
+        return;
+      }
+
+      // Check if we have language information
+      final speaker1Language = _speakerLanguages[0];
+      final speaker2Language = _speakerLanguages[1];
+      if (speaker1Language == null || speaker2Language == null) {
+        debugPrint(
+            'GoogleSTTTranslator: No language information available for stereo audio');
+        _showErrorDialog(
+            'Language information not available for stereo audio playback');
+        return;
+      }
+
+      if (_isPlayingStereo) {
+        // Stop stereo audio
+        await _stereoTtsService.stopStereoAudio();
+        setState(() {
+          _isPlayingStereo = false;
+        });
+        debugPrint('GoogleSTTTranslator: Stereo audio stopped');
+      } else {
+        // Stop any individual TTS playback
+        await _ttsService.stop();
+        setState(() {
+          _isPlayingTts1 = false;
+          _isPlayingTts2 = false;
+        });
+
+        // Check if we have a cached stereo audio file
+        if (_cachedStereoAudioPath == null) {
+          debugPrint(
+              'GoogleSTTTranslator: No cached stereo audio file available');
+          _showErrorDialog(
+              'Stereo audio file not available. Please try again.');
+          return;
+        }
+
+        // Check if the cached file exists
+        final stereoFile = File(_cachedStereoAudioPath!);
+        if (!await stereoFile.exists()) {
+          debugPrint(
+              'GoogleSTTTranslator: Cached stereo audio file does not exist: $_cachedStereoAudioPath');
+          _showErrorDialog('Stereo audio file not found. Please try again.');
+          return;
+        }
+
+        debugPrint('GoogleSTTTranslator: Playing cached stereo audio...');
+        debugPrint('  Cached stereo file: $_cachedStereoAudioPath');
+        debugPrint(
+            '  Left channel (Speaker 1): "${_translations[0]}" in ${speaker2Language.code}');
+        debugPrint(
+            '  Right channel (Speaker 2): "${_translations[1]}" in ${speaker1Language.code}');
+
+        // Play the cached stereo audio file
+        await _stereoTtsService.playStereoAudio(_cachedStereoAudioPath!);
+
+        setState(() {
+          _isPlayingStereo = true;
+        });
+        debugPrint('GoogleSTTTranslator: Stereo audio playing successfully');
+      }
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Stereo audio playback error: $e');
+      setState(() {
+        _isPlayingStereo = false;
+      });
+      _showErrorDialog('Error playing stereo audio: $e');
     }
   }
 
@@ -1424,6 +1759,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _speaker1Player.dispose();
     _speaker2Player.dispose();
     _ttsService.dispose();
+    _stereoTtsService.dispose();
     super.dispose();
   }
 
@@ -1839,6 +2175,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             isPlaying: _isPlayingSpeaker2,
             onTap: _playSpeaker2Audio,
           ),
+          const SizedBox(height: 30),
+          // Stereo Audio Button
+          _buildStereoAudioButton(),
           const SizedBox(height: 40),
           _buildSegmentsList(),
         ],
@@ -2169,6 +2508,125 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               ),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Build stereo audio button for playing both speakers' translated text
+  Widget _buildStereoAudioButton() {
+    // Check if we have translations for both speakers
+    final hasTranslations = _translations[0] != null &&
+        _translations[0]!.isNotEmpty &&
+        _translations[1] != null &&
+        _translations[1]!.isNotEmpty;
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1D1E33),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isPlayingStereo
+              ? Colors.purple
+              : Colors.purple.withValues(alpha: 0.3),
+          width: 2,
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.headphones,
+                color: _isPlayingStereo
+                    ? Colors.purple
+                    : Colors.purple.withValues(alpha: 0.7),
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Stereo Audio Playback',
+                      style: TextStyle(
+                        color: _isPlayingStereo ? Colors.purple : Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Left: Speaker 1\'s translation → Right: Speaker 2\'s translation',
+                      style: TextStyle(
+                        color: Colors.grey.shade400,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              GestureDetector(
+                onTap: hasTranslations ? _playStereoAudio : null,
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: hasTranslations
+                        ? (_isPlayingStereo ? Colors.red : Colors.purple)
+                        : Colors.grey.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(
+                      color: hasTranslations
+                          ? (_isPlayingStereo ? Colors.red : Colors.purple)
+                          : Colors.grey.withValues(alpha: 0.5),
+                      width: 1,
+                    ),
+                  ),
+                  child: Icon(
+                    _isPlayingStereo ? Icons.stop : Icons.play_arrow,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          if (!hasTranslations) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(
+                  color: Colors.orange.withValues(alpha: 0.3),
+                  width: 1,
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: Colors.orange,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Complete translation first to enable stereo audio playback',
+                      style: TextStyle(
+                        color: Colors.orange,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ],
       ),
     );

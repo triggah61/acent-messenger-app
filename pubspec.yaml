@@ -90,6 +90,8 @@ dependencies:
   sherpa_onnx: ^1.10.7 # Most reliable in-device Whisper solution
   # Text-to-speech for translation audio playback
   flutter_tts: ^3.8.3
+  # Audio processing for stereo merging (using native Flutter)
+  # No additional dependencies needed - using existing audioplayers
 
 dev_dependencies:
   flutter_test:
