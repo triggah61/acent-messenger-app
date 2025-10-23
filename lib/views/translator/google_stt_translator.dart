@@ -50,6 +50,10 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   final int _numberOfSpeakers = 2;
   bool _showSpeakerSetup = true;
 
+  // Speaker gender and earpiece configuration
+  Map<int, String> _speakerGenders = {}; // 0: 'male', 1: 'female'
+  Map<int, String> _speakerEarpieces = {}; // 0: 'left', 1: 'right'
+
   // Recording state
   bool _isRecording = false;
   bool _isProcessing = false;
@@ -123,6 +127,14 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _speakerLanguages = {
           0: defaultEnglish,
           1: defaultEnglish,
+        };
+        _speakerGenders = {
+          0: 'male', // Default to male
+          1: 'female', // Default to female
+        };
+        _speakerEarpieces = {
+          0: 'left', // Default to left earpiece
+          1: 'right', // Default to right earpiece
         };
         _showTranslation = {
           0: false, // Show original transcription by default
@@ -242,6 +254,16 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _speaker2TtsAudioPath = null;
         _cachedStereoAudioPath = null;
         _speakerSegments = [];
+
+        // Reset gender and earpiece to defaults
+        _speakerGenders = {
+          0: 'male',
+          1: 'female',
+        };
+        _speakerEarpieces = {
+          0: 'left',
+          1: 'right',
+        };
         _isPlayingStereo = false;
         _transcriptions.clear();
         _translations.clear();
@@ -716,6 +738,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               _speaker1TtsAudioPath = await _ttsService.generateAudioFile(
                 _translations[0]!,
                 speaker2Language.code,
+                gender: _speakerGenders[0],
               );
               debugPrint(
                   'GoogleSTTTranslator: Speaker 1 TTS audio path (attempt ${retryCount + 1}): $_speaker1TtsAudioPath');
@@ -807,6 +830,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               _speaker2TtsAudioPath = await _ttsService.generateAudioFile(
                 _translations[1]!,
                 speaker1Language.code,
+                gender: _speakerGenders[1],
               );
               debugPrint(
                   'GoogleSTTTranslator: Speaker 2 TTS audio path (attempt ${retryCount + 1}): $_speaker2TtsAudioPath');
@@ -936,14 +960,41 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint('  Right file size: $rightSize bytes');
 
       debugPrint('GoogleSTTTranslator: Generating stereo audio file...');
-      debugPrint('  Left TTS file: $_speaker1TtsAudioPath');
-      debugPrint('  Right TTS file: $_speaker2TtsAudioPath');
+      debugPrint('  Speaker 1 TTS file: $_speaker1TtsAudioPath');
+      debugPrint('  Speaker 2 TTS file: $_speaker2TtsAudioPath');
+      debugPrint('  Speaker 1 earpiece: ${_speakerEarpieces[0]}');
+      debugPrint('  Speaker 2 earpiece: ${_speakerEarpieces[1]}');
+
+      // Determine which TTS file goes to which channel based on earpiece configuration
+      // CORRECT LOGIC: Each speaker's translated TTS should play in the OTHER speaker's earpiece
+      String leftChannelFile;
+      String rightChannelFile;
+
+      if (_speakerEarpieces[0] == 'left') {
+        // Speaker 1 has left earpiece, so Speaker 2's translated TTS goes to left channel (for Speaker 1 to hear)
+        // Speaker 2 has right earpiece, so Speaker 1's translated TTS goes to right channel (for Speaker 2 to hear)
+        leftChannelFile =
+            _speaker2TtsAudioPath!; // Speaker 2's translated TTS for Speaker 1's left earpiece
+        rightChannelFile =
+            _speaker1TtsAudioPath!; // Speaker 1's translated TTS for Speaker 2's right earpiece
+        debugPrint(
+            'GoogleSTTTranslator: Audio routing - Left channel: Speaker 2 TTS (for Speaker 1), Right channel: Speaker 1 TTS (for Speaker 2)');
+      } else {
+        // Speaker 1 has right earpiece, so Speaker 2's translated TTS goes to right channel (for Speaker 1 to hear)
+        // Speaker 2 has left earpiece, so Speaker 1's translated TTS goes to left channel (for Speaker 2 to hear)
+        leftChannelFile =
+            _speaker1TtsAudioPath!; // Speaker 1's translated TTS for Speaker 2's left earpiece
+        rightChannelFile =
+            _speaker2TtsAudioPath!; // Speaker 2's translated TTS for Speaker 1's right earpiece
+        debugPrint(
+            'GoogleSTTTranslator: Audio routing - Left channel: Speaker 1 TTS (for Speaker 2), Right channel: Speaker 2 TTS (for Speaker 1)');
+      }
 
       // Generate stereo audio file using the robust service
       _cachedStereoAudioPath =
           await _stereoTtsService.createTrueStereoAudioFile(
-        _speaker1TtsAudioPath!,
-        _speaker2TtsAudioPath!,
+        leftChannelFile,
+        rightChannelFile,
         outputFileName:
             'cached_stereo_${DateTime.now().millisecondsSinceEpoch}.wav',
       );
@@ -1927,6 +1978,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             ],
           ),
           const SizedBox(height: 16),
+
+          // Language Selection
           DropdownButtonFormField<Language>(
             value: currentLanguage,
             decoration: InputDecoration(
@@ -1965,7 +2018,197 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               }
             },
           ),
+
+          const SizedBox(height: 16),
+
+          // Gender Selection
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Gender:',
+                  style: TextStyle(
+                    color: speakerColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _buildGenderOption(
+                        speakerIndex,
+                        'male',
+                        'Male',
+                        Icons.male,
+                        speakerColor,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildGenderOption(
+                        speakerIndex,
+                        'female',
+                        'Female',
+                        Icons.female,
+                        speakerColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // Earpiece Selection
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  'Earpiece:',
+                  style: TextStyle(
+                    color: speakerColor,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _buildEarpieceOption(
+                        speakerIndex,
+                        'left',
+                        'Left',
+                        Icons.headphones,
+                        speakerColor,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: _buildEarpieceOption(
+                        speakerIndex,
+                        'right',
+                        'Right',
+                        Icons.headphones,
+                        speakerColor,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildGenderOption(int speakerIndex, String gender, String label,
+      IconData icon, Color speakerColor) {
+    final isSelected = _speakerGenders[speakerIndex] == gender;
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          _speakerGenders[speakerIndex] = gender;
+        });
+        debugPrint(
+            'GoogleSTTTranslator: Speaker $speakerIndex gender changed to: $gender');
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? speakerColor.withValues(alpha: 0.2)
+              : const Color(0xFF0A0E21),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color:
+                isSelected ? speakerColor : speakerColor.withValues(alpha: 0.3),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? speakerColor : Colors.white70,
+              size: 20,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? speakerColor : Colors.white70,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEarpieceOption(int speakerIndex, String earpiece, String label,
+      IconData icon, Color speakerColor) {
+    final isSelected = _speakerEarpieces[speakerIndex] == earpiece;
+
+    return GestureDetector(
+      onTap: () {
+        setState(() {
+          // Update current speaker's earpiece
+          _speakerEarpieces[speakerIndex] = earpiece;
+
+          // Automatically assign opposite earpiece to other speaker
+          final otherSpeakerIndex = speakerIndex == 0 ? 1 : 0;
+          final oppositeEarpiece = earpiece == 'left' ? 'right' : 'left';
+          _speakerEarpieces[otherSpeakerIndex] = oppositeEarpiece;
+        });
+        debugPrint(
+            'GoogleSTTTranslator: Speaker $speakerIndex earpiece changed to: $earpiece');
+        debugPrint(
+            'GoogleSTTTranslator: Speaker ${speakerIndex == 0 ? 1 : 0} earpiece automatically set to: ${earpiece == 'left' ? 'right' : 'left'}');
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? speakerColor.withValues(alpha: 0.2)
+              : const Color(0xFF0A0E21),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color:
+                isSelected ? speakerColor : speakerColor.withValues(alpha: 0.3),
+            width: isSelected ? 2 : 1,
+          ),
+        ),
+        child: Column(
+          children: [
+            Icon(
+              icon,
+              color: isSelected ? speakerColor : Colors.white70,
+              size: 20,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: TextStyle(
+                color: isSelected ? speakerColor : Colors.white70,
+                fontSize: 12,
+                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

@@ -57,7 +57,8 @@ class TtsService {
   }
 
   /// Generate audio file from text and return the file path
-  Future<String?> generateAudioFile(String text, String languageCode) async {
+  Future<String?> generateAudioFile(String text, String languageCode,
+      {String? gender}) async {
     if (!_isInitialized) {
       await initialize();
     }
@@ -72,9 +73,15 @@ class TtsService {
       final ttsLanguage = _mapLanguageToTtsCode(languageCode);
       debugPrint('TtsService: Generating audio for language: $ttsLanguage');
       debugPrint('TtsService: Text: "$text"');
+      debugPrint('TtsService: Gender: ${gender ?? 'default'}');
 
       // Set language for TTS
       await _flutterTts!.setLanguage(ttsLanguage);
+
+      // Set voice based on gender if specified
+      if (gender != null) {
+        await _setVoiceByGender(gender, ttsLanguage);
+      }
 
       // Generate unique filename
       final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -218,6 +225,77 @@ class TtsService {
 
   /// Get current audio path
   String? get currentAudioPath => _currentAudioPath;
+
+  /// Set voice based on gender preference
+  Future<void> _setVoiceByGender(String gender, String ttsLanguage) async {
+    try {
+      // Get available voices for the language
+      final voices = await _flutterTts!.getVoices;
+
+      if (voices != null && voices.isNotEmpty) {
+        // Filter voices by language
+        final languageVoices = voices
+            .where((voice) =>
+                voice['locale'] != null &&
+                voice['locale']
+                    .toString()
+                    .startsWith(ttsLanguage.split('-')[0]))
+            .toList();
+
+        if (languageVoices.isNotEmpty) {
+          // Try to find a voice that matches the gender preference
+          String? selectedVoice;
+
+          if (gender.toLowerCase() == 'female') {
+            // Look for female voices (common patterns: female, woman, etc.)
+            selectedVoice = languageVoices.firstWhere(
+              (voice) {
+                final name = voice['name']?.toString().toLowerCase() ?? '';
+                return name.contains('female') ||
+                    name.contains('woman') ||
+                    name.contains('f') ||
+                    name.contains('samantha') ||
+                    name.contains('susan') ||
+                    name.contains('karen');
+              },
+              orElse: () => languageVoices.first,
+            )['name']?.toString();
+          } else if (gender.toLowerCase() == 'male') {
+            // Look for male voices (common patterns: male, man, etc.)
+            selectedVoice = languageVoices.firstWhere(
+              (voice) {
+                final name = voice['name']?.toString().toLowerCase() ?? '';
+                return name.contains('male') ||
+                    name.contains('man') ||
+                    name.contains('m') ||
+                    name.contains('alex') ||
+                    name.contains('daniel') ||
+                    name.contains('david');
+              },
+              orElse: () => languageVoices.first,
+            )['name']?.toString();
+          }
+
+          if (selectedVoice != null) {
+            await _flutterTts!
+                .setVoice({'name': selectedVoice, 'locale': ttsLanguage});
+            debugPrint(
+                'TtsService: Set voice to: $selectedVoice for gender: $gender');
+          } else {
+            debugPrint(
+                'TtsService: No suitable voice found for gender: $gender, using default');
+          }
+        } else {
+          debugPrint(
+              'TtsService: No voices available for language: $ttsLanguage');
+        }
+      } else {
+        debugPrint('TtsService: No voices available on this device');
+      }
+    } catch (e) {
+      debugPrint('TtsService: Error setting voice by gender: $e');
+    }
+  }
 
   /// Map language code to TTS language code
   String _mapLanguageToTtsCode(String languageCode) {
