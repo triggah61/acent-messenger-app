@@ -372,4 +372,4 @@ class _TransactionHistoryState extends State<TransactionHistory> {
   void _showTransactionDetails(Transaction transaction) {
     TransactionDetailsModal.show(context, transaction);
   }
-} 
+}

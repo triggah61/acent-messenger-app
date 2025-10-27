@@ -16,6 +16,10 @@ class TtsService {
   bool _isPlaying = false;
   String? _currentAudioPath;
 
+  // Callbacks for UI state synchronization
+  VoidCallback? _onPlaybackCompleted;
+  VoidCallback? _onPlaybackError;
+
   /// Initialize the TTS service
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -34,18 +38,21 @@ class TtsService {
       _flutterTts!.setCompletionHandler(() {
         _isPlaying = false;
         debugPrint('TtsService: TTS playback completed');
+        _onPlaybackCompleted?.call();
       });
 
       // Set up error handler
       _flutterTts!.setErrorHandler((message) {
         _isPlaying = false;
         debugPrint('TtsService: TTS error: $message');
+        _onPlaybackError?.call();
       });
 
       // Set up audio player completion handler
       _audioPlayer!.onPlayerComplete.listen((event) {
         _isPlaying = false;
         debugPrint('TtsService: Audio file playback completed');
+        _onPlaybackCompleted?.call();
       });
 
       _isInitialized = true;
@@ -54,6 +61,16 @@ class TtsService {
       debugPrint('TtsService: Initialization error: $e');
       rethrow;
     }
+  }
+
+  /// Set callback for playback completion
+  void setPlaybackCompletedCallback(VoidCallback? callback) {
+    _onPlaybackCompleted = callback;
+  }
+
+  /// Set callback for playback error
+  void setPlaybackErrorCallback(VoidCallback? callback) {
+    _onPlaybackError = callback;
   }
 
   /// Generate audio file from text and return the file path

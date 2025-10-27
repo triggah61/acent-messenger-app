@@ -6,6 +6,8 @@ import 'dart:math' as math;
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/services.dart';
+import 'package:noise_meter/noise_meter.dart';
 
 import '../../services/config_service.dart';
 import '../../services/permission_service.dart';
@@ -76,6 +78,41 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   // Stereo audio playback state
   bool _isPlayingStereo = false;
 
+  // Note: Using SystemSound for sound effects instead of AudioPlayer
+
+  // Automatic translation system state
+  bool _isAutomaticMode = false;
+  bool _isContinuousRecording = false;
+  double _currentSoundLevel = 0.0;
+  List<double> _soundLevelHistory = [];
+  Timer? _silentDetectionTimer;
+  int _silentDetectionCountdown = 0;
+  bool _isSilentDetectionActive = false;
+
+  // Manual testing controls
+  bool _isManualTestingMode = false;
+  double _manualAmplitude = 0.0;
+
+  // Real-time microphone amplitude monitoring
+  NoiseMeter? _noiseMeter;
+  StreamSubscription<NoiseReading>? _noiseSubscription;
+
+  // Sound level thresholds for speech detection
+  static const double _minSpeechLevel =
+      0.75; // Minimum level to consider as speech (75% - corresponds to ~67.5 dB)
+  // Increased from 40% to avoid false triggers from background noise (fans, AC, etc.)
+  static const double _maxSpeechLevel = 1.0; // Maximum level for normal speech
+  static const int _silentDetectionDuration =
+      3; // 3 seconds of silence before stopping
+
+  // Speech continuity tracking to avoid false triggers from brief noise spikes
+  int _consecutiveSpeechDetections = 0;
+  static const int _minConsecutiveSpeechDetections =
+      3; // Require 3 consecutive detections (300ms) to confirm speech
+
+  // Track if any speech has been detected in current recording session
+  bool _hasDetectedSpeechInSession = false;
+
   // Speaker segments from diarization
   List<SpeakerSegment> _speakerSegments = [];
 
@@ -116,6 +153,82 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       await _googleSttService.initialize();
       await _ttsService.initialize();
       await _stereoTtsService.initialize();
+
+      // Set up TTS service callbacks for UI state synchronization
+      _ttsService.setPlaybackCompletedCallback(() {
+        if (mounted) {
+          setState(() {
+            _isPlayingTts1 = false;
+            _isPlayingTts2 = false;
+          });
+          debugPrint(
+              'GoogleSTTTranslator: TTS playback completed - UI state updated');
+        }
+      });
+
+      _ttsService.setPlaybackErrorCallback(() {
+        if (mounted) {
+          setState(() {
+            _isPlayingTts1 = false;
+            _isPlayingTts2 = false;
+          });
+          debugPrint(
+              'GoogleSTTTranslator: TTS playback error - UI state updated');
+        }
+      });
+
+      // Set up unified stereo TTS service callback for both UI state and automatic mode
+      _stereoTtsService.setPlaybackCompletedCallback(() {
+        debugPrint(
+            'GoogleSTTTranslator: 🎵 Unified playback completion callback triggered!');
+        debugPrint(
+            '  _isAutomaticMode: $_isAutomaticMode, _isRecording: $_isRecording, _isPlayingStereo: $_isPlayingStereo');
+
+        if (mounted) {
+          setState(() {
+            _isPlayingStereo = false;
+          });
+        }
+
+        // Handle automatic mode restart
+        if (_isAutomaticMode && !_isRecording) {
+          debugPrint(
+              'GoogleSTTTranslator: ✅ Automatic mode - stereo playback COMPLETED! Starting new cycle in 500ms...');
+
+          setState(() {
+            _isProcessing = false;
+          });
+
+          // Longer delay to ensure TTS audio has completely finished
+          // This prevents the mic from capturing the previous cycle's TTS audio
+          Future.delayed(const Duration(milliseconds: 1500), () {
+            // Double-check conditions before starting new cycle
+            if (_isAutomaticMode && !_isRecording && !_isPlayingStereo) {
+              debugPrint(
+                  'GoogleSTTTranslator: 🔄 Conditions met, starting new recording cycle...');
+              debugPrint(
+                  'GoogleSTTTranslator: ⏰ 1.5s delay ensures TTS audio has completely finished');
+              _startAutomaticRecording();
+            } else {
+              debugPrint(
+                  'GoogleSTTTranslator: ⚠️ Conditions not met for restart: mode=$_isAutomaticMode, recording=$_isRecording, playing=$_isPlayingStereo');
+            }
+          });
+        } else {
+          debugPrint(
+              'GoogleSTTTranslator: Manual mode - stereo playback completed, UI state updated');
+        }
+      });
+
+      _stereoTtsService.setPlaybackErrorCallback(() {
+        if (mounted) {
+          setState(() {
+            _isPlayingStereo = false;
+          });
+          debugPrint(
+              'GoogleSTTTranslator: Stereo TTS playback error - UI state updated');
+        }
+      });
       final languages = await _configService.getSupportedLanguages();
       final defaultEnglish = languages.firstWhere(
         (lang) => lang.code == 'en',
@@ -240,7 +353,11 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         const RecordConfig(
           encoder: AudioEncoder.wav,
           sampleRate: 16000,
+          bitRate: 128000,
           numChannels: 1,
+          autoGain: true, // Enable automatic gain control
+          echoCancel: false, // Disable echo cancellation to preserve voice
+          noiseSuppress: false, // Disable noise suppression to preserve voice
         ),
         path: _recordedAudioPath!,
       );
@@ -255,15 +372,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _cachedStereoAudioPath = null;
         _speakerSegments = [];
 
-        // Reset gender and earpiece to defaults
-        _speakerGenders = {
-          0: 'male',
-          1: 'female',
-        };
-        _speakerEarpieces = {
-          0: 'left',
-          1: 'right',
-        };
+        // Keep gender and earpiece selections - don't reset user preferences
+        // _speakerGenders and _speakerEarpieces are preserved
         _isPlayingStereo = false;
         _transcriptions.clear();
         _translations.clear();
@@ -287,7 +397,15 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   Future<void> _stopRecording() async {
     try {
+      // CRITICAL: Stop sound level monitoring FIRST
+      // This prevents mic from capturing during processing/playback phases
+      _stopSoundLevelMonitoring();
+      debugPrint(
+          'GoogleSTTTranslator: ✅ Sound level monitoring stopped (mic OFF for playback)');
+
+      // Stop the audio recorder
       await _audioRecorder.stop();
+
       setState(() {
         _isRecording = false;
         _isProcessing = true;
@@ -735,6 +853,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
           while (!ttsSuccess && retryCount < maxRetries) {
             try {
+              debugPrint(
+                  'GoogleSTTTranslator: Generating Speaker 1 TTS with gender: ${_speakerGenders[0]}');
               _speaker1TtsAudioPath = await _ttsService.generateAudioFile(
                 _translations[0]!,
                 speaker2Language.code,
@@ -827,6 +947,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
           while (!ttsSuccess && retryCount < maxRetries) {
             try {
+              debugPrint(
+                  'GoogleSTTTranslator: Generating Speaker 2 TTS with gender: ${_speakerGenders[1]}');
               _speaker2TtsAudioPath = await _ttsService.generateAudioFile(
                 _translations[1]!,
                 speaker1Language.code,
@@ -1010,6 +1132,17 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         debugPrint('GoogleSTTTranslator: Cached stereo file verification:');
         debugPrint('  File exists: $cachedExists');
         debugPrint('  File size: $cachedSize bytes');
+
+        // Auto-play the stereo audio if file was successfully generated
+        if (cachedExists && cachedSize > 0) {
+          debugPrint('GoogleSTTTranslator: Auto-playing stereo audio...');
+          // Add a small delay to ensure UI updates and user sees the stereo audio is ready
+          await Future.delayed(const Duration(milliseconds: 500));
+          await _autoPlayStereoAudio();
+        } else {
+          debugPrint(
+              'GoogleSTTTranslator: Stereo audio file is empty or missing, skipping auto-play');
+        }
       } else {
         debugPrint(
             'GoogleSTTTranslator: Failed to generate stereo audio file - returned null');
@@ -1017,6 +1150,12 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     } catch (e, stackTrace) {
       debugPrint('GoogleSTTTranslator: Error generating stereo audio file: $e');
       debugPrint('GoogleSTTTranslator: Stack trace: $stackTrace');
+    } finally {
+      // CRITICAL: Clean up TTS files AFTER stereo generation completes
+      // This ensures files are available during stereo generation
+      debugPrint(
+          'GoogleSTTTranslator: Cleaning up TTS files after stereo generation...');
+      await _cleanupTtsFiles();
     }
   }
 
@@ -1212,6 +1351,87 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     }
   }
 
+  /// Auto-play stereo audio immediately after generation
+  /// This method is called automatically when stereo audio is successfully generated
+  Future<void> _autoPlayStereoAudio() async {
+    try {
+      // GUARD: Prevent multiple simultaneous playbacks
+      if (_isPlayingStereo) {
+        debugPrint(
+            'GoogleSTTTranslator: ⚠️ Stereo audio already playing, skipping auto-play');
+        return;
+      }
+
+      debugPrint('GoogleSTTTranslator: Starting auto-play of stereo audio...');
+
+      // Check if we have translations for both speakers
+      if (_translations[0] == null ||
+          _translations[0]!.isEmpty ||
+          _translations[1] == null ||
+          _translations[1]!.isEmpty) {
+        debugPrint(
+            'GoogleSTTTranslator: No translations available for auto-play stereo audio');
+        return;
+      }
+
+      // Check if we have language information
+      final speaker1Language = _speakerLanguages[0];
+      final speaker2Language = _speakerLanguages[1];
+      if (speaker1Language == null || speaker2Language == null) {
+        debugPrint(
+            'GoogleSTTTranslator: No language information available for auto-play stereo audio');
+        return;
+      }
+
+      // Check if we have a cached stereo audio file
+      if (_cachedStereoAudioPath == null) {
+        debugPrint(
+            'GoogleSTTTranslator: No cached stereo audio file available for auto-play');
+        return;
+      }
+
+      // Check if the cached file exists
+      final stereoFile = File(_cachedStereoAudioPath!);
+      if (!await stereoFile.exists()) {
+        debugPrint(
+            'GoogleSTTTranslator: Cached stereo audio file does not exist for auto-play: $_cachedStereoAudioPath');
+        return;
+      }
+
+      debugPrint('GoogleSTTTranslator: Auto-playing cached stereo audio...');
+      debugPrint('  Cached stereo file: $_cachedStereoAudioPath');
+      debugPrint(
+          '  Left channel (Speaker 1): "${_translations[0]}" in ${speaker2Language.code}');
+      debugPrint(
+          '  Right channel (Speaker 2): "${_translations[1]}" in ${speaker1Language.code}');
+
+      // Stop any individual TTS playback before starting stereo
+      await _ttsService.stop();
+      setState(() {
+        _isPlayingTts1 = false;
+        _isPlayingTts2 = false;
+        _isPlayingStereo =
+            true; // Set BEFORE playing to prevent race conditions
+      });
+
+      // Play the cached stereo audio file
+      await _stereoTtsService.playStereoAudio(_cachedStereoAudioPath!);
+
+      debugPrint(
+          'GoogleSTTTranslator: ✅ Auto-play stereo audio started successfully');
+      debugPrint(
+          'GoogleSTTTranslator: Waiting for playback completion callback...');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: ❌ Auto-play stereo audio error: $e');
+      setState(() {
+        _isPlayingStereo = false;
+      });
+      // Don't show error dialog for auto-play failures - just log them
+      debugPrint(
+          'GoogleSTTTranslator: Auto-play failed silently, user can still play manually');
+    }
+  }
+
   void _toggleTranslation(int speakerId) {
     setState(() {
       _showTranslation[speakerId] = !(_showTranslation[speakerId] ?? false);
@@ -1246,9 +1466,13 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   List<VoiceSegment> _detectVoiceActivity(Float32List audioData) {
     const int windowSize = 400; // 25ms at 16kHz
     const double energyThreshold =
-        0.01; // Minimum energy to be considered voice
+        0.001; // Minimum energy to be considered voice (lowered from 0.01)
     const int minSilenceDuration = 8000; // 0.5 seconds of silence
     const int minVoiceDuration = 4800; // 0.3 seconds minimum voice
+
+    debugPrint(
+        'GoogleSTTTranslator: Voice activity detection - Audio data length: ${audioData.length} samples');
+    debugPrint('GoogleSTTTranslator: Energy threshold: $energyThreshold');
 
     final List<VoiceSegment> segments = [];
     bool inVoice = false;
@@ -1265,6 +1489,13 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         energy += sample * sample;
       }
       energy = energy / chunk.length;
+
+      // Debug logging for energy values
+      if (i % (windowSize * 10) == 0) {
+        // Log every 10th window to avoid spam
+        debugPrint(
+            'GoogleSTTTranslator: Energy at sample $i: ${energy.toStringAsFixed(6)}, threshold: $energyThreshold');
+      }
 
       if (energy > energyThreshold) {
         // Voice detected
@@ -1802,6 +2033,711 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     );
   }
 
+  /// Start automatic translation mode
+  Future<void> _startAutomaticMode() async {
+    if (_isAutomaticMode) return;
+
+    setState(() {
+      _isAutomaticMode = true;
+    });
+
+    debugPrint('GoogleSTTTranslator: Starting automatic translation mode');
+
+    // Start the continuous translation loop
+    await _startContinuousTranslationLoop();
+  }
+
+  /// Stop automatic translation mode
+  Future<void> _stopAutomaticMode() async {
+    if (!_isAutomaticMode) return;
+
+    setState(() {
+      _isAutomaticMode = false;
+      _isContinuousRecording = false;
+    });
+
+    // Stop any ongoing recording
+    if (_isRecording) {
+      await _stopRecording();
+    }
+
+    // Cancel silent detection timer
+    _silentDetectionTimer?.cancel();
+    _silentDetectionTimer = null;
+
+    // Stop noise meter monitoring
+    _stopSoundLevelMonitoring();
+
+    debugPrint('GoogleSTTTranslator: Stopped automatic translation mode');
+  }
+
+  /// Stop sound level monitoring
+  void _stopSoundLevelMonitoring() {
+    debugPrint('GoogleSTTTranslator: Stopping sound level monitoring');
+
+    // Cancel noise meter subscription
+    _noiseSubscription?.cancel();
+    _noiseSubscription = null;
+
+    // Dispose noise meter
+    _noiseMeter = null;
+
+    // Reset sound level data
+    setState(() {
+      _currentSoundLevel = 0.0;
+      _soundLevelHistory.clear();
+    });
+  }
+
+  /// Start continuous translation loop
+  Future<void> _startContinuousTranslationLoop() async {
+    if (!_isAutomaticMode) return;
+
+    debugPrint('GoogleSTTTranslator: Starting continuous translation loop');
+
+    // Start recording with sound level monitoring
+    await _startAutomaticRecording();
+  }
+
+  /// Start automatic recording with sound level monitoring
+  Future<void> _startAutomaticRecording() async {
+    if (!_isAutomaticMode || _isRecording) return;
+
+    try {
+      debugPrint('GoogleSTTTranslator: ═══ Starting new recording cycle ═══');
+
+      // NOTE: We do NOT stop playback here!
+      // Playback should have already finished before this is called.
+      // This method is only called from the playback completion callback.
+
+      // NOTE: We do NOT clean up files here!
+      // Files are cleaned up AFTER stereo generation and playback completes.
+      // This prevents deleting TTS files that are still being used.
+
+      setState(() {
+        _isContinuousRecording = true;
+        _isRecording = true;
+        _isSilentDetectionActive = false;
+        _silentDetectionCountdown = 0;
+        _consecutiveSpeechDetections = 0; // Reset speech detection counter
+        _hasDetectedSpeechInSession = false; // Reset first speech flag
+        _isProcessing = false; // Ensure processing flag is cleared
+        _isPlayingStereo = false; // Ensure playback flag is cleared
+      });
+
+      debugPrint(
+          'GoogleSTTTranslator: Starting automatic recording (waiting for first speech...)');
+
+      // CRITICAL: Ensure no audio is playing before starting mic
+      // This prevents capturing TTS audio from previous cycle
+      if (_isPlayingStereo) {
+        debugPrint(
+            'GoogleSTTTranslator: ⚠️ Stereo audio still playing, waiting...');
+        await Future.delayed(const Duration(milliseconds: 1000));
+      }
+
+      // Play start recording sound effect
+      await _playStartRecordingSound();
+
+      // IMPORTANT: Start recorder FIRST before noise meter
+      // This ensures the recorder gets priority access to the microphone
+
+      // Get recording path
+      final directory = await getApplicationDocumentsDirectory();
+      final recordingPath =
+          '${directory.path}/auto_recording_${DateTime.now().millisecondsSinceEpoch}.wav';
+
+      // Start recording with proper audio source
+      await _audioRecorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.wav,
+          sampleRate: 16000,
+          bitRate: 128000,
+          numChannels: 1,
+          autoGain: true, // Enable automatic gain control
+          echoCancel: false, // Disable echo cancellation to preserve voice
+          noiseSuppress: false, // Disable noise suppression to preserve voice
+        ),
+        path: recordingPath,
+      );
+
+      _recordedAudioPath = recordingPath;
+
+      debugPrint('GoogleSTTTranslator: Audio recorder started successfully');
+
+      // Add a small delay to ensure recorder has exclusive microphone access
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      // Start sound level monitoring (now sharing microphone with recorder)
+      _startSoundLevelMonitoring();
+
+      // DON'T start silent detection timer yet!
+      // It will start automatically when first speech is detected
+      debugPrint(
+          'GoogleSTTTranslator: Waiting for first speech to activate silent detection...');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Error starting automatic recording: $e');
+      setState(() {
+        _isRecording = false;
+        _isContinuousRecording = false;
+      });
+    }
+  }
+
+  /// Start sound level monitoring using real microphone input
+  void _startSoundLevelMonitoring() {
+    debugPrint(
+      'GoogleSTTTranslator: Starting real-time microphone amplitude monitoring',
+    );
+
+    try {
+      // Initialize noise meter for real-time microphone monitoring
+      _noiseMeter = NoiseMeter();
+
+      // Start listening to real microphone input
+      _noiseSubscription = _noiseMeter!.noise.listen(
+        (NoiseReading noiseReading) {
+          if (!_isAutomaticMode || !_isRecording) return;
+
+          // Convert decibel reading to normalized amplitude (0.0 to 1.0)
+          final normalizedAmplitude = _convertDecibelToAmplitude(
+            noiseReading.meanDecibel,
+          );
+
+          setState(() {
+            _currentSoundLevel = normalizedAmplitude;
+
+            // Add to history for graph (keep last 100 samples)
+            _soundLevelHistory.add(normalizedAmplitude);
+            if (_soundLevelHistory.length > 100) {
+              _soundLevelHistory.removeAt(0);
+            }
+          });
+
+          // Log significant changes
+          if (normalizedAmplitude > 0.05 ||
+              (normalizedAmplitude - _currentSoundLevel).abs() > 0.1) {
+            debugPrint(
+              'GoogleSTTTranslator: Real microphone amplitude: ${noiseReading.meanDecibel.toStringAsFixed(1)} dB, normalized: ${(normalizedAmplitude * 100).toStringAsFixed(1)}%',
+            );
+          }
+
+          // Check if sound level indicates speech
+          if (_isSpeechDetected(normalizedAmplitude)) {
+            _onSpeechDetected();
+          }
+        },
+        onError: (error) {
+          debugPrint('GoogleSTTTranslator: Noise meter error: $error');
+        },
+      );
+
+      debugPrint(
+        'GoogleSTTTranslator: Real-time microphone monitoring started successfully',
+      );
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Error starting noise meter: $e');
+    }
+  }
+
+  /// Convert decibel reading to normalized amplitude (0.0 to 1.0)
+  double _convertDecibelToAmplitude(double decibel) {
+    // Real-world range: 30 dB (quiet) to 80 dB (loud speech)
+    final normalized = (decibel - 30) / 50;
+    return normalized.clamp(0.0, 1.0);
+  }
+
+  /// Check if current sound level indicates speech
+  bool _isSpeechDetected(double soundLevel) {
+    final isAboveThreshold =
+        soundLevel >= _minSpeechLevel && soundLevel <= _maxSpeechLevel;
+
+    // Track consecutive speech detections to avoid false triggers from brief noise spikes
+    if (isAboveThreshold) {
+      _consecutiveSpeechDetections++;
+    } else {
+      _consecutiveSpeechDetections = 0; // Reset counter when below threshold
+    }
+
+    // Require multiple consecutive detections to confirm actual speech
+    final isSpeech =
+        _consecutiveSpeechDetections >= _minConsecutiveSpeechDetections;
+
+    // Debug logging for speech detection
+    if (soundLevel > 0.05) {
+      // Only log if there's some sound
+      debugPrint(
+          'GoogleSTTTranslator: Sound level: ${(soundLevel * 100).toStringAsFixed(1)}%, '
+          'Above threshold: $isAboveThreshold, Consecutive: $_consecutiveSpeechDetections, '
+          'Speech confirmed: $isSpeech, Threshold: ${(_minSpeechLevel * 100).toStringAsFixed(0)}%');
+    }
+
+    return isSpeech;
+  }
+
+  /// Handle speech detection
+  void _onSpeechDetected() {
+    // Check if this is the first speech in this session
+    if (!_hasDetectedSpeechInSession) {
+      _hasDetectedSpeechInSession = true;
+      debugPrint(
+          'GoogleSTTTranslator: First speech detected! Starting silent detection timer');
+
+      // Start silent detection timer for the first time
+      _startSilentDetectionTimer();
+      return;
+    }
+
+    // If already in silent detection mode, reset the timer
+    if (!_isSilentDetectionActive) return;
+
+    debugPrint(
+        'GoogleSTTTranslator: Speech detected, resetting silent detection timer');
+
+    // Reset silent detection timer
+    _silentDetectionTimer?.cancel();
+    _startSilentDetectionTimer();
+  }
+
+  /// Start silent detection timer
+  void _startSilentDetectionTimer() {
+    _silentDetectionTimer?.cancel();
+
+    setState(() {
+      _isSilentDetectionActive = true;
+      _silentDetectionCountdown = _silentDetectionDuration;
+    });
+
+    debugPrint(
+        'GoogleSTTTranslator: Starting silent detection timer (${_silentDetectionDuration}s)');
+
+    _silentDetectionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!_isAutomaticMode || !_isRecording) {
+        timer.cancel();
+        debugPrint(
+            'GoogleSTTTranslator: Silent detection timer cancelled - mode changed');
+        return;
+      }
+
+      setState(() {
+        _silentDetectionCountdown--;
+      });
+
+      debugPrint(
+          'GoogleSTTTranslator: Silent detection countdown: ${_silentDetectionCountdown}s');
+
+      if (_silentDetectionCountdown <= 0) {
+        timer.cancel();
+        debugPrint('GoogleSTTTranslator: Silent detection timeout reached');
+        _onSilentDetectionTimeout();
+      }
+    });
+  }
+
+  /// Handle silent detection timeout
+  Future<void> _onSilentDetectionTimeout() async {
+    if (!_isAutomaticMode || !_isRecording) return;
+
+    debugPrint(
+        'GoogleSTTTranslator: Silent detection timeout, stopping recording');
+
+    // Play stop recording sound effect
+    await _playStopRecordingSound();
+
+    // Stop recording
+    await _stopRecording();
+
+    // Process the recorded audio
+    await _processRecordedAudio();
+  }
+
+  /// Process recorded audio through the translation pipeline
+  Future<void> _processRecordedAudio() async {
+    if (!_isAutomaticMode) return;
+
+    try {
+      setState(() {
+        _isProcessing = true;
+      });
+
+      debugPrint(
+          'GoogleSTTTranslator: Processing recorded audio in automatic mode');
+
+      // Set up playback completion callback BEFORE processing starts
+      // This ensures the callback is ready when auto-play happens
+      _setupPlaybackCompletionCallback();
+
+      // Process through the existing pipeline (this will trigger auto-play)
+      await _processAudio();
+
+      // Note: The callback will handle restarting after playback completes
+      debugPrint(
+          'GoogleSTTTranslator: Processing complete, waiting for TTS playback to finish...');
+    } catch (e) {
+      debugPrint(
+          'GoogleSTTTranslator: Error processing audio in automatic mode: $e');
+      setState(() {
+        _isProcessing = false;
+      });
+
+      // Restart recording after error
+      await Future.delayed(const Duration(seconds: 2));
+      await _startAutomaticRecording();
+    }
+  }
+
+  /// Set up playback completion callback for automatic restart
+  void _setupPlaybackCompletionCallback() {
+    debugPrint(
+        'GoogleSTTTranslator: Playback completion callback already set up in initState() - no action needed');
+
+    // NOTE: The callback is already set up in initState() as a unified callback
+    // that handles both UI state updates and automatic mode restart.
+    // No need to set up another callback here.
+  }
+
+  /// Build sound level graph widget
+  Widget _buildSoundLevelGraph() {
+    if (!_isAutomaticMode) return const SizedBox.shrink();
+
+    return Container(
+      height: 120,
+      margin: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1D1E33),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: _isRecording ? Colors.green : Colors.grey,
+          width: 2,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.graphic_eq,
+                color: _isRecording ? Colors.green : Colors.grey,
+                size: 20,
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Sound Level Monitor',
+                style: TextStyle(
+                  color: _isRecording ? Colors.green : Colors.grey,
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const Spacer(),
+              if (_isSilentDetectionActive)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.orange, width: 1),
+                  ),
+                  child: Text(
+                    'Silent: ${_silentDetectionCountdown}s',
+                    style: const TextStyle(
+                      color: Colors.orange,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              const SizedBox(width: 8),
+              // Manual testing toggle
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _isManualTestingMode = !_isManualTestingMode;
+                    if (_isManualTestingMode) {
+                      _manualAmplitude = 0.0;
+                    }
+                  });
+                },
+                child: Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: _isManualTestingMode
+                        ? Colors.blue.withValues(alpha: 0.2)
+                        : Colors.grey.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: _isManualTestingMode ? Colors.blue : Colors.grey,
+                      width: 1,
+                    ),
+                  ),
+                  child: Text(
+                    _isManualTestingMode ? 'Manual' : 'Auto',
+                    style: TextStyle(
+                      color: _isManualTestingMode ? Colors.blue : Colors.grey,
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: CustomPaint(
+              painter: SoundLevelGraphPainter(
+                soundLevelHistory: _soundLevelHistory,
+                currentLevel: _currentSoundLevel,
+                isRecording: _isRecording,
+                speechThreshold: _minSpeechLevel,
+              ),
+              size: Size.infinite,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Text(
+                'Current: ${(_currentSoundLevel * 100).toStringAsFixed(1)}%',
+                style: TextStyle(
+                  color: _isRecording ? Colors.green : Colors.grey,
+                  fontSize: 12,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                'Speech Threshold: ${(_minSpeechLevel * 100).toStringAsFixed(0)}%',
+                style: const TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
+          // Manual testing controls
+          if (_isManualTestingMode) ...[
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                const Text(
+                  'Manual Amplitude:',
+                  style: TextStyle(
+                    color: Colors.blue,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Slider(
+                    value: _manualAmplitude,
+                    min: 0.0,
+                    max: 1.0,
+                    divisions: 20,
+                    onChanged: (value) {
+                      setState(() {
+                        _manualAmplitude = value;
+                      });
+                    },
+                    activeColor: Colors.blue,
+                    inactiveColor: Colors.grey,
+                  ),
+                ),
+                Text(
+                  '${(_manualAmplitude * 100).toStringAsFixed(0)}%',
+                  style: const TextStyle(
+                    color: Colors.blue,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 4),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: [
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _manualAmplitude = 0.0;
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    foregroundColor: Colors.white,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  ),
+                  child: const Text('Silence', style: TextStyle(fontSize: 10)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _manualAmplitude = 0.1;
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange,
+                    foregroundColor: Colors.white,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  ),
+                  child: const Text('Low', style: TextStyle(fontSize: 10)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _manualAmplitude = 0.3;
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  ),
+                  child: const Text('Speech', style: TextStyle(fontSize: 10)),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    setState(() {
+                      _manualAmplitude = 0.6;
+                    });
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                  ),
+                  child: const Text('Loud', style: TextStyle(fontSize: 10)),
+                ),
+              ],
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// Clean up only TTS files (called after stereo generation)
+  Future<void> _cleanupTtsFiles() async {
+    try {
+      debugPrint('GoogleSTTTranslator: Cleaning up TTS files...');
+
+      int deletedCount = 0;
+
+      // Delete TTS audio files
+      if (_speaker1TtsAudioPath != null) {
+        final file1 = File(_speaker1TtsAudioPath!);
+        if (await file1.exists()) {
+          await file1.delete();
+          deletedCount++;
+          debugPrint(
+              'GoogleSTTTranslator: Deleted Speaker 1 TTS: $_speaker1TtsAudioPath');
+        }
+        _speaker1TtsAudioPath = null;
+      }
+
+      if (_speaker2TtsAudioPath != null) {
+        final file2 = File(_speaker2TtsAudioPath!);
+        if (await file2.exists()) {
+          await file2.delete();
+          deletedCount++;
+          debugPrint(
+              'GoogleSTTTranslator: Deleted Speaker 2 TTS: $_speaker2TtsAudioPath');
+        }
+        _speaker2TtsAudioPath = null;
+      }
+
+      debugPrint('GoogleSTTTranslator: ✅ Cleaned up $deletedCount TTS files');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Error cleaning up TTS files: $e');
+    }
+  }
+
+  /// Clean up files from previous cycle
+  Future<void> _cleanupPreviousCycleFiles() async {
+    try {
+      debugPrint('GoogleSTTTranslator: Cleaning up previous cycle files...');
+
+      int deletedCount = 0;
+
+      // NOTE: TTS files are cleaned up separately after stereo generation
+      // This prevents deleting files that are still being used
+
+      // Delete cached stereo audio file
+      if (_cachedStereoAudioPath != null) {
+        final stereoFile = File(_cachedStereoAudioPath!);
+        if (await stereoFile.exists()) {
+          await stereoFile.delete();
+          deletedCount++;
+          debugPrint(
+              'GoogleSTTTranslator: Deleted cached stereo: $_cachedStereoAudioPath');
+        }
+        _cachedStereoAudioPath = null;
+      }
+
+      // Delete previous speaker audio files from diarization
+      if (_speaker1AudioPath != null) {
+        final sp1File = File(_speaker1AudioPath!);
+        if (await sp1File.exists()) {
+          await sp1File.delete();
+          deletedCount++;
+        }
+        _speaker1AudioPath = null;
+      }
+
+      if (_speaker2AudioPath != null) {
+        final sp2File = File(_speaker2AudioPath!);
+        if (await sp2File.exists()) {
+          await sp2File.delete();
+          deletedCount++;
+        }
+        _speaker2AudioPath = null;
+      }
+
+      debugPrint(
+          'GoogleSTTTranslator: ✅ Cleaned up $deletedCount files from previous cycle');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Error cleaning up files: $e');
+      // Don't block new cycle if cleanup fails
+    }
+  }
+
+  /// Play start recording sound effect using system sound
+  Future<void> _playStartRecordingSound() async {
+    try {
+      // Use system click sound for start recording
+      SystemSound.play(SystemSoundType.click);
+      debugPrint(
+          'GoogleSTTTranslator: ✅ Played START recording sound (system click)');
+    } catch (e) {
+      debugPrint(
+          'GoogleSTTTranslator: ❌ Error playing start recording sound: $e');
+      // Don't block recording if sound effect fails
+    }
+  }
+
+  /// Play stop recording sound effect using system sound
+  Future<void> _playStopRecordingSound() async {
+    try {
+      // Use system alert sound for stop recording
+      SystemSound.play(SystemSoundType.alert);
+      debugPrint(
+          'GoogleSTTTranslator: ✅ Played STOP recording sound (system alert)');
+    } catch (e) {
+      debugPrint(
+          'GoogleSTTTranslator: ❌ Error playing stop recording sound: $e');
+      // Don't block processing if sound effect fails
+    }
+  }
+
   @override
   void dispose() {
     _pulseController.dispose();
@@ -1811,6 +2747,15 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _speaker2Player.dispose();
     _ttsService.dispose();
     _stereoTtsService.dispose();
+    // Note: No need to dispose SystemSound
+
+    // Clean up automatic mode resources
+    _silentDetectionTimer?.cancel();
+    _silentDetectionTimer = null;
+
+    // Clean up noise meter resources
+    _stopSoundLevelMonitoring();
+
     super.dispose();
   }
 
@@ -2217,13 +3162,14 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     return Column(
       children: [
         _buildSpeakerInfoBar(),
-        Expanded(
-          child: _isProcessing
-              ? _buildProcessingView()
-              : (_speaker1AudioPath != null && _speaker2AudioPath != null)
-                  ? _buildResultsView()
-                  : _buildIdleView(),
-        ),
+        _buildSoundLevelGraph(),
+        // Expanded(
+        //   child: _isProcessing
+        //       ? _buildProcessingView()
+        //       : (_speaker1AudioPath != null && _speaker2AudioPath != null)
+        //           ? _buildResultsView()
+        //           : _buildIdleView(),
+        // ),
         _buildRecordingControls(),
       ],
     );
@@ -2271,6 +3217,44 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                       color: speakerColor.withValues(alpha: 0.8),
                       fontSize: 10,
                     ),
+                  ),
+                  const SizedBox(height: 4),
+                  // Gender and Earpiece Configuration
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        _speakerGenders[index] == 'female'
+                            ? Icons.female
+                            : Icons.male,
+                        color: speakerColor.withValues(alpha: 0.7),
+                        size: 12,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _speakerGenders[index]?.toUpperCase() ?? 'M',
+                        style: TextStyle(
+                          color: speakerColor.withValues(alpha: 0.7),
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Icon(
+                        Icons.headphones,
+                        color: speakerColor.withValues(alpha: 0.7),
+                        size: 12,
+                      ),
+                      const SizedBox(width: 4),
+                      Text(
+                        _speakerEarpieces[index]?.toUpperCase() ?? 'L',
+                        style: TextStyle(
+                          color: speakerColor.withValues(alpha: 0.7),
+                          fontSize: 9,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
@@ -2972,43 +3956,129 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       padding: const EdgeInsets.all(20),
       color: const Color(0xFF1D1E33),
       child: SafeArea(
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
+        child: Column(
           children: [
-            GestureDetector(
-              onTap: _isProcessing ? null : _toggleRecording,
-              child: AnimatedBuilder(
-                animation: _pulseAnimation,
-                builder: (context, child) {
-                  return Transform.scale(
-                    scale: _isRecording ? _pulseAnimation.value : 1.0,
-                    child: Container(
-                      width: 80,
-                      height: 80,
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color:
-                            _isRecording ? Colors.red : const Color(0xFF00D9FF),
-                        boxShadow: _isRecording
-                            ? [
-                                BoxShadow(
-                                  color: Colors.red.withValues(alpha: 0.3),
-                                  blurRadius: 20,
-                                  spreadRadius: 5,
-                                ),
-                              ]
-                            : [],
-                      ),
-                      child: Icon(
-                        _isRecording ? Icons.stop : Icons.mic,
-                        color: Colors.white,
-                        size: 40,
+            // Automatic Mode Toggle
+            if (!_isAutomaticMode) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                child: ElevatedButton.icon(
+                  onPressed: _isProcessing ? null : _startAutomaticMode,
+                  icon: const Icon(Icons.autorenew),
+                  label: const Text('Start Automatic Mode'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+
+            // Manual Recording Controls (only show when not in automatic mode)
+            if (!_isAutomaticMode) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  GestureDetector(
+                    onTap: _isProcessing ? null : _toggleRecording,
+                    child: AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, child) {
+                        return Transform.scale(
+                          scale: _isRecording ? _pulseAnimation.value : 1.0,
+                          child: Container(
+                            width: 80,
+                            height: 80,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _isRecording
+                                  ? Colors.red
+                                  : const Color(0xFF00D9FF),
+                              boxShadow: _isRecording
+                                  ? [
+                                      BoxShadow(
+                                        color:
+                                            Colors.red.withValues(alpha: 0.3),
+                                        blurRadius: 20,
+                                        spreadRadius: 5,
+                                      ),
+                                    ]
+                                  : [],
+                            ),
+                            child: Icon(
+                              _isRecording ? Icons.stop : Icons.mic,
+                              color: Colors.white,
+                              size: 40,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ],
+              ),
+            ],
+
+            // Automatic Mode Controls
+            if (_isAutomaticMode) ...[
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  // Stop Automatic Mode Button
+                  Container(
+                    margin: const EdgeInsets.only(right: 16),
+                    child: ElevatedButton.icon(
+                      onPressed: _stopAutomaticMode,
+                      icon: const Icon(Icons.stop),
+                      label: const Text('Stop Auto'),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 12),
                       ),
                     ),
-                  );
-                },
+                  ),
+
+                  // Status Indicator
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: _isRecording
+                          ? Colors.green.withValues(alpha: 0.2)
+                          : Colors.blue.withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(
+                        color: _isRecording ? Colors.green : Colors.blue,
+                        width: 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          _isRecording ? Icons.mic : Icons.pause,
+                          color: _isRecording ? Colors.green : Colors.blue,
+                          size: 16,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _isRecording ? 'Listening...' : 'Processing...',
+                          style: TextStyle(
+                            color: _isRecording ? Colors.green : Colors.blue,
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-            ),
+            ],
           ],
         ),
       ),
@@ -3067,4 +4137,82 @@ class VoiceFeatures {
     this.startTime = 0.0,
     this.endTime = 0.0,
   });
+}
+
+/// Custom painter for drawing sound level graph
+class SoundLevelGraphPainter extends CustomPainter {
+  final List<double> soundLevelHistory;
+  final double currentLevel;
+  final bool isRecording;
+  final double speechThreshold;
+
+  SoundLevelGraphPainter({
+    required this.soundLevelHistory,
+    required this.currentLevel,
+    required this.isRecording,
+    required this.speechThreshold,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    if (soundLevelHistory.isEmpty) return;
+
+    final paint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.0;
+
+    // Draw speech threshold line
+    final thresholdY = size.height * (1 - speechThreshold);
+    paint.color = Colors.orange.withValues(alpha: 0.5);
+    canvas.drawLine(
+      Offset(0, thresholdY),
+      Offset(size.width, thresholdY),
+      paint,
+    );
+
+    // Draw sound level history
+    if (soundLevelHistory.length > 1) {
+      final path = Path();
+      final stepX = size.width / (soundLevelHistory.length - 1);
+
+      for (int i = 0; i < soundLevelHistory.length; i++) {
+        final x = i * stepX;
+        final y = size.height * (1 - soundLevelHistory[i]);
+
+        if (i == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+
+      // Color based on recording state and speech detection
+      if (isRecording) {
+        paint.color =
+            currentLevel >= speechThreshold ? Colors.green : Colors.blue;
+      } else {
+        paint.color = Colors.grey;
+      }
+
+      canvas.drawPath(path, paint);
+    }
+
+    // Draw current level indicator
+    if (isRecording) {
+      final currentY = size.height * (1 - currentLevel);
+      paint.color =
+          currentLevel >= speechThreshold ? Colors.green : Colors.blue;
+      paint.style = PaintingStyle.fill;
+      canvas.drawCircle(
+        Offset(size.width - 10, currentY),
+        4.0,
+        paint,
+      );
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) {
+    return true; // Always repaint for real-time updates
+  }
 }

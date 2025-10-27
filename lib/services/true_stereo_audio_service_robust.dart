@@ -18,6 +18,10 @@ class TrueStereoAudioServiceRobust {
   bool _isPlaying = false;
   String? _currentStereoAudioPath;
 
+  // Callbacks for UI state synchronization
+  VoidCallback? _onPlaybackCompleted;
+  VoidCallback? _onPlaybackError;
+
   /// Initialize the true stereo audio service
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -30,6 +34,7 @@ class TrueStereoAudioServiceRobust {
         _isPlaying = false;
         debugPrint(
             'TrueStereoAudioServiceRobust: Stereo audio playback completed');
+        _onPlaybackCompleted?.call();
       });
 
       _isInitialized = true;
@@ -38,6 +43,16 @@ class TrueStereoAudioServiceRobust {
       debugPrint('TrueStereoAudioServiceRobust: Initialization error: $e');
       rethrow;
     }
+  }
+
+  /// Set callback for playback completion
+  void setPlaybackCompletedCallback(VoidCallback? callback) {
+    _onPlaybackCompleted = callback;
+  }
+
+  /// Set callback for playback error
+  void setPlaybackErrorCallback(VoidCallback? callback) {
+    _onPlaybackError = callback;
   }
 
   /// Create a true stereo WAV file from two mono audio files
@@ -216,6 +231,7 @@ class TrueStereoAudioServiceRobust {
       _isPlaying = false;
       debugPrint(
           'TrueStereoAudioServiceRobust: Error playing stereo audio file: $e');
+      _onPlaybackError?.call();
     }
   }
 

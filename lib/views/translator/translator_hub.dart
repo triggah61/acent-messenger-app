@@ -1,8 +1,5 @@
 import 'package:flutter/material.dart';
-import 'on_screen_translator.dart';
-import 'stereo_translator.dart';
 import 'google_stt_translator.dart';
-import 'native_stt_translator.dart';
 
 class TranslatorHub extends StatelessWidget {
   const TranslatorHub({super.key});
@@ -24,7 +21,7 @@ class TranslatorHub extends StatelessWidget {
             children: [
               const SizedBox(height: 20),
               const Text(
-                'Choose Translation Mode',
+                'Translation Service',
                 style: TextStyle(
                   color: Colors.white,
                   fontSize: 24,
@@ -34,52 +31,12 @@ class TranslatorHub extends StatelessWidget {
               ),
               const SizedBox(height: 40),
 
-              // On-Screen Translator Card
-              _buildTranslatorCard(
-                context,
-                title: 'On-Screen Translator',
-                description:
-                    'Record conversations with speaker diarization and multi-language support',
-                icon: Icons.screen_share,
-                color: const Color(0xFF00D9FF),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const OnScreenTranslator(),
-                    ),
-                  );
-                },
-              ),
-
-              const SizedBox(height: 20),
-
-              // Stereo Translator Card
-              _buildTranslatorCard(
-                context,
-                title: 'Stereo Translator',
-                description:
-                    'Use Bluetooth stereo headset for dual-channel translation with separate earbuds',
-                icon: Icons.headset,
-                color: const Color(0xFFE91E63),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const StereoTranslator(),
-                    ),
-                  );
-                },
-              ),
-
-              const SizedBox(height: 20),
-
               // Google STT Translator Card
               _buildTranslatorCard(
                 context,
                 title: 'Google STT Translation',
                 description:
-                    'Record 2 speakers with Google STT diarization, auto-separate voices, and play back each speaker',
+                    'Record 2 speakers with Google STT diarization, auto-separate voices, translate text, and play back each speaker with gender-based TTS and earpiece configuration',
                 icon: Icons.cloud_queue,
                 color: const Color(0xFF4CAF50),
                 onTap: () {
@@ -87,26 +44,6 @@ class TranslatorHub extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (context) => const GoogleSTTTranslator(),
-                    ),
-                  );
-                },
-              ),
-
-              const SizedBox(height: 20),
-
-              // Native STT Translator Card
-              _buildTranslatorCard(
-                context,
-                title: 'Native STT Translation',
-                description:
-                    'Record 2 speakers, auto-separate their voices, and play back each speaker individually',
-                icon: Icons.speaker_notes,
-                color: const Color(0xFFFF9800),
-                onTap: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (context) => const NativeSTTTranslator(),
                     ),
                   );
                 },

@@ -22,6 +22,10 @@ class EnhancedTtsServiceRobust {
   bool _isPlaying = false;
   String? _currentAudioPath;
 
+  // Callbacks for UI state synchronization
+  VoidCallback? _onPlaybackCompleted;
+  VoidCallback? _onPlaybackError;
+
   /// Initialize the enhanced TTS service
   Future<void> initialize() async {
     if (_isInitialized) return;
@@ -34,6 +38,21 @@ class EnhancedTtsServiceRobust {
       // Initialize stereo audio service
       await _stereoAudioService!.initialize();
 
+      // Set up stereo audio service callbacks
+      _stereoAudioService!.setPlaybackCompletedCallback(() {
+        _isPlaying = false;
+        debugPrint(
+            'EnhancedTtsServiceRobust: Stereo audio playback completed - forwarding callback');
+        _onPlaybackCompleted?.call();
+      });
+
+      _stereoAudioService!.setPlaybackErrorCallback(() {
+        _isPlaying = false;
+        debugPrint(
+            'EnhancedTtsServiceRobust: Stereo audio playback error - forwarding callback');
+        _onPlaybackError?.call();
+      });
+
       // Set up TTS parameters
       await _flutterTts!.setLanguage("en-US");
       await _flutterTts!.setSpeechRate(0.5);
@@ -44,18 +63,21 @@ class EnhancedTtsServiceRobust {
       _flutterTts!.setCompletionHandler(() {
         _isPlaying = false;
         debugPrint('EnhancedTtsServiceRobust: TTS playback completed');
+        _onPlaybackCompleted?.call();
       });
 
       // Set up error handler
       _flutterTts!.setErrorHandler((message) {
         _isPlaying = false;
         debugPrint('EnhancedTtsServiceRobust: TTS error: $message');
+        _onPlaybackError?.call();
       });
 
       // Set up audio player completion handler
       _audioPlayer!.onPlayerComplete.listen((event) {
         _isPlaying = false;
         debugPrint('EnhancedTtsServiceRobust: Audio file playback completed');
+        _onPlaybackCompleted?.call();
       });
 
       _isInitialized = true;
@@ -64,6 +86,16 @@ class EnhancedTtsServiceRobust {
       debugPrint('EnhancedTtsServiceRobust: Initialization error: $e');
       rethrow;
     }
+  }
+
+  /// Set callback for playback completion
+  void setPlaybackCompletedCallback(VoidCallback? callback) {
+    _onPlaybackCompleted = callback;
+  }
+
+  /// Set callback for playback error
+  void setPlaybackErrorCallback(VoidCallback? callback) {
+    _onPlaybackError = callback;
   }
 
   /// Generate mono audio file from text and return the file path
@@ -77,6 +109,7 @@ class EnhancedTtsServiceRobust {
     String text,
     String languageCode, {
     String? fileName,
+    String? gender,
   }) async {
     if (!_isInitialized) {
       await initialize();
@@ -96,6 +129,11 @@ class EnhancedTtsServiceRobust {
 
       // Set language for TTS
       await _flutterTts!.setLanguage(ttsLanguage);
+
+      // Set voice based on gender if specified
+      if (gender != null) {
+        await _setVoiceByGender(gender, ttsLanguage);
+      }
 
       // Generate unique filename if not provided
       final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -155,8 +193,10 @@ class EnhancedTtsServiceRobust {
     String leftText,
     String rightText,
     String leftLanguageCode,
-    String rightLanguageCode,
-  ) async {
+    String rightLanguageCode, {
+    String? leftGender,
+    String? rightGender,
+  }) async {
     if (!_isInitialized) {
       await initialize();
     }
@@ -172,12 +212,14 @@ class EnhancedTtsServiceRobust {
         leftText,
         leftLanguageCode,
         fileName: 'left_channel_${DateTime.now().millisecondsSinceEpoch}.wav',
+        gender: leftGender,
       );
 
       final rightAudioPath = await generateMonoAudioFile(
         rightText,
         rightLanguageCode,
         fileName: 'right_channel_${DateTime.now().millisecondsSinceEpoch}.wav',
+        gender: rightGender,
       );
 
       // Check if at least one audio file was generated successfully
@@ -410,6 +452,7 @@ class EnhancedTtsServiceRobust {
       await initialize();
     }
 
+    _isPlaying = true;
     await _stereoAudioService!.playStereoAudio(stereoAudioPath);
   }
 
@@ -433,5 +476,77 @@ class EnhancedTtsServiceRobust {
     _isPlaying = false;
     _currentAudioPath = null;
     debugPrint('EnhancedTtsServiceRobust: Disposed');
+  }
+
+  /// Set voice based on gender preference
+  Future<void> _setVoiceByGender(String gender, String ttsLanguage) async {
+    try {
+      // Get available voices for the language
+      final voices = await _flutterTts!.getVoices;
+
+      if (voices != null && voices.isNotEmpty) {
+        // Filter voices by language
+        final languageVoices = voices
+            .where((voice) =>
+                voice['locale'] != null &&
+                voice['locale']
+                    .toString()
+                    .startsWith(ttsLanguage.split('-')[0]))
+            .toList();
+
+        if (languageVoices.isNotEmpty) {
+          // Try to find a voice that matches the gender preference
+          String? selectedVoice;
+
+          if (gender.toLowerCase() == 'female') {
+            // Look for female voices (common patterns: female, woman, etc.)
+            selectedVoice = languageVoices.firstWhere(
+              (voice) {
+                final name = voice['name']?.toString().toLowerCase() ?? '';
+                return name.contains('female') ||
+                    name.contains('woman') ||
+                    name.contains('f') ||
+                    name.contains('samantha') ||
+                    name.contains('susan') ||
+                    name.contains('karen');
+              },
+              orElse: () => languageVoices.first,
+            )['name']?.toString();
+          } else if (gender.toLowerCase() == 'male') {
+            // Look for male voices (common patterns: male, man, etc.)
+            selectedVoice = languageVoices.firstWhere(
+              (voice) {
+                final name = voice['name']?.toString().toLowerCase() ?? '';
+                return name.contains('male') ||
+                    name.contains('man') ||
+                    name.contains('m') ||
+                    name.contains('alex') ||
+                    name.contains('daniel') ||
+                    name.contains('david');
+              },
+              orElse: () => languageVoices.first,
+            )['name']?.toString();
+          }
+
+          if (selectedVoice != null) {
+            await _flutterTts!
+                .setVoice({'name': selectedVoice, 'locale': ttsLanguage});
+            debugPrint(
+                'EnhancedTtsServiceRobust: Set voice to: $selectedVoice for gender: $gender');
+          } else {
+            debugPrint(
+                'EnhancedTtsServiceRobust: No suitable voice found for gender: $gender, using default');
+          }
+        } else {
+          debugPrint(
+              'EnhancedTtsServiceRobust: No voices available for language: $ttsLanguage');
+        }
+      } else {
+        debugPrint(
+            'EnhancedTtsServiceRobust: No voices available on this device');
+      }
+    } catch (e) {
+      debugPrint('EnhancedTtsServiceRobust: Error setting voice by gender: $e');
+    }
   }
 }
