@@ -145,14 +145,20 @@ class GoogleSttService {
             languageCode), // Use appropriate model for language
       };
 
-      // Add alternative languages if provided (for multi-language conversations)
-      alternativeLanguages = ["en-US", "bn-IN"];
-
+      // Add alternative languages if provided by caller (for multi-language conversations)
       if (alternativeLanguages != null && alternativeLanguages.isNotEmpty) {
-        config['alternativeLanguageCodes'] = alternativeLanguages;
+        // Ensure unique values and preserve order
+        final seen = <String>{};
+        final deduped = <String>[];
+        for (final code in alternativeLanguages) {
+          if (!seen.contains(code)) {
+            seen.add(code);
+            deduped.add(code);
+          }
+        }
+        config['alternativeLanguageCodes'] = deduped;
         debugPrint('GoogleSttService: Using multi-language detection');
-        debugPrint(
-            'Primary: $languageCode, Alternatives: $alternativeLanguages');
+        debugPrint('Primary: $languageCode, Alternatives: $deduped');
       }
 
       final Map<String, dynamic> requestBody = {
