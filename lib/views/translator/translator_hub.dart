@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'google_stt_translator.dart';
+import 'assemblyai_stt_translator.dart';
 
 class TranslatorHub extends StatelessWidget {
   const TranslatorHub({super.key});
@@ -44,6 +45,26 @@ class TranslatorHub extends StatelessWidget {
                     context,
                     MaterialPageRoute(
                       builder: (context) => const GoogleSTTTranslator(),
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 20),
+
+              // AssemblyAI STT Translator Card
+              _buildTranslatorCard(
+                context,
+                title: 'AssemblyAI STT Translation',
+                description:
+                    'Record 2 speakers with AssemblyAI automatic language detection, speaker diarization, auto-separate voices, translate text, and play back each speaker with gender-based TTS and earpiece configuration',
+                icon: Icons.auto_awesome,
+                color: const Color(0xFF2196F3),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const AssemblyAiSttTranslator(),
                     ),
                   );
                 },

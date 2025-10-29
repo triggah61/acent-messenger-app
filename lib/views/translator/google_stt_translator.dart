@@ -11,15 +11,17 @@ import 'package:noise_meter/noise_meter.dart';
 
 import '../../services/config_service.dart';
 import '../../services/permission_service.dart';
-import '../../services/google_stt_service.dart';
-import '../../services/translation_service.dart';
+import '../../services/on_device_translation_service.dart';
 import '../../services/tts_service.dart';
 import '../../services/enhanced_tts_service_robust.dart';
+import '../../services/stt_provider.dart';
+import '../../services/google_stt_provider.dart';
 
 /// Google STT Translation - Records 2 speakers, performs on-device diarization,
 /// and separates audio into individual speaker files for playback
 class GoogleSTTTranslator extends StatefulWidget {
-  const GoogleSTTTranslator({super.key});
+  final SttProvider? provider;
+  const GoogleSTTTranslator({super.key, this.provider});
 
   @override
   State<GoogleSTTTranslator> createState() => _GoogleSTTTranslatorState();
@@ -30,7 +32,11 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   // Services
   final ConfigService _configService = ConfigService.instance;
   final PermissionService _permissionService = PermissionService.instance;
-  final GoogleSttService _googleSttService = GoogleSttService();
+  // STT provider (Google by default). Can be injected for AssemblyAI.
+  late final SttProvider _sttProvider;
+
+  final OnDeviceTranslationService _translationService =
+      OnDeviceTranslationService();
   final TtsService _ttsService = TtsService();
   final EnhancedTtsServiceRobust _stereoTtsService = EnhancedTtsServiceRobust();
   final AudioRecorder _audioRecorder = AudioRecorder();
@@ -77,6 +83,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   // Stereo audio playback state
   bool _isPlayingStereo = false;
+
+  // Per-session cache for STT calls: key = "<audioPath>|<langCode>"
+  final Map<String, Map<String, dynamic>> _sttCache = {};
 
   // Note: Using SystemSound for sound effects instead of AudioPlayer
 
@@ -150,7 +159,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   Future<void> _initializeServices() async {
     try {
-      await _googleSttService.initialize();
+      _sttProvider = (widget.provider ?? GoogleSttProvider());
+      await _sttProvider.initialize();
+      await _translationService.initialize();
       await _ttsService.initialize();
       await _stereoTtsService.initialize();
 
@@ -235,11 +246,16 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         orElse: () => languages.first,
       );
 
+      final defaultBengali = languages.firstWhere(
+        (lang) => lang.code == 'bn',
+        orElse: () => languages.first,
+      );
+
       setState(() {
         _supportedLanguages = languages;
         _speakerLanguages = {
           0: defaultEnglish,
-          1: defaultEnglish,
+          1: defaultBengali,
         };
         _speakerGenders = {
           0: 'male', // Default to male
@@ -576,9 +592,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       final directory = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
 
-      // Create separate audio files for each speaker
-      _speaker1AudioPath = '${directory.path}/speaker1_$timestamp.wav';
-      _speaker2AudioPath = '${directory.path}/speaker2_$timestamp.wav';
+      // Step 1: Create temporary audio files for each detected speaker
+      final tempSpeaker1Path = '${directory.path}/temp_speaker1_$timestamp.wav';
+      final tempSpeaker2Path = '${directory.path}/temp_speaker2_$timestamp.wav';
 
       // Read original audio file
       final originalFile = File(_recordedAudioPath!);
@@ -587,11 +603,48 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       // Convert to Float32List for processing
       final Float32List audioData = _convertBytesToFloat32List(originalBytes);
 
-      // Create speaker-specific audio files
-      await _createSpeakerAudioFile(audioData, _speaker1AudioPath!, 0);
-      await _createSpeakerAudioFile(audioData, _speaker2AudioPath!, 1);
+      // Create temporary speaker-specific audio files
+      await _createSpeakerAudioFile(audioData, tempSpeaker1Path, 0);
+      await _createSpeakerAudioFile(audioData, tempSpeaker2Path, 1);
 
-      debugPrint('GoogleSTTTranslator: Audio separation completed');
+      // Step 2: Language-based speaker assignment
+      setState(() {
+        _processingProgress = 0.70;
+        _processingStatus = 'Detecting languages and assigning speakers...';
+      });
+
+      // Get configured languages for both speakers
+      final speaker1ConfiguredLanguage = _speakerLanguages[0]?.code ?? 'en';
+      final speaker2ConfiguredLanguage = _speakerLanguages[1]?.code ?? 'en';
+      final List<String> preferredLanguages = [
+        speaker1ConfiguredLanguage,
+        speaker2ConfiguredLanguage
+      ];
+
+      debugPrint(
+          'GoogleSTTTranslator: Configured languages - Speaker 1: $speaker1ConfiguredLanguage, Speaker 2: $speaker2ConfiguredLanguage');
+
+      // Assign speakers based on language detection
+      final Map<String, String> speakerAssignment =
+          await _assignSpeakersByLanguage(
+              tempSpeaker1Path, tempSpeaker2Path, preferredLanguages);
+
+      // Step 3: Create final speaker files with correct assignment
+      _speaker1AudioPath = '${directory.path}/speaker1_$timestamp.wav';
+      _speaker2AudioPath = '${directory.path}/speaker2_$timestamp.wav';
+
+      // Copy the correctly assigned files
+      await File(speakerAssignment['speaker1']!).copy(_speaker1AudioPath!);
+      await File(speakerAssignment['speaker2']!).copy(_speaker2AudioPath!);
+
+      // Clean up temporary files
+      await File(tempSpeaker1Path).delete();
+      await File(tempSpeaker2Path).delete();
+
+      debugPrint(
+          'GoogleSTTTranslator: Audio separation completed with language-based assignment');
+      debugPrint(
+          'GoogleSTTTranslator: Final assignment - Speaker 1: ${speakerAssignment['speaker1']}, Speaker 2: ${speakerAssignment['speaker2']}');
     } catch (e) {
       debugPrint('GoogleSTTTranslator: Audio separation error: $e');
       rethrow;
@@ -651,33 +704,52 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             'GoogleSTTTranslator: Transcribing Speaker 1 in language: $speaker1LanguageCode');
 
         final audioBytes = await File(_speaker1AudioPath!).readAsBytes();
-        final result1 = await _googleSttService.transcribeWithDiarization(
-          audioBytes: audioBytes,
-          languageCode: speaker1LanguageCode,
-          minSpeakers: 1,
-          maxSpeakers: 1,
-        );
+        // Get both configured languages for AssemblyAI language detection
+        final speaker1Lang = _speakerLanguages[0]?.code ?? 'en';
+        final speaker2Lang = _speakerLanguages[1]?.code ?? 'en';
+        final List<String> allConfiguredLanguages = [
+          speaker1Lang,
+          speaker2Lang
+        ];
+
+        // Try cache first (balanced detection already filled this)
+        final cacheKey1 = '$_speaker1AudioPath|$speaker1LanguageCode';
+        Map<String, dynamic>? cached1 = _sttCache[cacheKey1];
+        var result1 = cached1;
+        if (cached1 == null) {
+          final r = await _sttProvider.transcribeWithDiarization(
+            audioBytes: audioBytes,
+            languageCode: speaker1LanguageCode,
+            alternativeLanguages: allConfiguredLanguages,
+            minSpeakers: 1,
+            maxSpeakers: 1,
+          );
+          if (r != null) {
+            final text = r.fullTranscript.isNotEmpty
+                ? r.fullTranscript
+                : r.segments.map((s) => s.text).join(' ');
+            result1 = {
+              'text': text,
+              'segmentCount': r.segments.length,
+              'confidence': _calculateTextQualityConfidence(
+                  text, text.length, r.segments.length),
+            };
+            _sttCache[cacheKey1] = result1 as Map<String, dynamic>;
+          } else {
+            result1 = null;
+          }
+        }
 
         if (result1 != null) {
+          debugPrint('GoogleSTTTranslator: Speaker 1 transcription result:');
+          debugPrint('  Language: $speaker1LanguageCode');
+          debugPrint('  Text: "${result1['text']}"');
+          _transcriptions[0] = (result1['text'] as String?) ?? '';
           debugPrint(
-              'GoogleSTTTranslator: Speaker 1 result - fullTranscript: "${result1.fullTranscript}"');
+              'GoogleSTTTranslator: Stored Speaker 1 transcript: "${_transcriptions[0]}"');
+        } else {
           debugPrint(
-              'GoogleSTTTranslator: Speaker 1 result - segments: ${result1.segments.length}');
-          if (result1.segments.isNotEmpty) {
-            debugPrint(
-                'GoogleSTTTranslator: Speaker 1 segments: ${result1.segments.map((s) => s.text).toList()}');
-          }
-
-          // Use fullTranscript if available, otherwise combine segments
-          if (result1.fullTranscript.isNotEmpty) {
-            _transcriptions[0] = result1.fullTranscript;
-            debugPrint(
-                'GoogleSTTTranslator: Stored Speaker 1 fullTranscript: "${result1.fullTranscript}"');
-          } else if (result1.segments.isNotEmpty) {
-            _transcriptions[0] = result1.segments.map((s) => s.text).join(' ');
-            debugPrint(
-                'GoogleSTTTranslator: Stored Speaker 1 from segments: "${_transcriptions[0]}"');
-          }
+              'GoogleSTTTranslator: Speaker 1 transcription failed - no result');
         }
       }
 
@@ -692,33 +764,52 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             'GoogleSTTTranslator: Transcribing Speaker 2 in language: $speaker2LanguageCode');
 
         final audioBytes = await File(_speaker2AudioPath!).readAsBytes();
-        final result2 = await _googleSttService.transcribeWithDiarization(
-          audioBytes: audioBytes,
-          languageCode: speaker2LanguageCode,
-          minSpeakers: 1,
-          maxSpeakers: 1,
-        );
+        // Get both configured languages for AssemblyAI language detection
+        final speaker1Lang = _speakerLanguages[0]?.code ?? 'en';
+        final speaker2Lang = _speakerLanguages[1]?.code ?? 'en';
+        final List<String> allConfiguredLanguages = [
+          speaker1Lang,
+          speaker2Lang
+        ];
+
+        // Try cache first (balanced detection already filled this)
+        final cacheKey2 = '$_speaker2AudioPath|$speaker2LanguageCode';
+        Map<String, dynamic>? cached2 = _sttCache[cacheKey2];
+        var result2 = cached2;
+        if (cached2 == null) {
+          final r = await _sttProvider.transcribeWithDiarization(
+            audioBytes: audioBytes,
+            languageCode: speaker2LanguageCode,
+            alternativeLanguages: allConfiguredLanguages,
+            minSpeakers: 1,
+            maxSpeakers: 1,
+          );
+          if (r != null) {
+            final text = r.fullTranscript.isNotEmpty
+                ? r.fullTranscript
+                : r.segments.map((s) => s.text).join(' ');
+            result2 = {
+              'text': text,
+              'segmentCount': r.segments.length,
+              'confidence': _calculateTextQualityConfidence(
+                  text, text.length, r.segments.length),
+            };
+            _sttCache[cacheKey2] = result2 as Map<String, dynamic>;
+          } else {
+            result2 = null;
+          }
+        }
 
         if (result2 != null) {
+          debugPrint('GoogleSTTTranslator: Speaker 2 transcription result:');
+          debugPrint('  Language: $speaker2LanguageCode');
+          debugPrint('  Text: "${result2['text']}"');
+          _transcriptions[1] = (result2['text'] as String?) ?? '';
           debugPrint(
-              'GoogleSTTTranslator: Speaker 2 result - fullTranscript: "${result2.fullTranscript}"');
+              'GoogleSTTTranslator: Stored Speaker 2 transcript: "${_transcriptions[1]}"');
+        } else {
           debugPrint(
-              'GoogleSTTTranslator: Speaker 2 result - segments: ${result2.segments.length}');
-          if (result2.segments.isNotEmpty) {
-            debugPrint(
-                'GoogleSTTTranslator: Speaker 2 segments: ${result2.segments.map((s) => s.text).toList()}');
-          }
-
-          // Use fullTranscript if available, otherwise combine segments
-          if (result2.fullTranscript.isNotEmpty) {
-            _transcriptions[1] = result2.fullTranscript;
-            debugPrint(
-                'GoogleSTTTranslator: Stored Speaker 2 fullTranscript: "${result2.fullTranscript}"');
-          } else if (result2.segments.isNotEmpty) {
-            _transcriptions[1] = result2.segments.map((s) => s.text).join(' ');
-            debugPrint(
-                'GoogleSTTTranslator: Stored Speaker 2 from segments: "${_transcriptions[1]}"');
-          }
+              'GoogleSTTTranslator: Speaker 2 transcription failed - no result');
         }
       }
 
@@ -743,6 +834,11 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     try {
       debugPrint('GoogleSTTTranslator: Starting translation process...');
 
+      setState(() {
+        _processingStatus = 'Translating text...';
+        _processingProgress = 0.85;
+      });
+
       // Get speaker languages
       final speaker1Language = _speakerLanguages[0];
       final speaker2Language = _speakerLanguages[1];
@@ -759,10 +855,17 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint('GoogleSTTTranslator: Speaker 2 language: $speaker2LangCode');
 
       // Check if translation is needed
-      if (!TranslationService.isTranslationNeeded(
-          speaker1LangCode, speaker2LangCode)) {
+      if (speaker1LangCode == speaker2LangCode) {
         debugPrint(
             'GoogleSTTTranslator: No translation needed - same language');
+        return;
+      }
+
+      // Check if on-device translation is supported
+      if (!_translationService.isTranslationSupported(
+          speaker1LangCode, speaker2LangCode)) {
+        debugPrint(
+            'GoogleSTTTranslator: On-device translation not supported for $speaker1LangCode -> $speaker2LangCode');
         return;
       }
 
@@ -770,16 +873,15 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       if (_transcriptions[0] != null && _transcriptions[0]!.isNotEmpty) {
         debugPrint(
             'GoogleSTTTranslator: Translating Speaker 1 text to $speaker2LangCode...');
-        final result1 = await TranslationService.translateText(
-          sourceLanguage: speaker1LangCode,
-          targetLanguage: speaker2LangCode,
-          content: _transcriptions[0]!,
+        final result1 = await _translationService.translateText(
+          _transcriptions[0]!,
+          speaker1LangCode,
+          speaker2LangCode,
         );
 
-        if (result1 != null && result1.translatedText.isNotEmpty) {
-          _translations[0] = result1.translatedText;
-          debugPrint(
-              'GoogleSTTTranslator: Speaker 1 translation: "${result1.translatedText}"');
+        if (result1.isNotEmpty) {
+          _translations[0] = result1;
+          debugPrint('GoogleSTTTranslator: Speaker 1 translation: "$result1"');
         } else {
           debugPrint('GoogleSTTTranslator: Speaker 1 translation failed');
         }
@@ -789,16 +891,15 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       if (_transcriptions[1] != null && _transcriptions[1]!.isNotEmpty) {
         debugPrint(
             'GoogleSTTTranslator: Translating Speaker 2 text to $speaker1LangCode...');
-        final result2 = await TranslationService.translateText(
-          sourceLanguage: speaker2LangCode,
-          targetLanguage: speaker1LangCode,
-          content: _transcriptions[1]!,
+        final result2 = await _translationService.translateText(
+          _transcriptions[1]!,
+          speaker2LangCode,
+          speaker1LangCode,
         );
 
-        if (result2 != null && result2.translatedText.isNotEmpty) {
-          _translations[1] = result2.translatedText;
-          debugPrint(
-              'GoogleSTTTranslator: Speaker 2 translation: "${result2.translatedText}"');
+        if (result2.isNotEmpty) {
+          _translations[1] = result2;
+          debugPrint('GoogleSTTTranslator: Speaker 2 translation: "$result2"');
         } else {
           debugPrint('GoogleSTTTranslator: Speaker 2 translation failed');
         }
@@ -829,6 +930,11 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   Future<void> _generateTtsAudio() async {
     try {
       debugPrint('GoogleSTTTranslator: Starting TTS audio generation...');
+
+      setState(() {
+        _processingStatus = 'Generating speech audio...';
+        _processingProgress = 0.90;
+      });
 
       // Generate TTS audio for Speaker 1's translated text (for Speaker 2 to hear)
       debugPrint('GoogleSTTTranslator: Checking Speaker 1 translation...');
@@ -1031,12 +1137,575 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     }
   }
 
+  /// Detect language by running balanced STT calls: once per configured language
+  /// Caches results per (audioPath, language) to avoid duplicate API calls later.
+  Future<Map<String, dynamic>> _detectVoiceLanguageOptimized(
+      String audioPath, List<String> preferredLanguages) async {
+    try {
+      final file = File(audioPath);
+      if (!await file.exists()) {
+        debugPrint(
+            'GoogleSTTTranslator: Audio file does not exist: $audioPath');
+        return {'language': null, 'confidence': 0.0, 'text': null};
+      }
+
+      final audioBytes = await file.readAsBytes();
+      if (audioBytes.isEmpty) {
+        debugPrint('GoogleSTTTranslator: Audio file is empty: $audioPath');
+        return {'language': null, 'confidence': 0.0, 'text': null};
+      }
+
+      debugPrint(
+          'GoogleSTTTranslator: Using Google STT multi-language detection for: $audioPath');
+      debugPrint(
+          'GoogleSTTTranslator: Preferred languages: $preferredLanguages');
+
+      // Balanced: call once with en, once with bn (or configured pair)
+      final primaryA = _mapLanguageToGoogleCode(preferredLanguages[0]);
+      final primaryB = _mapLanguageToGoogleCode(preferredLanguages[1]);
+
+      Future<Map<String, dynamic>?> transcribeFor(
+          String primary, String alt) async {
+        final cacheKey = '$audioPath|$primary';
+        if (_sttCache.containsKey(cacheKey)) {
+          return _sttCache[cacheKey];
+        }
+        final r = await _sttProvider.transcribeWithDiarization(
+          audioBytes: audioBytes,
+          languageCode: primary,
+          alternativeLanguages: [primary, alt],
+          minSpeakers: 1,
+          maxSpeakers: 1,
+        );
+        if (r == null) return null;
+        final text = r.fullTranscript.isNotEmpty
+            ? r.fullTranscript
+            : r.segments.map((s) => s.text).join(' ');
+        final textLength = text.length;
+        final segmentCount = r.segments.length;
+        final confidence =
+            _calculateTextQualityConfidence(text, textLength, segmentCount);
+        final detected = _determineLanguageFromText(text, preferredLanguages);
+        final payload = <String, dynamic>{
+          'language': detected,
+          'confidence': confidence,
+          'text': text,
+          'textLength': textLength,
+          'segmentCount': segmentCount,
+        };
+        _sttCache[cacheKey] = payload;
+        return payload;
+      }
+
+      // Execute sequentially to limit load; still exactly two calls
+      final a = await transcribeFor(primaryA, primaryB);
+      final b = await transcribeFor(primaryB, primaryA);
+
+      Map<String, dynamic>? best = a;
+      if (b != null &&
+          (best == null ||
+              (b['confidence'] as double) > (best['confidence'] as double))) {
+        best = b;
+      }
+
+      if (best == null) {
+        debugPrint('GoogleSTTTranslator: No transcription result from STT');
+        return {'language': null, 'confidence': 0.0, 'text': null};
+      }
+
+      debugPrint('GoogleSTTTranslator: Balanced detection result:');
+      debugPrint('  Text: "${best['text']}"');
+      debugPrint('  Detected Language: ${best['language']}');
+      debugPrint('  Confidence: ${best['confidence']}');
+      debugPrint('  Text Length: ${best['textLength']}');
+      debugPrint('  Segments: ${best['segmentCount']}');
+
+      return best;
+    } catch (e) {
+      debugPrint(
+          'GoogleSTTTranslator: Multi-language detection error for $audioPath: $e');
+      return {'language': null, 'confidence': 0.0, 'text': null};
+    }
+  }
+
+  /// Calculate confidence based on text quality metrics
+  double _calculateTextQualityConfidence(
+      String text, int textLength, int segmentCount) {
+    if (text.isEmpty) return 0.0;
+
+    double confidence = 0.0;
+
+    // Base confidence from text length (longer text = higher confidence)
+    confidence += (textLength * 0.01).clamp(0.0, 0.4);
+
+    // Bonus for having segments (indicates successful processing)
+    confidence += segmentCount > 0 ? 0.2 : 0.0;
+
+    // Bonus for text containing meaningful characters
+    final meaningfulChars = text.replaceAll(RegExp(r'[^\w\s]'), '').length;
+    confidence += (meaningfulChars * 0.005).clamp(0.0, 0.2);
+
+    // Bonus for text containing multiple words
+    final wordCount =
+        text.split(RegExp(r'\s+')).where((w) => w.isNotEmpty).length;
+    confidence += (wordCount * 0.02).clamp(0.0, 0.2);
+
+    return confidence.clamp(0.0, 1.0);
+  }
+
+  /// Determine language from text content using script detection
+  String? _determineLanguageFromText(
+      String text, List<String> preferredLanguages) {
+    if (text.isEmpty) return null;
+
+    // Count characters by script
+    int bengaliCount = 0;
+    int hindiCount = 0;
+    int sinhalaCount = 0;
+    int latinCount = 0;
+    int arabicCount = 0;
+    int chineseCount = 0;
+    int otherCount = 0;
+
+    for (final rune in text.runes) {
+      if (rune >= 0x0980 && rune <= 0x09FF) {
+        bengaliCount++; // Bengali Unicode block
+      } else if (rune >= 0x0900 && rune <= 0x097F) {
+        hindiCount++; // Devanagari (Hindi) Unicode block
+      } else if (rune >= 0x0D80 && rune <= 0x0DFF) {
+        sinhalaCount++; // Sinhala Unicode block
+      } else if ((rune >= 0x0041 && rune <= 0x005A) ||
+          (rune >= 0x0061 && rune <= 0x007A)) {
+        latinCount++; // Latin script
+      } else if (rune >= 0x0600 && rune <= 0x06FF) {
+        arabicCount++; // Arabic script
+      } else if (rune >= 0x4E00 && rune <= 0x9FFF) {
+        chineseCount++; // CJK Unified Ideographs
+      } else if (rune > 0x007F) {
+        otherCount++; // Other non-ASCII characters
+      }
+    }
+
+    final totalChars = bengaliCount +
+        hindiCount +
+        sinhalaCount +
+        latinCount +
+        arabicCount +
+        chineseCount +
+        otherCount;
+    if (totalChars == 0)
+      return preferredLanguages[0]; // Fallback to first language
+
+    // Calculate script ratios
+    final bengaliRatio = bengaliCount / totalChars;
+    final hindiRatio = hindiCount / totalChars;
+    final sinhalaRatio = sinhalaCount / totalChars;
+    final latinRatio = latinCount / totalChars;
+    final arabicRatio = arabicCount / totalChars;
+    final chineseRatio = chineseCount / totalChars;
+
+    debugPrint('GoogleSTTTranslator: Script analysis:');
+    debugPrint('  Bengali: $bengaliCount ($bengaliRatio)');
+    debugPrint('  Hindi: $hindiCount ($hindiRatio)');
+    debugPrint('  Sinhala: $sinhalaCount ($sinhalaRatio)');
+    debugPrint('  Latin: $latinCount ($latinRatio)');
+    debugPrint('  Arabic: $arabicCount ($arabicRatio)');
+    debugPrint('  Chinese: $chineseCount ($chineseRatio)');
+
+    // Determine language based on dominant script
+    if (bengaliRatio > 0.5) {
+      // Bengali script dominant
+      for (final lang in preferredLanguages) {
+        if (lang.toLowerCase().startsWith('bn')) return lang;
+      }
+    } else if (hindiRatio > 0.5) {
+      // Hindi script dominant - treat as Bengali for our purposes
+      debugPrint(
+          'GoogleSTTTranslator: Detected Hindi script, treating as Bengali');
+      for (final lang in preferredLanguages) {
+        if (lang.toLowerCase().startsWith('bn')) return lang;
+      }
+    } else if (sinhalaRatio > 0.5) {
+      // Sinhala script dominant - treat as Bengali for our purposes
+      debugPrint(
+          'GoogleSTTTranslator: Detected Sinhala script, treating as Bengali');
+      for (final lang in preferredLanguages) {
+        if (lang.toLowerCase().startsWith('bn')) return lang;
+      }
+    } else if (latinRatio > 0.5) {
+      // Latin script dominant
+      for (final lang in preferredLanguages) {
+        if (lang.toLowerCase().startsWith('en') ||
+            lang.toLowerCase().startsWith('es') ||
+            lang.toLowerCase().startsWith('fr') ||
+            lang.toLowerCase().startsWith('de')) return lang;
+      }
+    } else if (arabicRatio > 0.5) {
+      // Arabic script dominant
+      for (final lang in preferredLanguages) {
+        if (lang.toLowerCase().startsWith('ar')) return lang;
+      }
+    } else if (chineseRatio > 0.5) {
+      // Chinese script dominant
+      for (final lang in preferredLanguages) {
+        if (lang.toLowerCase().startsWith('zh')) return lang;
+      }
+    }
+
+    // Fallback: return the language with highest script match
+    final scriptScores = <String, double>{};
+    for (final lang in preferredLanguages) {
+      final langLower = lang.toLowerCase();
+      if (langLower.startsWith('bn')) {
+        // Use the highest of Bengali, Hindi, or Sinhala ratio for Bengali language
+        scriptScores[lang] =
+            math.max(bengaliRatio, math.max(hindiRatio, sinhalaRatio));
+      } else if (langLower.startsWith('en') ||
+          langLower.startsWith('es') ||
+          langLower.startsWith('fr') ||
+          langLower.startsWith('de')) {
+        scriptScores[lang] = latinRatio;
+      } else if (langLower.startsWith('ar')) {
+        scriptScores[lang] = arabicRatio;
+      } else if (langLower.startsWith('zh')) {
+        scriptScores[lang] = chineseRatio;
+      } else {
+        scriptScores[lang] =
+            latinRatio; // Default to Latin for unknown languages
+      }
+    }
+
+    // Return language with highest script score
+    String? bestLanguage;
+    double bestScore = 0.0;
+    for (final entry in scriptScores.entries) {
+      if (entry.value > bestScore) {
+        bestScore = entry.value;
+        bestLanguage = entry.key;
+      }
+    }
+
+    debugPrint(
+        'GoogleSTTTranslator: Script-based language detection: $bestLanguage (score: $bestScore)');
+    return bestLanguage ?? preferredLanguages[0];
+  }
+
+  /// Detect language of a diarized voice by testing both languages and picking the best result
+  Future<Map<String, dynamic>> _detectVoiceLanguage(
+      String audioPath, List<String> preferredLanguages) async {
+    try {
+      final file = File(audioPath);
+      if (!await file.exists()) {
+        debugPrint(
+            'GoogleSTTTranslator: Audio file does not exist: $audioPath');
+        return {'language': null, 'confidence': 0.0, 'text': null};
+      }
+
+      final audioBytes = await file.readAsBytes();
+      if (audioBytes.isEmpty) {
+        debugPrint('GoogleSTTTranslator: Audio file is empty: $audioPath');
+        return {'language': null, 'confidence': 0.0, 'text': null};
+      }
+
+      debugPrint(
+          'GoogleSTTTranslator: Testing voice with both languages: $audioPath');
+      debugPrint(
+          'GoogleSTTTranslator: Preferred languages: $preferredLanguages');
+
+      // Test each preferred language and pick the best result
+      final Map<String, Map<String, dynamic>> languageResults = {};
+
+      for (final language in preferredLanguages) {
+        try {
+          debugPrint('GoogleSTTTranslator: Testing with language: $language');
+
+          final result = await _sttProvider.transcribeWithDiarization(
+            audioBytes: audioBytes,
+            languageCode: _mapLanguageToGoogleCode(language),
+            alternativeLanguages: [
+              _mapLanguageToGoogleCode(language),
+              _mapLanguageToGoogleCode(preferredLanguages[1]),
+            ],
+            minSpeakers: 1,
+            maxSpeakers: 1,
+          );
+
+          if (result != null) {
+            final text = result.fullTranscript.isNotEmpty
+                ? result.fullTranscript
+                : result.segments.map((s) => s.text).join(' ');
+            final avgConfidence = result.segments.isNotEmpty
+                ? result.segments
+                        .map((s) => s.confidence)
+                        .reduce((a, b) => a + b) /
+                    result.segments.length
+                : 0.0;
+
+            languageResults[language] = {
+              'text': text,
+              'confidence': avgConfidence,
+              'segmentCount': result.segments.length,
+              'textLength': text.length,
+            };
+
+            debugPrint('GoogleSTTTranslator: Language $language result:');
+            debugPrint('  Text: "$text"');
+            debugPrint('  Avg Confidence: $avgConfidence');
+            debugPrint('  Segments: ${result.segments.length}');
+            debugPrint('  Text Length: ${text.length}');
+          }
+        } catch (e) {
+          debugPrint(
+              'GoogleSTTTranslator: Error testing language $language: $e');
+        }
+      }
+
+      // Find the best language based on confidence and text quality
+      String? bestLanguage;
+      double bestScore = 0.0;
+      String bestText = '';
+
+      for (final entry in languageResults.entries) {
+        final language = entry.key;
+        final result = entry.value;
+        final confidence = result['confidence'] as double;
+        final textLength = result['textLength'] as int;
+        final segmentCount = result['segmentCount'] as int;
+
+        // Calculate a composite score: confidence + text length bonus + segment count bonus
+        final score = confidence +
+            (textLength > 0 ? 0.1 : 0.0) +
+            (segmentCount > 0 ? 0.05 : 0.0);
+
+        debugPrint(
+            'GoogleSTTTranslator: Language $language score: $score (confidence: $confidence, length: $textLength, segments: $segmentCount)');
+
+        if (score > bestScore) {
+          bestScore = score;
+          bestLanguage = language;
+          bestText = result['text'] as String;
+        }
+      }
+
+      debugPrint(
+          'GoogleSTTTranslator: Best language match: $bestLanguage (score: $bestScore)');
+      debugPrint('GoogleSTTTranslator: Best text: "$bestText"');
+
+      return {
+        'language': bestLanguage,
+        'confidence': bestScore,
+        'text': bestText,
+        'allResults': languageResults,
+      };
+    } catch (e) {
+      debugPrint(
+          'GoogleSTTTranslator: Language detection error for $audioPath: $e');
+      return {'language': null, 'confidence': 0.0, 'text': null};
+    }
+  }
+
+  /// Calculate language match score between detected and preferred language
+  double _calculateLanguageMatchScore(String detectedLanguage,
+      String preferredLanguage, double originalConfidence) {
+    // Normalize language codes
+    final detected = detectedLanguage.toLowerCase().trim();
+    final preferred = preferredLanguage.toLowerCase().trim();
+
+    debugPrint(
+        'GoogleSTTTranslator: Calculating match score: "$detected" vs "$preferred"');
+
+    // Extract primary language codes (e.g., 'en' from 'en-US')
+    final detectedPrimary = detected.split('-')[0].split('_')[0];
+    final preferredPrimary = preferred.split('-')[0].split('_')[0];
+
+    // Exact match - highest score
+    if (detected == preferred) {
+      debugPrint('GoogleSTTTranslator: Exact match: $detected');
+      return originalConfidence * 1.0;
+    }
+
+    // Primary language code match - high score
+    if (detectedPrimary == preferredPrimary) {
+      debugPrint('GoogleSTTTranslator: Primary code match: $detectedPrimary');
+      return originalConfidence * 0.9;
+    }
+
+    // Partial match - medium score
+    if (detected.contains(preferred) || preferred.contains(detected)) {
+      debugPrint(
+          'GoogleSTTTranslator: Partial match: $detected contains $preferred');
+      return originalConfidence * 0.8;
+    }
+
+    // Handle common language variations
+    final languageVariations = {
+      'en': ['english', 'eng', 'en-us', 'en-gb'],
+      'bn': ['bengali', 'bangla', 'ben', 'bn-bd', 'bn-in'],
+      'hi': ['hindi', 'hin', 'hi-in'],
+      'es': ['spanish', 'spa', 'es-es', 'es-mx'],
+      'fr': ['french', 'fra', 'fr-fr', 'fr-ca'],
+      'de': ['german', 'deu', 'de-de'],
+      'ja': ['japanese', 'jpn', 'ja-jp'],
+      'ko': ['korean', 'kor', 'ko-kr'],
+      'zh': ['chinese', 'chi', 'zh-cn', 'zh-tw'],
+      'ar': ['arabic', 'ara', 'ar-sa'],
+      'pt': ['portuguese', 'por', 'pt-br', 'pt-pt'],
+      'ru': ['russian', 'rus', 'ru-ru'],
+    };
+
+    // Check if detected language matches any variation of preferred language
+    for (final entry in languageVariations.entries) {
+      if (entry.key == preferredPrimary) {
+        for (final variation in entry.value) {
+          if (detected.contains(variation) ||
+              detectedPrimary.contains(variation)) {
+            debugPrint(
+                'GoogleSTTTranslator: Variation match: $detected matches $variation for $preferred');
+            return originalConfidence * 0.7;
+          }
+        }
+      }
+    }
+
+    // No match found - very low score
+    debugPrint('GoogleSTTTranslator: No match found: $detected vs $preferred');
+    return originalConfidence * 0.1;
+  }
+
+  /// Assign speakers based on language detection results
+  Future<Map<String, String>> _assignSpeakersByLanguage(String voice1Path,
+      String voice2Path, List<String> preferredLanguages) async {
+    try {
+      debugPrint(
+          'GoogleSTTTranslator: ===== LANGUAGE-BASED SPEAKER ASSIGNMENT =====');
+      debugPrint('GoogleSTTTranslator: Voice 1: $voice1Path');
+      debugPrint('GoogleSTTTranslator: Voice 2: $voice2Path');
+      debugPrint(
+          'GoogleSTTTranslator: Preferred languages: $preferredLanguages');
+
+      // Test both voices with multi-language detection for accurate assignment
+      debugPrint(
+          'GoogleSTTTranslator: Testing Voice 1 with multi-language detection...');
+      final voice1Result =
+          await _detectVoiceLanguageOptimized(voice1Path, preferredLanguages);
+
+      debugPrint(
+          'GoogleSTTTranslator: Testing Voice 2 with multi-language detection...');
+      final voice2Result =
+          await _detectVoiceLanguageOptimized(voice2Path, preferredLanguages);
+
+      debugPrint('GoogleSTTTranslator: Voice 1 language detection:');
+      debugPrint('  Language: ${voice1Result['language']}');
+      debugPrint('  Confidence: ${voice1Result['confidence']}');
+      debugPrint('  Text: "${voice1Result['text']}"');
+
+      debugPrint('GoogleSTTTranslator: Voice 2 language detection:');
+      debugPrint('  Language: ${voice2Result['language']}');
+      debugPrint('  Confidence: ${voice2Result['confidence']}');
+      debugPrint('  Text: "${voice2Result['text']}"');
+
+      // Create assignment based on both voice language detections
+      final Map<String, String> assignment = {};
+      final List<String> assignedLanguages = [];
+
+      final voice1Language = voice1Result['language'] as String?;
+      final voice2Language = voice2Result['language'] as String?;
+      final speaker1Lang = _speakerLanguages[0]?.code ?? 'en';
+      final speaker2Lang = _speakerLanguages[1]?.code ?? 'en';
+
+      debugPrint('GoogleSTTTranslator: Speaker language configuration:');
+      debugPrint('  Speaker 1: $speaker1Lang');
+      debugPrint('  Speaker 2: $speaker2Lang');
+      debugPrint('  Voice 1 detected language: $voice1Language');
+      debugPrint('  Voice 2 detected language: $voice2Language');
+
+      // Assign speakers based on language matching
+      bool voice1Assigned = false;
+      bool voice2Assigned = false;
+
+      // Try to assign Voice 1 first
+      if (voice1Language != null &&
+          preferredLanguages.contains(voice1Language)) {
+        if (voice1Language == speaker1Lang) {
+          assignment['speaker1'] = voice1Path;
+          voice1Assigned = true;
+          assignedLanguages.add(voice1Language);
+          debugPrint(
+              'GoogleSTTTranslator: ✅ Voice 1 assigned to Speaker 1 (language: $voice1Language)');
+        } else if (voice1Language == speaker2Lang) {
+          assignment['speaker2'] = voice1Path;
+          voice1Assigned = true;
+          assignedLanguages.add(voice1Language);
+          debugPrint(
+              'GoogleSTTTranslator: ✅ Voice 1 assigned to Speaker 2 (language: $voice1Language)');
+        }
+      }
+
+      // Try to assign Voice 2
+      if (voice2Language != null &&
+          preferredLanguages.contains(voice2Language)) {
+        if (voice2Language == speaker1Lang && !voice1Assigned) {
+          assignment['speaker1'] = voice2Path;
+          voice2Assigned = true;
+          assignedLanguages.add(voice2Language);
+          debugPrint(
+              'GoogleSTTTranslator: ✅ Voice 2 assigned to Speaker 1 (language: $voice2Language)');
+        } else if (voice2Language == speaker2Lang && !voice1Assigned) {
+          assignment['speaker2'] = voice2Path;
+          voice2Assigned = true;
+          assignedLanguages.add(voice2Language);
+          debugPrint(
+              'GoogleSTTTranslator: ✅ Voice 2 assigned to Speaker 2 (language: $voice2Language)');
+        }
+      }
+
+      // Fill remaining assignments
+      if (!voice1Assigned) {
+        if (assignment['speaker1'] == null) {
+          assignment['speaker1'] = voice1Path;
+        } else {
+          assignment['speaker2'] = voice1Path;
+        }
+      }
+      if (!voice2Assigned) {
+        if (assignment['speaker1'] == null) {
+          assignment['speaker1'] = voice2Path;
+        } else {
+          assignment['speaker2'] = voice2Path;
+        }
+      }
+
+      debugPrint(
+          'GoogleSTTTranslator: ===== FINAL LANGUAGE-BASED ASSIGNMENT =====');
+      debugPrint('GoogleSTTTranslator: Speaker 1: ${assignment['speaker1']}');
+      debugPrint('GoogleSTTTranslator: Speaker 2: ${assignment['speaker2']}');
+      debugPrint('GoogleSTTTranslator: Assigned languages: $assignedLanguages');
+      debugPrint(
+          'GoogleSTTTranslator: ===========================================');
+
+      return assignment;
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Language-based assignment error: $e');
+      // Fallback to original order
+      return {
+        'speaker1': voice1Path,
+        'speaker2': voice2Path,
+      };
+    }
+  }
+
   /// Generate stereo audio file from TTS audio files
   /// This method creates the stereo file once and caches it for reuse
   Future<void> _generateStereoAudioFile() async {
     try {
       debugPrint(
           'GoogleSTTTranslator: Starting stereo audio file generation...');
+
+      setState(() {
+        _processingStatus = 'Creating stereo audio...';
+        _processingProgress = 0.95;
+      });
+
       debugPrint('  Speaker1TtsAudioPath: $_speaker1TtsAudioPath');
       debugPrint('  Speaker2TtsAudioPath: $_speaker2TtsAudioPath');
 
@@ -1133,23 +1802,44 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         debugPrint('  File exists: $cachedExists');
         debugPrint('  File size: $cachedSize bytes');
 
+        setState(() {
+          _processingStatus = 'Ready to play!';
+          _processingProgress = 1.0;
+        });
+
         // Auto-play the stereo audio if file was successfully generated
         if (cachedExists && cachedSize > 0) {
           debugPrint('GoogleSTTTranslator: Auto-playing stereo audio...');
           // Add a small delay to ensure UI updates and user sees the stereo audio is ready
           await Future.delayed(const Duration(milliseconds: 500));
           await _autoPlayStereoAudio();
+
+          // Clear processing state after auto-play starts
+          setState(() {
+            _isProcessing = false;
+          });
         } else {
           debugPrint(
               'GoogleSTTTranslator: Stereo audio file is empty or missing, skipping auto-play');
+          setState(() {
+            _isProcessing = false;
+          });
         }
       } else {
         debugPrint(
             'GoogleSTTTranslator: Failed to generate stereo audio file - returned null');
+        setState(() {
+          _isProcessing = false;
+        });
       }
     } catch (e, stackTrace) {
       debugPrint('GoogleSTTTranslator: Error generating stereo audio file: $e');
       debugPrint('GoogleSTTTranslator: Stack trace: $stackTrace');
+
+      setState(() {
+        _isProcessing = false;
+        _processingStatus = 'Error occurred';
+      });
     } finally {
       // CRITICAL: Clean up TTS files AFTER stereo generation completes
       // This ensures files are available during stereo generation
@@ -2747,6 +3437,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _speaker2Player.dispose();
     _ttsService.dispose();
     _stereoTtsService.dispose();
+    _translationService.dispose();
     // Note: No need to dispose SystemSound
 
     // Clean up automatic mode resources
@@ -3163,13 +3854,13 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       children: [
         _buildSpeakerInfoBar(),
         _buildSoundLevelGraph(),
-        // Expanded(
-        //   child: _isProcessing
-        //       ? _buildProcessingView()
-        //       : (_speaker1AudioPath != null && _speaker2AudioPath != null)
-        //           ? _buildResultsView()
-        //           : _buildIdleView(),
-        // ),
+        Expanded(
+          child: _isProcessing
+              ? _buildProcessingView()
+              : (_speaker1AudioPath != null && _speaker2AudioPath != null)
+                  ? _buildResultsView()
+                  : _buildIdleView(),
+        ),
         _buildRecordingControls(),
       ],
     );
@@ -3748,29 +4439,50 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _translations[1] != null &&
         _translations[1]!.isNotEmpty;
 
+    // Check if we have a cached stereo file
+    final hasStereoFile = _cachedStereoAudioPath != null;
+
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: const Color(0xFF1D1E33),
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: _isPlayingStereo
               ? Colors.purple
               : Colors.purple.withValues(alpha: 0.3),
           width: 2,
         ),
+        boxShadow: _isPlayingStereo
+            ? [
+                BoxShadow(
+                  color: Colors.purple.withValues(alpha: 0.3),
+                  blurRadius: 20,
+                  spreadRadius: 2,
+                ),
+              ]
+            : null,
       ),
       child: Column(
         children: [
           Row(
             children: [
-              Icon(
-                Icons.headphones,
-                color: _isPlayingStereo
-                    ? Colors.purple
-                    : Colors.purple.withValues(alpha: 0.7),
-                size: 20,
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: _isPlayingStereo
+                      ? Colors.purple.withValues(alpha: 0.2)
+                      : Colors.purple.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(
+                  Icons.headphones,
+                  color: _isPlayingStereo
+                      ? Colors.purple
+                      : Colors.purple.withValues(alpha: 0.7),
+                  size: 24,
+                ),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3781,7 +4493,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                       'Stereo Audio Playback',
                       style: TextStyle(
                         color: _isPlayingStereo ? Colors.purple : Colors.white,
-                        fontSize: 16,
+                        fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
                     ),
@@ -3793,41 +4505,66 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                         fontSize: 12,
                       ),
                     ),
+                    if (_isPlayingStereo) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        '🔊 Playing...',
+                        style: TextStyle(
+                          color: Colors.purple,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
               GestureDetector(
-                onTap: hasTranslations ? _playStereoAudio : null,
+                onTap: (hasTranslations && hasStereoFile)
+                    ? _playStereoAudio
+                    : null,
                 child: Container(
-                  padding: const EdgeInsets.all(12),
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: hasTranslations
+                    color: (hasTranslations && hasStereoFile)
                         ? (_isPlayingStereo ? Colors.red : Colors.purple)
                         : Colors.grey.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: hasTranslations
+                      color: (hasTranslations && hasStereoFile)
                           ? (_isPlayingStereo ? Colors.red : Colors.purple)
                           : Colors.grey.withValues(alpha: 0.5),
-                      width: 1,
+                      width: 2,
                     ),
+                    boxShadow: (hasTranslations && hasStereoFile)
+                        ? [
+                            BoxShadow(
+                              color: (_isPlayingStereo
+                                      ? Colors.red
+                                      : Colors.purple)
+                                  .withValues(alpha: 0.3),
+                              blurRadius: 8,
+                              spreadRadius: 1,
+                            ),
+                          ]
+                        : null,
                   ),
                   child: Icon(
                     _isPlayingStereo ? Icons.stop : Icons.play_arrow,
                     color: Colors.white,
-                    size: 20,
+                    size: 24,
                   ),
                 ),
               ),
             ],
           ),
-          if (!hasTranslations) ...[
-            const SizedBox(height: 12),
+          if (!hasTranslations || !hasStereoFile) ...[
+            const SizedBox(height: 16),
             Container(
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.orange.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: Colors.orange.withValues(alpha: 0.3),
                   width: 1,
@@ -3838,15 +4575,18 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                   Icon(
                     Icons.info_outline,
                     color: Colors.orange,
-                    size: 16,
+                    size: 18,
                   ),
-                  const SizedBox(width: 8),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Complete translation first to enable stereo audio playback',
+                      !hasTranslations
+                          ? 'Complete translation process to enable stereo playback'
+                          : 'Stereo audio file not available. Please try recording again.',
                       style: TextStyle(
                         color: Colors.orange,
-                        fontSize: 12,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),

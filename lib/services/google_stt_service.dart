@@ -135,17 +135,19 @@ class GoogleSttService {
         'sampleRateHertz': 16000, // Adjust based on your audio
         'languageCode': languageCode,
         'enableAutomaticPunctuation': true,
-        'enableWordTimeOffsets': true,
-        'diarizationConfig': {
-          'enableSpeakerDiarization': true,
-          'minSpeakerCount': minSpeakers,
-          'maxSpeakerCount': maxSpeakers,
-        },
+        'enableWordTimeOffsets': false,
+        // 'diarizationConfig': {
+        //   'enableSpeakerDiarization': true,
+        //   'minSpeakerCount': minSpeakers,
+        //   'maxSpeakerCount': maxSpeakers,
+        // },
         'model': _getSupportedModel(
             languageCode), // Use appropriate model for language
       };
 
       // Add alternative languages if provided (for multi-language conversations)
+      alternativeLanguages = ["en-US", "bn-IN"];
+
       if (alternativeLanguages != null && alternativeLanguages.isNotEmpty) {
         config['alternativeLanguageCodes'] = alternativeLanguages;
         debugPrint('GoogleSttService: Using multi-language detection');
@@ -159,6 +161,9 @@ class GoogleSttService {
           'content': audioContent,
         },
       };
+
+      print(
+          "Calling Transcription with diarization: ${jsonEncode(requestBody)}");
 
       // Make the API request
       final response = await http.post(
@@ -174,6 +179,7 @@ class GoogleSttService {
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
+        print(data);
         debugPrint('GoogleSttService: Transcription successful');
 
         return _parseDiarizationResponse(data);

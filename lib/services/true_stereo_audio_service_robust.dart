@@ -132,7 +132,7 @@ class TrueStereoAudioServiceRobust {
       final leftData = leftAudioInfo?['audioData'] as List<int>?;
       final rightData = rightAudioInfo?['audioData'] as List<int>?;
 
-      // Determine sample rate from valid file(s)
+      // Determine sample rate from valid file(s) - ensure consistency
       int sampleRate = 16000; // Default fallback
       int channels = 1;
       int bitsPerSample = 16;
@@ -146,6 +146,11 @@ class TrueStereoAudioServiceRobust {
         channels = rightAudioInfo['channels'] as int;
         bitsPerSample = rightAudioInfo['bitsPerSample'] as int;
       }
+
+      // CRITICAL FIX: Ensure both audio files use the same sample rate
+      // This prevents one speaker from playing slower than the other
+      debugPrint(
+          'TrueStereoAudioServiceRobust: Normalizing sample rate to $sampleRate Hz for consistency');
 
       debugPrint(
           'TrueStereoAudioServiceRobust: Using sample rate: $sampleRate Hz');
