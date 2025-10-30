@@ -10,7 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:noise_meter/noise_meter.dart';
 
 import '../../services/config_service.dart';
-import '../../services/audio_route_service.dart';
+// Audio route is handled via a platform channel call to avoid build-time issues
 import '../../services/permission_service.dart';
 import '../../services/on_device_translation_service.dart';
 import '../../services/tts_service.dart';
@@ -158,6 +158,36 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _initializeServices();
     _setupAudioPlayers();
     _initializeAnimations();
+  }
+
+  // Platform-channel helper: force phone mic even if BT/TWS connected
+  static const MethodChannel _audioRouteChannel = MethodChannel('audio_route');
+  Future<void> _forcePhoneMic() async {
+    try {
+      await _audioRouteChannel.invokeMethod('forcePhoneMic');
+      debugPrint('GoogleSTTTranslator: Forced phone mic via platform channel');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Failed to force phone mic: $e');
+    }
+  }
+
+  Future<void> _enterRecordingRoute() async {
+    try {
+      await _audioRouteChannel.invokeMethod('enterRecordingRoute');
+      debugPrint('GoogleSTTTranslator: Entered recording route (phone mic)');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Failed to enter recording route: $e');
+    }
+  }
+
+  Future<void> _enterPlaybackRoute() async {
+    try {
+      await _audioRouteChannel.invokeMethod('enterPlaybackRoute');
+      debugPrint(
+          'GoogleSTTTranslator: Entered playback route (prefer BT A2DP)');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Failed to enter playback route: $e');
+    }
   }
 
   /// Check if a WAV file contains meaningful audio (not just a tiny/silent file)
@@ -401,8 +431,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         return;
       }
 
-      // Force using the phone's built-in microphone regardless of BT state
-      await AudioRouteService.forcePhoneMic();
+      // Always force built-in mic for recording (keep BT output unaffected)
+      await _enterRecordingRoute();
 
       final directory = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -2212,6 +2242,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         debugPrint('GoogleSTTTranslator: Playing cached stereo audio...');
         debugPrint('  Cached stereo file: $_cachedStereoAudioPath');
 
+        // Ensure playback routing prefers BT A2DP if connected
+        await _enterPlaybackRoute();
+
         // Play the cached stereo audio file
         await _stereoTtsService.playStereoAudio(_cachedStereoAudioPath!);
 
@@ -2243,6 +2276,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint('GoogleSTTTranslator: Starting auto-play of stereo audio...');
 
       // Do not require translations for auto-play; rely on generated stereo file
+
+      // Ensure playback routing prefers BT A2DP if connected
+      await _enterPlaybackRoute();
 
       // Check if we have language information
       final speaker1Language = _speakerLanguages[0];
@@ -4871,22 +4907,22 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         child: Column(
           children: [
             // Automatic Mode Toggle
-            // if (!_isAutomaticMode) ...[
-            //   Container(
-            //     margin: const EdgeInsets.only(bottom: 16),
-            //     child: ElevatedButton.icon(
-            //       onPressed: _isProcessing ? null : _startAutomaticMode,
-            //       icon: const Icon(Icons.autorenew),
-            //       label: const Text('Start Automatic Mode'),
-            //       style: ElevatedButton.styleFrom(
-            //         backgroundColor: Colors.green,
-            //         foregroundColor: Colors.white,
-            //         padding: const EdgeInsets.symmetric(
-            //             horizontal: 24, vertical: 12),
-            //       ),
-            //     ),
-            //   ),
-            // ],
+            if (!_isAutomaticMode) ...[
+              Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                child: ElevatedButton.icon(
+                  onPressed: _isProcessing ? null : _startAutomaticMode,
+                  icon: const Icon(Icons.autorenew),
+                  label: const Text('Start Automatic Mode'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 24, vertical: 12),
+                  ),
+                ),
+              ),
+            ],
 
             // Manual Recording Controls (only show when not in automatic mode)
             if (!_isAutomaticMode) ...[
