@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:noise_meter/noise_meter.dart';
 
 import '../../services/config_service.dart';
+import '../../services/audio_route_service.dart';
 import '../../services/permission_service.dart';
 import '../../services/on_device_translation_service.dart';
 import '../../services/tts_service.dart';
@@ -83,6 +84,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   // Stereo audio playback state
   bool _isPlayingStereo = false;
+  // Defer TTS cleanup until stereo playback completes
+  bool _pendingStereoPlaybackCleanup = false;
 
   // Per-session cache for STT calls: key = "<audioPath>|<langCode>"
   final Map<String, Map<String, dynamic>> _sttCache = {};
@@ -157,6 +160,35 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _initializeAnimations();
   }
 
+  /// Check if a WAV file contains meaningful audio (not just a tiny/silent file)
+  /// Returns true when file size is above minimal WAV header and not trivially tiny
+  Future<bool> _hasMeaningfulAudio(String path,
+      {required int speakerIndex}) async {
+    try {
+      final file = File(path);
+      if (!await file.exists()) {
+        debugPrint(
+            'GoogleSTTTranslator: Speaker $speakerIndex audio missing: $path');
+        return false;
+      }
+      final size = await file.length();
+      // 44 bytes = WAV header only; use a conservative threshold (~1KB) to avoid empty streams
+      const int minBytes = 1024;
+      debugPrint(
+          'GoogleSTTTranslator: Speaker $speakerIndex audio size: $size bytes');
+      if (size <= 44 || size < minBytes) {
+        debugPrint(
+            'GoogleSTTTranslator: Skipping STT for Speaker $speakerIndex - audio too small');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      debugPrint(
+          'GoogleSTTTranslator: Audio check error for Speaker $speakerIndex: $e');
+      return false;
+    }
+  }
+
   Future<void> _initializeServices() async {
     try {
       _sttProvider = (widget.provider ?? GoogleSttProvider());
@@ -189,7 +221,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       });
 
       // Set up unified stereo TTS service callback for both UI state and automatic mode
-      _stereoTtsService.setPlaybackCompletedCallback(() {
+      _stereoTtsService.setPlaybackCompletedCallback(() async {
         debugPrint(
             'GoogleSTTTranslator: 🎵 Unified playback completion callback triggered!');
         debugPrint(
@@ -199,6 +231,14 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           setState(() {
             _isPlayingStereo = false;
           });
+        }
+
+        // Perform deferred cleanup of TTS files after playback completes
+        if (_pendingStereoPlaybackCleanup) {
+          debugPrint(
+              'GoogleSTTTranslator: Performing deferred TTS cleanup after playback');
+          await _cleanupTtsFiles();
+          _pendingStereoPlaybackCleanup = false;
         }
 
         // Handle automatic mode restart
@@ -360,6 +400,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _showErrorDialog('Microphone permission is required for recording.');
         return;
       }
+
+      // Force using the phone's built-in microphone regardless of BT state
+      await AudioRouteService.forcePhoneMic();
 
       final directory = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
@@ -693,9 +736,10 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint(
           'GoogleSTTTranslator: Starting transcription of separated audio...');
 
-      // Transcribe Speaker 1 audio
+      // Transcribe Speaker 1 audio (skip if file has no meaningful audio)
       if (_speaker1AudioPath != null &&
-          await File(_speaker1AudioPath!).exists()) {
+          await File(_speaker1AudioPath!).exists() &&
+          await _hasMeaningfulAudio(_speaker1AudioPath!, speakerIndex: 0)) {
         final speaker1Language = _speakerLanguages[0];
         final speaker1LanguageCode =
             _mapLanguageToGoogleCode(speaker1Language?.code ?? 'en');
@@ -753,9 +797,10 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         }
       }
 
-      // Transcribe Speaker 2 audio
+      // Transcribe Speaker 2 audio (skip if file has no meaningful audio)
       if (_speaker2AudioPath != null &&
-          await File(_speaker2AudioPath!).exists()) {
+          await File(_speaker2AudioPath!).exists() &&
+          await _hasMeaningfulAudio(_speaker2AudioPath!, speakerIndex: 1)) {
         final speaker2Language = _speakerLanguages[1];
         final speaker2LanguageCode =
             _mapLanguageToGoogleCode(speaker2Language?.code ?? 'en');
@@ -936,6 +981,16 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _processingProgress = 0.90;
       });
 
+      // Always ensure we have TTS files for both speakers (real or silent)
+      bool hasSpeaker1Translation =
+          _translations[0] != null && _translations[0]!.isNotEmpty;
+      bool hasSpeaker2Translation =
+          _translations[1] != null && _translations[1]!.isNotEmpty;
+
+      debugPrint('GoogleSTTTranslator: Translation status:');
+      debugPrint('  Speaker 1 has translation: $hasSpeaker1Translation');
+      debugPrint('  Speaker 2 has translation: $hasSpeaker2Translation');
+
       // Generate TTS audio for Speaker 1's translated text (for Speaker 2 to hear)
       debugPrint('GoogleSTTTranslator: Checking Speaker 1 translation...');
       debugPrint('  Translation[0]: ${_translations[0]}');
@@ -943,7 +998,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint(
           '  Translation[0] is not empty: ${_translations[0]?.isNotEmpty ?? false}');
 
-      if (_translations[0] != null && _translations[0]!.isNotEmpty) {
+      if (hasSpeaker1Translation) {
         final speaker2Language = _speakerLanguages[1];
         debugPrint(
             '  Speaker2Language: ${speaker2Language?.name} (${speaker2Language?.code})');
@@ -1020,6 +1075,11 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             debugPrint(
                 'GoogleSTTTranslator: Speaker 1 TTS generation failed after $maxRetries attempts');
             _speaker1TtsAudioPath = null;
+            // Create silent audio as fallback
+            debugPrint(
+                'GoogleSTTTranslator: Creating silent audio fallback for Speaker 1');
+            _speaker1TtsAudioPath =
+                await _createSilentAudioFile('speaker1_fallback');
           }
         } else {
           debugPrint(
@@ -1037,7 +1097,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint(
           '  Translation[1] is not empty: ${_translations[1]?.isNotEmpty ?? false}');
 
-      if (_translations[1] != null && _translations[1]!.isNotEmpty) {
+      if (hasSpeaker2Translation) {
         final speaker1Language = _speakerLanguages[0];
         debugPrint(
             '  Speaker1Language: ${speaker1Language?.name} (${speaker1Language?.code})');
@@ -1114,6 +1174,11 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             debugPrint(
                 'GoogleSTTTranslator: Speaker 2 TTS generation failed after $maxRetries attempts');
             _speaker2TtsAudioPath = null;
+            // Create silent audio as fallback
+            debugPrint(
+                'GoogleSTTTranslator: Creating silent audio fallback for Speaker 2');
+            _speaker2TtsAudioPath =
+                await _createSilentAudioFile('speaker2_fallback');
           }
         } else {
           debugPrint(
@@ -1124,13 +1189,50 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             'GoogleSTTTranslator: Speaker 2 translation is null or empty, skipping TTS generation');
       }
 
+      // Ensure we have TTS files for both speakers (create silent audio for missing ones)
+      if (!hasSpeaker1Translation && _speaker1TtsAudioPath == null) {
+        debugPrint(
+            'GoogleSTTTranslator: Creating silent audio for Speaker 1 (no translation)');
+        _speaker1TtsAudioPath = await _createSilentAudioFile('speaker1_silent');
+      }
+
+      if (!hasSpeaker2Translation && _speaker2TtsAudioPath == null) {
+        debugPrint(
+            'GoogleSTTTranslator: Creating silent audio for Speaker 2 (no translation)');
+        _speaker2TtsAudioPath = await _createSilentAudioFile('speaker2_silent');
+      }
+
       // Add a small delay to ensure file system operations complete
       await Future.delayed(const Duration(milliseconds: 500));
 
       // Generate stereo audio file immediately after TTS generation
       await _generateStereoAudioFile();
 
+      // Force UI refresh to enable TTS buttons
+      if (mounted) {
+        setState(() {
+          // This will trigger a rebuild to enable TTS buttons
+        });
+      }
+
       debugPrint('GoogleSTTTranslator: TTS audio generation completed');
+      debugPrint('  Speaker 1 TTS path: $_speaker1TtsAudioPath');
+      debugPrint('  Speaker 2 TTS path: $_speaker2TtsAudioPath');
+
+      // Verify TTS files exist and are playable
+      if (_speaker1TtsAudioPath != null) {
+        final file1 = File(_speaker1TtsAudioPath!);
+        final exists1 = await file1.exists();
+        final size1 = exists1 ? await file1.length() : 0;
+        debugPrint('  Speaker 1 TTS file exists: $exists1, size: $size1 bytes');
+      }
+
+      if (_speaker2TtsAudioPath != null) {
+        final file2 = File(_speaker2TtsAudioPath!);
+        final exists2 = await file2.exists();
+        final size2 = exists2 ? await file2.length() : 0;
+        debugPrint('  Speaker 2 TTS file exists: $exists2, size: $size2 bytes');
+      }
     } catch (e) {
       debugPrint('GoogleSTTTranslator: TTS audio generation error: $e');
       // Don't throw - TTS failure shouldn't break the app
@@ -1694,6 +1796,78 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     }
   }
 
+  /// Create a silent audio file for missing speakers
+  Future<String?> _createSilentAudioFile(String prefix) async {
+    try {
+      final directory = await getApplicationDocumentsDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final silentFilePath = '${directory.path}/${prefix}_${timestamp}.wav';
+
+      // Create a 2-second silent WAV file (16kHz, 16-bit, mono)
+      const sampleRate = 16000;
+      const duration = 2.0; // 2 seconds
+      final numSamples = (sampleRate * duration).round();
+
+      // WAV header (44 bytes)
+      final header = Uint8List(44);
+      final data = ByteData.view(header.buffer);
+
+      // RIFF header
+      data.setUint8(0, 0x52); // 'R'
+      data.setUint8(1, 0x49); // 'I'
+      data.setUint8(2, 0x46); // 'F'
+      data.setUint8(3, 0x46); // 'F'
+      data.setUint32(4, 36 + numSamples * 2, Endian.little); // File size - 8
+
+      // WAVE header
+      data.setUint8(8, 0x57); // 'W'
+      data.setUint8(9, 0x41); // 'A'
+      data.setUint8(10, 0x56); // 'V'
+      data.setUint8(11, 0x45); // 'E'
+
+      // fmt chunk
+      data.setUint8(12, 0x66); // 'f'
+      data.setUint8(13, 0x6D); // 'm'
+      data.setUint8(14, 0x74); // 't'
+      data.setUint8(15, 0x20); // ' '
+      data.setUint32(16, 16, Endian.little); // fmt chunk size
+      data.setUint16(20, 1, Endian.little); // Audio format (PCM)
+      data.setUint16(22, 1, Endian.little); // Number of channels (mono)
+      data.setUint32(24, sampleRate, Endian.little); // Sample rate
+      data.setUint32(28, sampleRate * 2, Endian.little); // Byte rate
+      data.setUint16(32, 2, Endian.little); // Block align
+      data.setUint16(34, 16, Endian.little); // Bits per sample
+
+      // data chunk
+      data.setUint8(36, 0x64); // 'd'
+      data.setUint8(37, 0x61); // 'a'
+      data.setUint8(38, 0x74); // 't'
+      data.setUint8(39, 0x61); // 'a'
+      data.setUint32(40, numSamples * 2, Endian.little); // Data size
+
+      // Create silent audio data (all zeros)
+      final audioData = Uint8List(numSamples * 2);
+
+      // Combine header and audio data
+      final silentFile = Uint8List(44 + numSamples * 2);
+      silentFile.setRange(0, 44, header);
+      silentFile.setRange(44, 44 + numSamples * 2, audioData);
+
+      // Write to file
+      await File(silentFilePath).writeAsBytes(silentFile);
+
+      debugPrint(
+          'GoogleSTTTranslator: Created silent audio file: $silentFilePath');
+      debugPrint(
+          '  Duration: ${duration}s, Sample rate: ${sampleRate}Hz, Size: ${silentFile.length} bytes');
+
+      return silentFilePath;
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: Failed to create silent audio file: $e');
+      return null;
+    }
+  }
+
   /// Generate stereo audio file from TTS audio files
   /// This method creates the stereo file once and caches it for reuse
   Future<void> _generateStereoAudioFile() async {
@@ -1709,15 +1883,26 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint('  Speaker1TtsAudioPath: $_speaker1TtsAudioPath');
       debugPrint('  Speaker2TtsAudioPath: $_speaker2TtsAudioPath');
 
-      // Check if we have both TTS audio files
-      if (_speaker1TtsAudioPath == null || _speaker2TtsAudioPath == null) {
+      // Handle single-speaker scenarios by creating silent audio for missing speakers
+      bool needsSilentAudio = false;
+
+      if (_speaker1TtsAudioPath == null) {
         debugPrint(
-            'GoogleSTTTranslator: Cannot generate stereo audio - missing TTS files');
+            'GoogleSTTTranslator: Speaker 1 TTS missing, will create silent audio');
+        _speaker1TtsAudioPath = await _createSilentAudioFile('speaker1_silent');
+        needsSilentAudio = true;
+      }
+
+      if (_speaker2TtsAudioPath == null) {
         debugPrint(
-            '  Speaker1TtsAudioPath is null: ${_speaker1TtsAudioPath == null}');
+            'GoogleSTTTranslator: Speaker 2 TTS missing, will create silent audio');
+        _speaker2TtsAudioPath = await _createSilentAudioFile('speaker2_silent');
+        needsSilentAudio = true;
+      }
+
+      if (needsSilentAudio) {
         debugPrint(
-            '  Speaker2TtsAudioPath is null: ${_speaker2TtsAudioPath == null}');
-        return;
+            'GoogleSTTTranslator: Created silent audio files for missing speakers');
       }
 
       // Check if both files exist
@@ -1841,11 +2026,10 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _processingStatus = 'Error occurred';
       });
     } finally {
-      // CRITICAL: Clean up TTS files AFTER stereo generation completes
-      // This ensures files are available during stereo generation
+      // Defer cleanup; we'll clean after playback completes so UI buttons keep working
+      _pendingStereoPlaybackCleanup = true;
       debugPrint(
-          'GoogleSTTTranslator: Cleaning up TTS files after stereo generation...');
-      await _cleanupTtsFiles();
+          'GoogleSTTTranslator: Deferring TTS cleanup until playback completion');
     }
   }
 
@@ -1890,6 +2074,20 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   /// Play TTS audio for Speaker 1's translated text
   Future<void> _playSpeaker1TtsAudio() async {
     try {
+      // If TTS not ready but translation exists, generate on-demand
+      if ((_speaker1TtsAudioPath == null || _speaker1TtsAudioPath!.isEmpty) &&
+          (_translations[0]?.isNotEmpty ?? false)) {
+        debugPrint(
+            'GoogleSTTTranslator: Speaker 1 TTS missing, generating on-demand...');
+        final speaker2Language = _speakerLanguages[1];
+        if (speaker2Language != null) {
+          _speaker1TtsAudioPath = await _ttsService.generateAudioFile(
+            _translations[0]!,
+            speaker2Language.code,
+            gender: _speakerGenders[0],
+          );
+        }
+      }
       if (_speaker1TtsAudioPath == null || _speaker1TtsAudioPath!.isEmpty) {
         debugPrint('GoogleSTTTranslator: No TTS audio available for Speaker 1');
         return;
@@ -1925,6 +2123,20 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   /// Play TTS audio for Speaker 2's translated text
   Future<void> _playSpeaker2TtsAudio() async {
     try {
+      // If TTS not ready but translation exists, generate on-demand
+      if ((_speaker2TtsAudioPath == null || _speaker2TtsAudioPath!.isEmpty) &&
+          (_translations[1]?.isNotEmpty ?? false)) {
+        debugPrint(
+            'GoogleSTTTranslator: Speaker 2 TTS missing, generating on-demand...');
+        final speaker1Language = _speakerLanguages[0];
+        if (speaker1Language != null) {
+          _speaker2TtsAudioPath = await _ttsService.generateAudioFile(
+            _translations[1]!,
+            speaker1Language.code,
+            gender: _speakerGenders[1],
+          );
+        }
+      }
       if (_speaker2TtsAudioPath == null || _speaker2TtsAudioPath!.isEmpty) {
         debugPrint('GoogleSTTTranslator: No TTS audio available for Speaker 2');
         return;
@@ -1962,27 +2174,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   /// Right channel: Speaker 2's translated text (for Speaker 1 to hear)
   Future<void> _playStereoAudio() async {
     try {
-      // Check if we have translations for both speakers
-      if (_translations[0] == null ||
-          _translations[0]!.isEmpty ||
-          _translations[1] == null ||
-          _translations[1]!.isEmpty) {
-        debugPrint(
-            'GoogleSTTTranslator: No translations available for stereo audio');
-        _showErrorDialog('No translations available for stereo audio playback');
-        return;
-      }
-
-      // Check if we have language information
-      final speaker1Language = _speakerLanguages[0];
-      final speaker2Language = _speakerLanguages[1];
-      if (speaker1Language == null || speaker2Language == null) {
-        debugPrint(
-            'GoogleSTTTranslator: No language information available for stereo audio');
-        _showErrorDialog(
-            'Language information not available for stereo audio playback');
-        return;
-      }
+      // Manual play should not require translations; rely on cached stereo file
 
       if (_isPlayingStereo) {
         // Stop stereo audio
@@ -2019,10 +2211,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
         debugPrint('GoogleSTTTranslator: Playing cached stereo audio...');
         debugPrint('  Cached stereo file: $_cachedStereoAudioPath');
-        debugPrint(
-            '  Left channel (Speaker 1): "${_translations[0]}" in ${speaker2Language.code}');
-        debugPrint(
-            '  Right channel (Speaker 2): "${_translations[1]}" in ${speaker1Language.code}');
 
         // Play the cached stereo audio file
         await _stereoTtsService.playStereoAudio(_cachedStereoAudioPath!);
@@ -2054,15 +2242,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
       debugPrint('GoogleSTTTranslator: Starting auto-play of stereo audio...');
 
-      // Check if we have translations for both speakers
-      if (_translations[0] == null ||
-          _translations[0]!.isEmpty ||
-          _translations[1] == null ||
-          _translations[1]!.isEmpty) {
-        debugPrint(
-            'GoogleSTTTranslator: No translations available for auto-play stereo audio');
-        return;
-      }
+      // Do not require translations for auto-play; rely on generated stereo file
 
       // Check if we have language information
       final speaker1Language = _speakerLanguages[0];
@@ -4433,13 +4613,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   /// Build stereo audio button for playing both speakers' translated text
   Widget _buildStereoAudioButton() {
-    // Check if we have translations for both speakers
-    final hasTranslations = _translations[0] != null &&
-        _translations[0]!.isNotEmpty &&
-        _translations[1] != null &&
-        _translations[1]!.isNotEmpty;
-
-    // Check if we have a cached stereo file
+    // Enable play/stop when a cached stereo file exists (single-speaker compatible)
     final hasStereoFile = _cachedStereoAudioPath != null;
 
     return Container(
@@ -4520,23 +4694,21 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                 ),
               ),
               GestureDetector(
-                onTap: (hasTranslations && hasStereoFile)
-                    ? _playStereoAudio
-                    : null,
+                onTap: hasStereoFile ? _playStereoAudio : null,
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: (hasTranslations && hasStereoFile)
+                    color: hasStereoFile
                         ? (_isPlayingStereo ? Colors.red : Colors.purple)
                         : Colors.grey.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: (hasTranslations && hasStereoFile)
+                      color: hasStereoFile
                           ? (_isPlayingStereo ? Colors.red : Colors.purple)
                           : Colors.grey.withValues(alpha: 0.5),
                       width: 2,
                     ),
-                    boxShadow: (hasTranslations && hasStereoFile)
+                    boxShadow: (hasStereoFile)
                         ? [
                             BoxShadow(
                               color: (_isPlayingStereo
@@ -4551,14 +4723,16 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                   ),
                   child: Icon(
                     _isPlayingStereo ? Icons.stop : Icons.play_arrow,
-                    color: Colors.white,
+                    color: hasStereoFile
+                        ? Colors.white
+                        : Colors.grey.withValues(alpha: 0.6),
                     size: 24,
                   ),
                 ),
               ),
             ],
           ),
-          if (!hasTranslations || !hasStereoFile) ...[
+          if (!hasStereoFile) ...[
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
@@ -4580,9 +4754,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      !hasTranslations
-                          ? 'Complete translation process to enable stereo playback'
-                          : 'Stereo audio file not available. Please try recording again.',
+                      'Stereo audio file not available. Please try recording again.',
                       style: TextStyle(
                         color: Colors.orange,
                         fontSize: 13,
@@ -4699,22 +4871,22 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         child: Column(
           children: [
             // Automatic Mode Toggle
-            if (!_isAutomaticMode) ...[
-              Container(
-                margin: const EdgeInsets.only(bottom: 16),
-                child: ElevatedButton.icon(
-                  onPressed: _isProcessing ? null : _startAutomaticMode,
-                  icon: const Icon(Icons.autorenew),
-                  label: const Text('Start Automatic Mode'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 12),
-                  ),
-                ),
-              ),
-            ],
+            // if (!_isAutomaticMode) ...[
+            //   Container(
+            //     margin: const EdgeInsets.only(bottom: 16),
+            //     child: ElevatedButton.icon(
+            //       onPressed: _isProcessing ? null : _startAutomaticMode,
+            //       icon: const Icon(Icons.autorenew),
+            //       label: const Text('Start Automatic Mode'),
+            //       style: ElevatedButton.styleFrom(
+            //         backgroundColor: Colors.green,
+            //         foregroundColor: Colors.white,
+            //         padding: const EdgeInsets.symmetric(
+            //             horizontal: 24, vertical: 12),
+            //       ),
+            //     ),
+            //   ),
+            // ],
 
             // Manual Recording Controls (only show when not in automatic mode)
             if (!_isAutomaticMode) ...[
