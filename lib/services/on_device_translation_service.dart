@@ -112,7 +112,9 @@ class OnDeviceTranslationService {
   Future<void> _downloadRequiredModels() async {
     try {
       // Download models for commonly used languages
-      final commonLanguages = ['en', 'bn', 'hi', 'es', 'fr', 'de', 'ar', 'ko'];
+      // final commonLanguages = ['en', 'bn', 'hi', 'es', 'fr', 'de', 'ar', 'ko'];
+
+      final commonLanguages = ['en', 'ko'];
       final languageNames = getLanguageInfo();
 
       for (final langCode in commonLanguages) {

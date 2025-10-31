@@ -167,41 +167,78 @@ class TrueStereoAudioServiceRobust {
       final leftData = leftAudioInfo?['audioData'] as List<int>?;
       final rightData = rightAudioInfo?['audioData'] as List<int>?;
 
-      // Determine sample rate from valid file(s) - ensure consistency
-      int sampleRate = 16000; // Default fallback
-      int channels = 1;
-      int bitsPerSample = 16;
+      // Extract sample rates from both files
+      final leftSampleRate = leftAudioInfo?['sampleRate'] as int? ?? 16000;
+      final rightSampleRate = rightAudioInfo?['sampleRate'] as int? ?? 16000;
+      final leftChannels = leftAudioInfo?['channels'] as int? ?? 1;
+      final rightChannels = rightAudioInfo?['channels'] as int? ?? 1;
+      final leftBitsPerSample = leftAudioInfo?['bitsPerSample'] as int? ?? 16;
+      final rightBitsPerSample = rightAudioInfo?['bitsPerSample'] as int? ?? 16;
 
-      if (leftAudioInfo != null) {
-        sampleRate = leftAudioInfo['sampleRate'] as int;
-        channels = leftAudioInfo['channels'] as int;
-        bitsPerSample = leftAudioInfo['bitsPerSample'] as int;
-      } else if (rightAudioInfo != null) {
-        sampleRate = rightAudioInfo['sampleRate'] as int;
-        channels = rightAudioInfo['channels'] as int;
-        bitsPerSample = rightAudioInfo['bitsPerSample'] as int;
+      debugPrint('TrueStereoAudioServiceRobust: ═══ Sample Rate Analysis ═══');
+      debugPrint('  Left audio:  $leftSampleRate Hz, $leftChannels ch, $leftBitsPerSample bits');
+      debugPrint('  Right audio: $rightSampleRate Hz, $rightChannels ch, $rightBitsPerSample bits');
+
+      // CRITICAL FIX: Detect and handle sample rate mismatch
+      // Different TTS voices (male/female) can generate different sample rates
+      // causing one channel to play slow/fast/weird if not resampled
+      int targetSampleRate;
+      List<int>? leftAudioData;
+      List<int>? rightAudioData;
+
+      if (leftSampleRate != rightSampleRate) {
+        // SAMPLE RATE MISMATCH DETECTED!
+        debugPrint('TrueStereoAudioServiceRobust: ⚠️ SAMPLE RATE MISMATCH DETECTED!');
+        debugPrint('  This causes one speaker to play slow/weird');
+        debugPrint('  Resampling to match...');
+        
+        // Use the higher sample rate as target (better quality)
+        targetSampleRate = leftSampleRate > rightSampleRate ? leftSampleRate : rightSampleRate;
+        debugPrint('  Target sample rate: $targetSampleRate Hz');
+
+        // Resample the audio data that doesn't match
+        if (leftData != null) {
+          if (leftSampleRate != targetSampleRate) {
+            debugPrint('  Resampling LEFT audio: $leftSampleRate Hz → $targetSampleRate Hz');
+            leftAudioData = _resampleAudio(leftData, leftSampleRate, targetSampleRate);
+            debugPrint('  ✅ Left audio resampled successfully');
+          } else {
+            leftAudioData = leftData;
+          }
+        } else {
+          leftAudioData = _createSilentAudio(targetSampleRate, 1.0);
+        }
+
+        if (rightData != null) {
+          if (rightSampleRate != targetSampleRate) {
+            debugPrint('  Resampling RIGHT audio: $rightSampleRate Hz → $targetSampleRate Hz');
+            rightAudioData = _resampleAudio(rightData, rightSampleRate, targetSampleRate);
+            debugPrint('  ✅ Right audio resampled successfully');
+          } else {
+            rightAudioData = rightData;
+          }
+        } else {
+          rightAudioData = _createSilentAudio(targetSampleRate, 1.0);
+        }
+
+        debugPrint('TrueStereoAudioServiceRobust: ✅ Sample rate normalization complete');
+      } else {
+        // Sample rates match, no resampling needed
+        targetSampleRate = leftSampleRate;
+        leftAudioData = leftData ?? _createSilentAudio(targetSampleRate, 1.0);
+        rightAudioData = rightData ?? _createSilentAudio(targetSampleRate, 1.0);
+        debugPrint('TrueStereoAudioServiceRobust: ✅ Sample rates match ($targetSampleRate Hz) - no resampling needed');
       }
 
-      // CRITICAL FIX: Ensure both audio files use the same sample rate
-      // This prevents one speaker from playing slower than the other
-      debugPrint(
-          'TrueStereoAudioServiceRobust: Normalizing sample rate to $sampleRate Hz for consistency');
-
-      debugPrint(
-          'TrueStereoAudioServiceRobust: Using sample rate: $sampleRate Hz');
-      debugPrint(
-          'TrueStereoAudioServiceRobust: Channels: $channels, Bits per sample: $bitsPerSample');
-
-      // Create silent audio data if needed
-      final leftAudioData = leftData ??
-          _createSilentAudio(sampleRate, 1.0); // 1 second of silence
-      final rightAudioData = rightData ??
-          _createSilentAudio(sampleRate, 1.0); // 1 second of silence
+      debugPrint('TrueStereoAudioServiceRobust: Final configuration:');
+      debugPrint('  Sample rate: $targetSampleRate Hz');
+      debugPrint('  Channels: 2 (stereo)');
+      debugPrint('  Bits per sample: 16');
 
       // Calculate audio durations for logging
       final leftDuration =
-          leftAudioData.length / (sampleRate * 2); // 2 bytes per 16-bit sample
-      final rightDuration = rightAudioData.length / (sampleRate * 2);
+          leftAudioData.length / (targetSampleRate * 2); // 2 bytes per 16-bit sample
+      final rightDuration = rightAudioData.length / (targetSampleRate * 2);
       debugPrint(
           'TrueStereoAudioServiceRobust: Left audio duration: ${leftDuration.toStringAsFixed(2)} seconds');
       debugPrint(
@@ -211,9 +248,9 @@ class TrueStereoAudioServiceRobust {
       final stereoWavBytes = _createStereoWavFileNoCutting(
         leftAudioData,
         rightAudioData,
-        sampleRate: sampleRate,
-        channels: channels,
-        bitsPerSample: bitsPerSample,
+        sampleRate: targetSampleRate,
+        channels: 2, // Always stereo output
+        bitsPerSample: 16,
       );
 
       // Write stereo WAV file
@@ -221,14 +258,14 @@ class TrueStereoAudioServiceRobust {
       await outputFile.writeAsBytes(stereoWavBytes);
 
       final finalDuration = stereoWavBytes.length /
-          (sampleRate * 2 * 2); // 2 channels * 2 bytes per sample
+          (targetSampleRate * 2 * 2); // 2 channels * 2 bytes per sample
       debugPrint(
           'TrueStereoAudioServiceRobust: True stereo audio file created successfully');
       debugPrint('  Output path: $outputPath');
       debugPrint('  File size: ${stereoWavBytes.length} bytes');
       debugPrint(
           '  Final duration: ${finalDuration.toStringAsFixed(2)} seconds');
-      debugPrint('  Sample rate: $sampleRate Hz');
+      debugPrint('  Sample rate: $targetSampleRate Hz');
 
       return outputPath;
     } catch (e) {
@@ -510,6 +547,82 @@ class TrueStereoAudioServiceRobust {
   /// Convert integer to bytes (little-endian)
   List<int> _intToBytes(int value, int numBytes) {
     return List.generate(numBytes, (i) => (value >> (i * 8)) & 0xFF);
+  }
+
+  /// Resample audio data from one sample rate to another
+  /// Uses linear interpolation for simplicity and speed
+  /// 
+  /// [audioData] - The input audio data (16-bit PCM, little-endian)
+  /// [fromRate] - The current sample rate of the audio
+  /// [toRate] - The target sample rate
+  /// 
+  /// Returns resampled audio data
+  List<int> _resampleAudio(List<int> audioData, int fromRate, int toRate) {
+    try {
+      if (fromRate == toRate) {
+        return audioData;
+      }
+
+      // Convert byte array to 16-bit samples
+      final inputSamples = <int>[];
+      for (int i = 0; i < audioData.length; i += 2) {
+        if (i + 1 < audioData.length) {
+          // Read 16-bit little-endian sample
+          final sample = (audioData[i] & 0xFF) | ((audioData[i + 1] & 0xFF) << 8);
+          // Convert to signed 16-bit
+          final signedSample = sample > 32767 ? sample - 65536 : sample;
+          inputSamples.add(signedSample);
+        }
+      }
+
+      final inputLength = inputSamples.length;
+      final ratio = fromRate / toRate;
+      final outputLength = (inputLength / ratio).round();
+      final outputSamples = <int>[];
+
+      debugPrint('TrueStereoAudioServiceRobust: Resampling details:');
+      debugPrint('  Input samples: $inputLength');
+      debugPrint('  Output samples: $outputLength');
+      debugPrint('  Ratio: ${ratio.toStringAsFixed(4)}');
+
+      // Perform linear interpolation
+      for (int i = 0; i < outputLength; i++) {
+        final srcIndex = i * ratio;
+        final srcIndexFloor = srcIndex.floor();
+        final srcIndexCeil = srcIndexFloor + 1;
+
+        if (srcIndexCeil < inputLength) {
+          // Linear interpolation between two samples
+          final fraction = srcIndex - srcIndexFloor;
+          final sample1 = inputSamples[srcIndexFloor];
+          final sample2 = inputSamples[srcIndexCeil];
+          final interpolated = sample1 + ((sample2 - sample1) * fraction);
+          outputSamples.add(interpolated.round());
+        } else {
+          // Last sample, no interpolation needed
+          outputSamples.add(inputSamples[srcIndexFloor]);
+        }
+      }
+
+      // Convert samples back to byte array (16-bit little-endian)
+      final outputBytes = <int>[];
+      for (final sample in outputSamples) {
+        // Convert to unsigned 16-bit
+        final unsignedSample = sample < 0 ? sample + 65536 : sample;
+        // Write as little-endian bytes
+        outputBytes.add(unsignedSample & 0xFF); // Low byte
+        outputBytes.add((unsignedSample >> 8) & 0xFF); // High byte
+      }
+
+      debugPrint('TrueStereoAudioServiceRobust: Resampling completed');
+      debugPrint('  Output bytes: ${outputBytes.length}');
+
+      return outputBytes;
+    } catch (e) {
+      debugPrint('TrueStereoAudioServiceRobust: Error resampling audio: $e');
+      // Return original data as fallback
+      return audioData;
+    }
   }
 
   /// Test the stereo audio functionality
