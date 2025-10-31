@@ -99,22 +99,51 @@ class OnDeviceTranslationService {
     }
   }
 
+  /// Callback for download progress updates
+  Function(String languageName, bool isDownloading)? _onModelDownloadProgress;
+
+  /// Set callback for model download progress
+  void setModelDownloadProgressCallback(
+      Function(String languageName, bool isDownloading)? callback) {
+    _onModelDownloadProgress = callback;
+  }
+
   /// Download required language models
   Future<void> _downloadRequiredModels() async {
     try {
       // Download models for commonly used languages
-      final commonLanguages = ['en', 'bn', 'hi', 'es', 'fr', 'de', 'ar'];
+      final commonLanguages = ['en', 'bn', 'hi', 'es', 'fr', 'de', 'ar', 'ko'];
+      final languageNames = getLanguageInfo();
 
       for (final langCode in commonLanguages) {
         final language = _languageMap[langCode];
         if (language != null) {
           try {
+            // Check if model is already downloaded
+            final isDownloaded =
+                await _modelManager.isModelDownloaded(language.bcpCode);
+            if (isDownloaded) {
+              print(
+                  'OnDeviceTranslationService: ✅ Model already exists for $langCode');
+              continue;
+            }
+
+            // Notify UI about download start
+            final languageName = languageNames[langCode] ?? langCode;
+            _onModelDownloadProgress?.call(languageName, true);
+
             await _modelManager.downloadModel(language.bcpCode);
             print(
                 'OnDeviceTranslationService: ✅ Downloaded model for $langCode');
+
+            // Notify UI about download completion
+            _onModelDownloadProgress?.call(languageName, false);
           } catch (e) {
             print(
                 'OnDeviceTranslationService: ⚠️ Failed to download model for $langCode: $e');
+            // Notify UI about download failure
+            final languageName = languageNames[langCode] ?? langCode;
+            _onModelDownloadProgress?.call(languageName, false);
           }
         }
       }

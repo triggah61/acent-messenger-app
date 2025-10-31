@@ -29,6 +29,41 @@ class TrueStereoAudioServiceRobust {
     try {
       _audioPlayer = AudioPlayer();
 
+      // CRITICAL: Set audio context for Android to use MUSIC stream
+      // This ensures stereo A2DP playback instead of mono SCO
+      // NOTE: AudioFocus.gain will let audioplayers manage focus (don't request in MainActivity)
+      try {
+        await _audioPlayer!.setAudioContext(
+          AudioContext(
+            android: AudioContextAndroid(
+              isSpeakerphoneOn: false,
+              stayAwake: true,
+              contentType: AndroidContentType.music,
+              usageType: AndroidUsageType.media,
+              audioFocus: AndroidAudioFocus.gain, // Managed by audioplayers
+            ),
+            iOS: AudioContextIOS(
+              category: AVAudioSessionCategory.playback,
+              options: {
+                AVAudioSessionOptions.allowBluetooth,
+                AVAudioSessionOptions.allowBluetoothA2DP,
+              },
+            ),
+          ),
+        );
+        
+        // Set player mode to STREAM for proper media playback
+        await _audioPlayer!.setPlayerMode(PlayerMode.mediaPlayer);
+        
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ✅ Audio context set for stereo playback');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ✅ Player mode set to MEDIA_PLAYER');
+      } catch (e) {
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ⚠️ Failed to set audio context: $e');
+      }
+
       // Set up completion handler
       _audioPlayer!.onPlayerComplete.listen((event) {
         _isPlaying = false;
@@ -212,6 +247,8 @@ class TrueStereoAudioServiceRobust {
     }
 
     try {
+      debugPrint('TrueStereoAudioServiceRobust: ═══ Starting Stereo Playback ═══');
+      
       if (_isPlaying) {
         await stop();
       }
@@ -220,22 +257,35 @@ class TrueStereoAudioServiceRobust {
       final file = File(stereoAudioPath);
       if (!await file.exists()) {
         debugPrint(
-            'TrueStereoAudioServiceRobust: Stereo audio file does not exist: $stereoAudioPath');
+            'TrueStereoAudioServiceRobust: ❌ Stereo audio file does not exist: $stereoAudioPath');
+        return;
+      }
+      
+      // Verify file size
+      final fileSize = await file.length();
+      debugPrint('TrueStereoAudioServiceRobust: File size: $fileSize bytes');
+      
+      if (fileSize < 44) {
+        debugPrint('TrueStereoAudioServiceRobust: ❌ File too small (corrupted)');
         return;
       }
 
       _currentStereoAudioPath = stereoAudioPath;
       _isPlaying = true;
 
-      debugPrint(
-          'TrueStereoAudioServiceRobust: Playing stereo audio file: $stereoAudioPath');
+      debugPrint('TrueStereoAudioServiceRobust: ✅ Playing stereo audio file');
+      debugPrint('TrueStereoAudioServiceRobust: Path: $stereoAudioPath');
+      debugPrint('TrueStereoAudioServiceRobust: Audio Context: MUSIC/MEDIA (stereo A2DP)');
+      debugPrint('TrueStereoAudioServiceRobust: Expected Output: TWS/Bluetooth stereo earpieces');
 
       // Use AudioPlayer to play the stereo audio file
       await _audioPlayer!.play(DeviceFileSource(stereoAudioPath));
+      
+      debugPrint('TrueStereoAudioServiceRobust: ✅ Playback started successfully');
     } catch (e) {
       _isPlaying = false;
       debugPrint(
-          'TrueStereoAudioServiceRobust: Error playing stereo audio file: $e');
+          'TrueStereoAudioServiceRobust: ❌ Error playing stereo audio file: $e');
       _onPlaybackError?.call();
     }
   }

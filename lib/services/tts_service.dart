@@ -13,6 +13,7 @@ class TtsService {
   FlutterTts? _flutterTts;
   AudioPlayer? _audioPlayer;
   bool _isInitialized = false;
+  bool _isTtsEngineReady = false;
   bool _isPlaying = false;
   String? _currentAudioPath;
 
@@ -25,6 +26,7 @@ class TtsService {
     if (_isInitialized) return;
 
     try {
+      debugPrint('TtsService: Initializing TTS engine...');
       _flutterTts = FlutterTts();
       _audioPlayer = AudioPlayer();
 
@@ -55,12 +57,48 @@ class TtsService {
         _onPlaybackCompleted?.call();
       });
 
+      // CRITICAL: Wait for TTS engine to be ready
+      // This is essential for Android - the engine needs time to initialize
+      debugPrint('TtsService: Waiting for TTS engine to be ready...');
+      await _waitForTtsEngine();
+
       _isInitialized = true;
-      debugPrint('TtsService: Initialized successfully');
+      debugPrint('TtsService: ✅ Initialized successfully and engine is ready');
     } catch (e) {
-      debugPrint('TtsService: Initialization error: $e');
+      debugPrint('TtsService: ❌ Initialization error: $e');
       rethrow;
     }
+  }
+
+  /// Wait for TTS engine to be fully initialized
+  Future<void> _waitForTtsEngine() async {
+    int attempts = 0;
+    const maxAttempts = 50; // 5 seconds timeout
+    const checkInterval = Duration(milliseconds: 100);
+
+    while (attempts < maxAttempts) {
+      try {
+        // Try to get voices - this will fail if engine not ready
+        final voices = await _flutterTts!.getVoices;
+        if (voices != null && voices.isNotEmpty) {
+          _isTtsEngineReady = true;
+          debugPrint('TtsService: ✅ TTS engine is ready (found ${voices.length} voices)');
+          return;
+        }
+      } catch (e) {
+        // Engine not ready yet, continue waiting
+      }
+
+      await Future.delayed(checkInterval);
+      attempts++;
+
+      if (attempts % 10 == 0) {
+        debugPrint('TtsService: Still waiting for TTS engine... (attempt $attempts/$maxAttempts)');
+      }
+    }
+
+    debugPrint('TtsService: ⚠️ TTS engine initialization timeout, but continuing anyway');
+    _isTtsEngineReady = true; // Continue anyway
   }
 
   /// Set callback for playback completion
@@ -77,7 +115,13 @@ class TtsService {
   Future<String?> generateAudioFile(String text, String languageCode,
       {String? gender}) async {
     if (!_isInitialized) {
+      debugPrint('TtsService: Not initialized, initializing now...');
       await initialize();
+    }
+
+    if (!_isTtsEngineReady) {
+      debugPrint('TtsService: TTS engine not ready, waiting...');
+      await _waitForTtsEngine();
     }
 
     if (text.isEmpty) {
@@ -88,12 +132,15 @@ class TtsService {
     try {
       // Map language code to TTS language
       final ttsLanguage = _mapLanguageToTtsCode(languageCode);
-      debugPrint('TtsService: Generating audio for language: $ttsLanguage');
+      debugPrint('TtsService: ═══ Generating TTS Audio ═══');
+      debugPrint('TtsService: Language: $ttsLanguage');
       debugPrint('TtsService: Text: "$text"');
       debugPrint('TtsService: Gender: ${gender ?? 'default'}');
+      debugPrint('TtsService: Engine ready: $_isTtsEngineReady');
 
       // Set language for TTS
       await _flutterTts!.setLanguage(ttsLanguage);
+      debugPrint('TtsService: ✅ Language set to $ttsLanguage');
 
       // Set voice based on gender if specified
       if (gender != null) {

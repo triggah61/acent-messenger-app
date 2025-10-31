@@ -3,7 +3,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'dart:math' as math;
-import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +14,7 @@ import '../../services/permission_service.dart';
 import '../../services/on_device_translation_service.dart';
 import '../../services/tts_service.dart';
 import '../../services/enhanced_tts_service_robust.dart';
+import '../../services/native_audio_recorder_service.dart';
 import '../../services/stt_provider.dart';
 import '../../services/google_stt_provider.dart';
 
@@ -40,7 +40,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       OnDeviceTranslationService();
   final TtsService _ttsService = TtsService();
   final EnhancedTtsServiceRobust _stereoTtsService = EnhancedTtsServiceRobust();
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  final NativeAudioRecorderService _nativeRecorder =
+      NativeAudioRecorderService();
   final AudioPlayer _speaker1Player = AudioPlayer();
   final AudioPlayer _speaker2Player = AudioPlayer();
 
@@ -143,6 +144,10 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   double _processingProgress = 0.0;
   String _processingStatus = '';
 
+  // Model download progress
+  bool _isDownloadingModels = false;
+  String _downloadingModelName = '';
+
   // Speaker names and colors
   final List<String> _speakerNames = ['Speaker 1', 'Speaker 2'];
   final List<Color> _speakerColors = [
@@ -223,6 +228,21 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     try {
       _sttProvider = (widget.provider ?? GoogleSttProvider());
       await _sttProvider.initialize();
+
+      // Set up translation model download progress callback
+      _translationService.setModelDownloadProgressCallback(
+        (String languageName, bool isDownloading) {
+          if (mounted) {
+            setState(() {
+              _isDownloadingModels = isDownloading;
+              _downloadingModelName = languageName;
+            });
+            debugPrint(
+                'GoogleSTTTranslator: Model download - $languageName: ${isDownloading ? "downloading" : "complete"}');
+          }
+        },
+      );
+
       await _translationService.initialize();
       await _ttsService.initialize();
       await _stereoTtsService.initialize();
@@ -424,6 +444,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   Future<void> _startRecording() async {
     try {
+      debugPrint('GoogleSTTTranslator: ═══ Starting Recording ═══');
+
       final hasPermission =
           await _permissionService.requestMicrophonePermission();
       if (!hasPermission) {
@@ -431,25 +453,36 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         return;
       }
 
-      // Always force built-in mic for recording (keep BT output unaffected)
+      // CRITICAL: Always force built-in mic for recording
+      debugPrint(
+          'GoogleSTTTranslator: Step 1: Configuring audio route for recording...');
       await _enterRecordingRoute();
+      debugPrint('GoogleSTTTranslator: ✅ Audio route configured for RECORDING');
+
+      // Add delay to ensure audio system has switched modes
+      await Future.delayed(const Duration(milliseconds: 200));
+      debugPrint('GoogleSTTTranslator: ✅ Audio system ready');
 
       final directory = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       _recordedAudioPath = '${directory.path}/recording_$timestamp.wav';
 
-      await _audioRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.wav,
-          sampleRate: 16000,
-          bitRate: 128000,
-          numChannels: 1,
-          autoGain: true, // Enable automatic gain control
-          echoCancel: false, // Disable echo cancellation to preserve voice
-          noiseSuppress: false, // Disable noise suppression to preserve voice
-        ),
-        path: _recordedAudioPath!,
-      );
+      debugPrint(
+          'GoogleSTTTranslator: Step 2: Starting NATIVE audio recorder...');
+      debugPrint('GoogleSTTTranslator: Recording path: $_recordedAudioPath');
+      debugPrint(
+          'GoogleSTTTranslator: Expected input: FORCED built-in microphone (MIC audio source)');
+
+      // CRITICAL: Use native recorder that forces MIC audio source
+      // This guarantees phone mic is used, not Bluetooth
+      final bool recordingStarted =
+          await _nativeRecorder.startRecording(_recordedAudioPath!);
+
+      if (!recordingStarted) {
+        debugPrint('GoogleSTTTranslator: ❌ Failed to start native recording');
+        _showErrorDialog('Failed to start recording. Please try again.');
+        return;
+      }
 
       setState(() {
         _isRecording = true;
@@ -477,9 +510,10 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       _pulseController.repeat(reverse: true);
       _waveController.repeat();
 
-      debugPrint('GoogleSTTTranslator: Recording started');
+      debugPrint('GoogleSTTTranslator: ✅ Recording started successfully');
+      debugPrint('GoogleSTTTranslator: Using built-in phone microphone');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Recording error: $e');
+      debugPrint('GoogleSTTTranslator: ❌ Recording error: $e');
       _showErrorDialog('Failed to start recording: $e');
     }
   }
@@ -492,8 +526,15 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint(
           'GoogleSTTTranslator: ✅ Sound level monitoring stopped (mic OFF for playback)');
 
-      // Stop the audio recorder
-      await _audioRecorder.stop();
+      // Stop the NATIVE audio recorder
+      debugPrint('GoogleSTTTranslator: Stopping native audio recorder...');
+      final String? recordedPath = await _nativeRecorder.stopRecording();
+
+      if (recordedPath == null) {
+        debugPrint('GoogleSTTTranslator: ❌ Failed to stop recording properly');
+      } else {
+        debugPrint('GoogleSTTTranslator: ✅ Recording saved: $recordedPath');
+      }
 
       setState(() {
         _isRecording = false;
@@ -808,7 +849,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               'confidence': _calculateTextQualityConfidence(
                   text, text.length, r.segments.length),
             };
-            _sttCache[cacheKey1] = result1 as Map<String, dynamic>;
+            _sttCache[cacheKey1] = result1;
           } else {
             result1 = null;
           }
@@ -869,7 +910,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               'confidence': _calculateTextQualityConfidence(
                   text, text.length, r.segments.length),
             };
-            _sttCache[cacheKey2] = result2 as Map<String, dynamic>;
+            _sttCache[cacheKey2] = result2;
           } else {
             result2 = null;
           }
@@ -2242,8 +2283,16 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         debugPrint('GoogleSTTTranslator: Playing cached stereo audio...');
         debugPrint('  Cached stereo file: $_cachedStereoAudioPath');
 
-        // Ensure playback routing prefers BT A2DP if connected
+        // CRITICAL: Switch to playback route for proper TWS stereo routing
+        debugPrint('GoogleSTTTranslator: Switching to playback route...');
         await _enterPlaybackRoute();
+
+        // IMPORTANT: Add delay to allow audio system to switch modes
+        // TWS devices need time to switch from SCO/COMMUNICATION to A2DP/MUSIC mode
+        // Android 11 may need longer delay for proper mode switching
+        await Future.delayed(const Duration(milliseconds: 500));
+        debugPrint(
+            'GoogleSTTTranslator: ✅ Audio route switched (waited 500ms), ready for stereo playback');
 
         // Play the cached stereo audio file
         await _stereoTtsService.playStereoAudio(_cachedStereoAudioPath!);
@@ -2277,8 +2326,17 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
       // Do not require translations for auto-play; rely on generated stereo file
 
-      // Ensure playback routing prefers BT A2DP if connected
+      // CRITICAL: Switch to playback route for proper TWS stereo routing
+      debugPrint(
+          'GoogleSTTTranslator: Auto-play: Switching to playback route...');
       await _enterPlaybackRoute();
+
+      // IMPORTANT: Add delay to allow audio system to switch modes
+      // TWS devices need time to switch from SCO/COMMUNICATION to A2DP/MUSIC mode
+      // Android 11 may need longer delay for proper mode switching
+      await Future.delayed(const Duration(milliseconds: 500));
+      debugPrint(
+          'GoogleSTTTranslator: ✅ Audio route switched for auto-play (waited 500ms)');
 
       // Check if we have language information
       final speaker1Language = _speakerLanguages[0];
@@ -3053,19 +3111,17 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       final recordingPath =
           '${directory.path}/auto_recording_${DateTime.now().millisecondsSinceEpoch}.wav';
 
-      // Start recording with proper audio source
-      await _audioRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.wav,
-          sampleRate: 16000,
-          bitRate: 128000,
-          numChannels: 1,
-          autoGain: true, // Enable automatic gain control
-          echoCancel: false, // Disable echo cancellation to preserve voice
-          noiseSuppress: false, // Disable noise suppression to preserve voice
-        ),
-        path: recordingPath,
-      );
+      // Start NATIVE recording with FORCED phone mic
+      debugPrint('GoogleSTTTranslator: [AUTO] Starting NATIVE recorder...');
+      debugPrint(
+          'GoogleSTTTranslator: [AUTO] Forced MIC audio source (phone mic only)');
+      final bool started = await _nativeRecorder.startRecording(recordingPath);
+
+      if (!started) {
+        debugPrint(
+            'GoogleSTTTranslator: ❌ [AUTO] Failed to start native recording');
+        return;
+      }
 
       _recordedAudioPath = recordingPath;
 
@@ -3648,7 +3704,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   void dispose() {
     _pulseController.dispose();
     _waveController.dispose();
-    _audioRecorder.dispose();
+    // Native recorder doesn't need explicit dispose
     _speaker1Player.dispose();
     _speaker2Player.dispose();
     _ttsService.dispose();
@@ -3669,11 +3725,27 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   @override
   Widget build(BuildContext context) {
     if (!_isInitialized) {
-      return const Scaffold(
-        backgroundColor: Color(0xFF0A0E27),
+      return Scaffold(
+        backgroundColor: const Color(0xFF0A0E27),
         body: Center(
-          child: CircularProgressIndicator(
-            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
+              ),
+              const SizedBox(height: 20),
+              Text(
+                _isDownloadingModels
+                    ? 'Downloading $_downloadingModelName model...\nPlease wait.'
+                    : 'Initializing translator...',
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ),
         ),
       );
