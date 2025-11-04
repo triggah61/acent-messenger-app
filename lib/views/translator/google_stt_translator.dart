@@ -153,6 +153,12 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   // Model download progress
   bool _isDownloadingModels = false;
   String _downloadingModelName = '';
+  double _downloadProgress = 0.0; // Progress from 0.0 to 1.0
+  bool _isDownloadDialogShown =
+      false; // Track if download dialog is currently shown
+  StateSetter? _downloadDialogSetter; // Store dialog's setState for updates
+  String?
+      _downloadRetryMessage; // Retry message (e.g., "Download failed. Retrying...")
 
   // Speaker names and colors
   final List<String> _speakerNames = ['Speaker 1', 'Speaker 2'];
@@ -235,16 +241,51 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       _sttProvider = (widget.provider ?? GoogleSttProvider());
       await _sttProvider.initialize();
 
-      // Set up translation model download progress callback
+      // Set up translation model download progress callback with real-time percentage
       _translationService.setModelDownloadProgressCallback(
-        (String languageName, bool isDownloading) {
+        (String languageName, double progress, {String? retryMessage}) {
           if (mounted) {
             setState(() {
-              _isDownloadingModels = isDownloading;
               _downloadingModelName = languageName;
+              _downloadProgress = progress;
+              _isDownloadingModels =
+                  progress < 1.0; // Still downloading if < 100%
+              _downloadRetryMessage = retryMessage; // Store retry message
             });
-            debugPrint(
-                'GoogleSTTTranslator: Model download - $languageName: ${isDownloading ? "downloading" : "complete"}');
+
+            // Show download dialog when actual download starts (progress between 0.01 and 0.99)
+            // This ensures we only show when real download happens, not when checking cache
+            if (progress > 0.01 &&
+                progress < 0.99 &&
+                !_isDownloadDialogShown &&
+                _isDownloadingModels) {
+              _showDownloadDialog();
+            }
+
+            // Update dialog when progress changes (if dialog is shown)
+            if (_isDownloadDialogShown && _downloadDialogSetter != null) {
+              _downloadDialogSetter!(() {});
+            }
+
+            // Close download dialog when download completes (all models done)
+            if (progress >= 1.0 &&
+                _isDownloadDialogShown &&
+                !_isDownloadingModels) {
+              // Wait a moment to show 100%, then close
+              Future.delayed(const Duration(milliseconds: 500), () {
+                if (mounted && !_isDownloadingModels) {
+                  _closeDownloadDialog();
+                }
+              });
+            }
+
+            if (retryMessage != null) {
+              debugPrint(
+                  'GoogleSTTTranslator: Model download - $languageName: $retryMessage');
+            } else {
+              debugPrint(
+                  'GoogleSTTTranslator: Model download - $languageName: ${(progress * 100).toStringAsFixed(1)}%');
+            }
           }
         },
       );
@@ -429,6 +470,48 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
     // Add a small delay to show the loading state
     await Future.delayed(const Duration(milliseconds: 300));
+
+    // CRITICAL: Download language models on-demand based on selected languages
+    try {
+      final selectedLanguageCodes = [
+        _speakerLanguages[0]?.code ?? '',
+        _speakerLanguages[1]?.code ?? ''
+      ].where((code) => code.isNotEmpty).toList();
+
+      debugPrint(
+          'GoogleSTTTranslator: Checking/downloading models for selected languages: $selectedLanguageCodes');
+
+      final modelsReady = await _translationService
+          .downloadLanguageModels(selectedLanguageCodes);
+
+      if (!modelsReady) {
+        // Close download dialog if still open
+        if (_isDownloadDialogShown) {
+          _closeDownloadDialog();
+        }
+        _showErrorDialog(
+            'Failed to download translation models. Please check your internet connection and try again.');
+        setState(() {
+          _isStartingSession = false;
+        });
+        return;
+      }
+
+      debugPrint('GoogleSTTTranslator: ✅ All translation models are ready');
+      // Dialog will close automatically via progress callback when progress reaches 100%
+    } catch (e) {
+      debugPrint(
+          'GoogleSTTTranslator: ❌ Error downloading translation models: $e');
+      // Close download dialog if still open
+      if (_isDownloadDialogShown) {
+        _closeDownloadDialog();
+      }
+      _showErrorDialog('Failed to download translation models: $e');
+      setState(() {
+        _isStartingSession = false;
+      });
+      return;
+    }
 
     // Transition to main recording screen
     setState(() {
@@ -3037,6 +3120,172 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     );
   }
 
+  /// Show download dialog with progress bar
+  void _showDownloadDialog() {
+    if (!mounted || _isDownloadDialogShown) return;
+
+    _isDownloadDialogShown = true;
+    showDialog(
+      context: context,
+      barrierDismissible: false, // User cannot dismiss during download
+      builder: (dialogContext) => WillPopScope(
+        onWillPop: () async => false, // Prevent back button from closing
+        child: StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            // Store setState function for progress updates
+            _downloadDialogSetter = setDialogState;
+
+            final progress = _downloadProgress;
+            final isDownloading = _isDownloadingModels;
+            final languageName = _downloadingModelName.isNotEmpty
+                ? _downloadingModelName
+                : 'Translation model';
+            final retryMessage = _downloadRetryMessage;
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1D1E33),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
+                side: const BorderSide(
+                  color: Color(0xFF00D9FF),
+                  width: 2,
+                ),
+              ),
+              content: SizedBox(
+                width: MediaQuery.of(context).size.width * 0.8,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Spinner
+                    const CircularProgressIndicator(
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Message
+                    Text(
+                      'Downloading $languageName model...',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Please wait while we download the translation model.',
+                      style: TextStyle(
+                        color: Colors.white.withOpacity(0.7),
+                        fontSize: 14,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                    // Show retry message if present
+                    if (retryMessage != null) ...[
+                      const SizedBox(height: 16),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 8,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: Colors.orange.withOpacity(0.5),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.refresh,
+                              color: Colors.orange,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                retryMessage,
+                                style: TextStyle(
+                                  color: Colors.orange,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 24),
+
+                    // Progress bar
+                    Container(
+                      width: double.infinity,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(4),
+                        color: Colors.white.withOpacity(0.1),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: progress,
+                          backgroundColor: Colors.transparent,
+                          valueColor: const AlwaysStoppedAnimation<Color>(
+                            Color(0xFF00D9FF),
+                          ),
+                          minHeight: 8,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Percentage
+                    Text(
+                      '${(progress * 100).toStringAsFixed(1)}%',
+                      style: const TextStyle(
+                        color: Color(0xFF00D9FF),
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    if (!isDownloading && progress >= 1.0) ...[
+                      const SizedBox(height: 8),
+                      const Text(
+                        '✓ Download Complete!',
+                        style: TextStyle(
+                          color: Colors.green,
+                          fontSize: 14,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  /// Close download dialog
+  void _closeDownloadDialog() {
+    if (!mounted || !_isDownloadDialogShown) return;
+
+    _isDownloadDialogShown = false;
+    _downloadDialogSetter = null; // Clear setState reference
+    Navigator.of(context).pop();
+    debugPrint('GoogleSTTTranslator: Download dialog closed');
+  }
+
   /// Start automatic translation mode
   Future<void> _startAutomaticMode() async {
     if (_isAutomaticMode) return;
@@ -3768,24 +4017,81 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       return Scaffold(
         backgroundColor: const Color(0xFF0A0E27),
         body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const CircularProgressIndicator(
-                valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
-              ),
-              const SizedBox(height: 20),
-              Text(
-                _isDownloadingModels
-                    ? 'Downloading $_downloadingModelName model...\nPlease wait.'
-                    : 'Initializing translator...',
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 40.0),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                // Circular progress indicator
+                const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
                 ),
-                textAlign: TextAlign.center,
-              ),
-            ],
+                const SizedBox(height: 30),
+
+                // Status text
+                Text(
+                  _isDownloadingModels
+                      ? 'Downloading $_downloadingModelName model...'
+                      : 'Initializing translator...',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+
+                // Show progress bar and percentage when downloading
+                if (_isDownloadingModels) ...[
+                  const SizedBox(height: 20),
+
+                  // Linear progress bar
+                  Container(
+                    width: double.infinity,
+                    height: 8,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(4),
+                      color: Colors.white.withOpacity(0.1),
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: _downloadProgress,
+                        backgroundColor: Colors.transparent,
+                        valueColor: const AlwaysStoppedAnimation<Color>(
+                          Color(0xFF00D9FF),
+                        ),
+                        minHeight: 8,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // Percentage text
+                  Text(
+                    '${(_downloadProgress * 100).toStringAsFixed(1)}%',
+                    style: const TextStyle(
+                      color: Color(0xFF00D9FF),
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Helper text
+                  Text(
+                    'Please wait, this may take a moment...',
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.6),
+                      fontSize: 13,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ],
+            ),
           ),
         ),
       );
