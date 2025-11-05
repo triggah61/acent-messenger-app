@@ -43,6 +43,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       NativeAudioRecorderService();
   final AudioPlayer _speaker1Player = AudioPlayer();
   final AudioPlayer _speaker2Player = AudioPlayer();
+  final AudioPlayer _soundEffectPlayer =
+      AudioPlayer(); // For recording start/stop sounds
 
   // Animation controllers
   late AnimationController _pulseController;
@@ -462,6 +464,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint(
           'GoogleSTTTranslator: Expected input: FORCED built-in microphone (MIC audio source)');
 
+      // Play start recording sound effect
+      await _playStartRecordingSound();
+
       // CRITICAL: Use native recorder that forces MIC audio source
       // This guarantees phone mic is used, not Bluetooth
       final bool recordingStarted =
@@ -509,6 +514,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   Future<void> _stopRecording() async {
     try {
+      // Play stop recording sound effect
+      await _playStopRecordingSound();
+
       // CRITICAL: Stop sound level monitoring FIRST
       // This prevents mic from capturing during processing/playback phases
       _stopSoundLevelMonitoring();
@@ -3692,12 +3700,24 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   }
 
   /// Play start recording sound effect using system sound
+  /// Play start recording sound effect
+  /// Uses custom sound file if available, falls back to system sound
   Future<void> _playStartRecordingSound() async {
     try {
-      // Use system click sound for start recording
-      SystemSound.play(SystemSoundType.click);
-      debugPrint(
-          'GoogleSTTTranslator: ✅ Played START recording sound (system click)');
+      // Try to play custom sound file first
+      try {
+        await _soundEffectPlayer
+            .play(AssetSource('sounds/recording_start.mp3'));
+        debugPrint(
+            'GoogleSTTTranslator: ✅ Played START recording sound (custom)');
+      } catch (e) {
+        // Fallback to system sound if custom file not available
+        debugPrint(
+            'GoogleSTTTranslator: Custom sound not found, using system sound');
+        SystemSound.play(SystemSoundType.click);
+        debugPrint(
+            'GoogleSTTTranslator: ✅ Played START recording sound (system click)');
+      }
     } catch (e) {
       debugPrint(
           'GoogleSTTTranslator: ❌ Error playing start recording sound: $e');
@@ -3705,13 +3725,23 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     }
   }
 
-  /// Play stop recording sound effect using system sound
+  /// Play stop recording sound effect
+  /// Uses custom sound file if available, falls back to system sound
   Future<void> _playStopRecordingSound() async {
     try {
-      // Use system alert sound for stop recording
-      SystemSound.play(SystemSoundType.alert);
-      debugPrint(
-          'GoogleSTTTranslator: ✅ Played STOP recording sound (system alert)');
+      // Try to play custom sound file first
+      try {
+        await _soundEffectPlayer.play(AssetSource('sounds/recording_stop.mp3'));
+        debugPrint(
+            'GoogleSTTTranslator: ✅ Played STOP recording sound (custom)');
+      } catch (e) {
+        // Fallback to system sound if custom file not available
+        debugPrint(
+            'GoogleSTTTranslator: Custom sound not found, using system sound');
+        SystemSound.play(SystemSoundType.alert);
+        debugPrint(
+            'GoogleSTTTranslator: ✅ Played STOP recording sound (system alert)');
+      }
     } catch (e) {
       debugPrint(
           'GoogleSTTTranslator: ❌ Error playing stop recording sound: $e');
@@ -3726,6 +3756,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     // Native recorder doesn't need explicit dispose
     _speaker1Player.dispose();
     _speaker2Player.dispose();
+    _soundEffectPlayer.dispose();
     _ttsService.dispose();
     _stereoTtsService.dispose();
     // Translation service is static - no dispose needed
