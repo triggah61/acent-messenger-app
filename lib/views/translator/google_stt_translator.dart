@@ -3815,30 +3815,30 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   Widget _buildSpeakerSetupScreen() {
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 20),
+          const SizedBox(height: 8),
           const Text(
             'Configure Speakers',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 24,
+              fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 30),
+          const SizedBox(height: 12),
           ...List.generate(_numberOfSpeakers, (index) {
             return _buildSpeakerConfig(index);
           }),
-          const SizedBox(height: 40),
+          const SizedBox(height: 16),
           ElevatedButton(
             onPressed: _isStartingSession ? null : _startRecordingSession,
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF00D9FF),
-              padding: const EdgeInsets.symmetric(vertical: 16),
+              padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -3886,11 +3886,11 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     final currentLanguage = _speakerLanguages[speakerIndex];
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 20),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: const Color(0xFF1D1E33),
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: speakerColor.withValues(alpha: 0.3),
           width: 2,
@@ -3902,8 +3902,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           Row(
             children: [
               Container(
-                width: 40,
-                height: 40,
+                width: 32,
+                height: 32,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   color: speakerColor.withValues(alpha: 0.2),
@@ -3911,28 +3911,31 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                 child: Icon(
                   Icons.person,
                   color: speakerColor,
-                  size: 24,
+                  size: 20,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 10),
               Text(
                 _speakerNames[speakerIndex],
                 style: TextStyle(
                   color: speakerColor,
-                  fontSize: 18,
+                  fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // Language Selection
           DropdownButtonFormField<Language>(
             value: currentLanguage,
             decoration: InputDecoration(
               labelText: 'Select Language',
-              labelStyle: const TextStyle(color: Colors.white70),
+              labelStyle: const TextStyle(color: Colors.white70, fontSize: 14),
+              contentPadding:
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+              isDense: true,
               border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
                 borderSide:
@@ -3949,11 +3952,12 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               ),
             ),
             dropdownColor: const Color(0xFF1D1E33),
-            style: const TextStyle(color: Colors.white),
+            style: const TextStyle(color: Colors.white, fontSize: 14),
             items: _supportedLanguages.map((language) {
               return DropdownMenuItem<Language>(
                 value: language,
-                child: Text(language.name),
+                child:
+                    Text(language.name, style: const TextStyle(fontSize: 14)),
               );
             }).toList(),
             onChanged: (Language? newLanguage) {
@@ -3967,22 +3971,20 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             },
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // Gender Selection
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Gender:',
-                  style: TextStyle(
-                    color: speakerColor,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
+              Text(
+                'Gender:',
+                style: TextStyle(
+                  color: speakerColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
                 child: Row(
                   children: [
@@ -4011,22 +4013,20 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             ],
           ),
 
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
           // Earpiece Selection
           Row(
             children: [
-              Expanded(
-                child: Text(
-                  'Earpiece:',
-                  style: TextStyle(
-                    color: speakerColor,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
-                  ),
+              Text(
+                'Earpiece:',
+                style: TextStyle(
+                  color: speakerColor,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 12),
               Expanded(
                 child: Row(
                   children: [
@@ -4127,7 +4127,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             'GoogleSTTTranslator: Speaker ${speakerIndex == 0 ? 1 : 0} earpiece automatically set to: ${earpiece == 'left' ? 'right' : 'left'}');
       },
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
         decoration: BoxDecoration(
           color: isSelected
               ? speakerColor.withValues(alpha: 0.2)
@@ -4140,18 +4140,19 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           ),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           children: [
             Icon(
               icon,
               color: isSelected ? speakerColor : Colors.white70,
-              size: 20,
+              size: 18,
             ),
-            const SizedBox(height: 4),
+            const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
                 color: isSelected ? speakerColor : Colors.white70,
-                fontSize: 12,
+                fontSize: 11,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
@@ -5003,22 +5004,22 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         child: Column(
           children: [
             // Automatic Mode Toggle
-            if (!_isAutomaticMode) ...[
-              Container(
-                margin: const EdgeInsets.only(bottom: 16),
-                child: ElevatedButton.icon(
-                  onPressed: _isProcessing ? null : _startAutomaticMode,
-                  icon: const Icon(Icons.autorenew),
-                  label: const Text('Start Automatic Mode'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 24, vertical: 12),
-                  ),
-                ),
-              ),
-            ],
+            // if (!_isAutomaticMode) ...[
+            //   Container(
+            //     margin: const EdgeInsets.only(bottom: 16),
+            //     child: ElevatedButton.icon(
+            //       onPressed: _isProcessing ? null : _startAutomaticMode,
+            //       icon: const Icon(Icons.autorenew),
+            //       label: const Text('Start Automatic Mode'),
+            //       style: ElevatedButton.styleFrom(
+            //         backgroundColor: Colors.green,
+            //         foregroundColor: Colors.white,
+            //         padding: const EdgeInsets.symmetric(
+            //             horizontal: 24, vertical: 12),
+            //       ),
+            //     ),
+            //   ),
+            // ],
 
             // Manual Recording Controls (only show when not in automatic mode)
             if (!_isAutomaticMode) ...[
