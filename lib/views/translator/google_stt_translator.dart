@@ -11,7 +11,7 @@ import 'package:noise_meter/noise_meter.dart';
 import '../../services/config_service.dart';
 // Audio route is handled via a platform channel call to avoid build-time issues
 import '../../services/permission_service.dart';
-import '../../services/on_device_translation_service.dart';
+import '../../services/translation_service.dart';
 import '../../services/tts_service.dart';
 import '../../services/enhanced_tts_service_robust.dart';
 import '../../services/native_audio_recorder_service.dart';
@@ -36,8 +36,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   // STT provider (Google by default). Can be injected for AssemblyAI.
   late final SttProvider _sttProvider;
 
-  final OnDeviceTranslationService _translationService =
-      OnDeviceTranslationService();
+  // Translation service uses backend API (Azure Translator)
   final TtsService _ttsService = TtsService();
   final EnhancedTtsServiceRobust _stereoTtsService = EnhancedTtsServiceRobust();
   final NativeAudioRecorderService _nativeRecorder =
@@ -150,16 +149,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   double _processingProgress = 0.0;
   String _processingStatus = '';
 
-  // Model download progress
-  bool _isDownloadingModels = false;
-  String _downloadingModelName = '';
-  double _downloadProgress = 0.0; // Progress from 0.0 to 1.0
-  bool _isDownloadDialogShown =
-      false; // Track if download dialog is currently shown
-  StateSetter? _downloadDialogSetter; // Store dialog's setState for updates
-  String?
-      _downloadRetryMessage; // Retry message (e.g., "Download failed. Retrying...")
-
   // Speaker names and colors
   final List<String> _speakerNames = ['Speaker 1', 'Speaker 2'];
   final List<Color> _speakerColors = [
@@ -241,56 +230,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       _sttProvider = (widget.provider ?? GoogleSttProvider());
       await _sttProvider.initialize();
 
-      // Set up translation model download progress callback with real-time percentage
-      _translationService.setModelDownloadProgressCallback(
-        (String languageName, double progress, {String? retryMessage}) {
-          if (mounted) {
-            setState(() {
-              _downloadingModelName = languageName;
-              _downloadProgress = progress;
-              _isDownloadingModels =
-                  progress < 1.0; // Still downloading if < 100%
-              _downloadRetryMessage = retryMessage; // Store retry message
-            });
-
-            // Show download dialog when actual download starts (progress between 0.01 and 0.99)
-            // This ensures we only show when real download happens, not when checking cache
-            if (progress > 0.01 &&
-                progress < 0.99 &&
-                !_isDownloadDialogShown &&
-                _isDownloadingModels) {
-              _showDownloadDialog();
-            }
-
-            // Update dialog when progress changes (if dialog is shown)
-            if (_isDownloadDialogShown && _downloadDialogSetter != null) {
-              _downloadDialogSetter!(() {});
-            }
-
-            // Close download dialog when download completes (all models done)
-            if (progress >= 1.0 &&
-                _isDownloadDialogShown &&
-                !_isDownloadingModels) {
-              // Wait a moment to show 100%, then close
-              Future.delayed(const Duration(milliseconds: 500), () {
-                if (mounted && !_isDownloadingModels) {
-                  _closeDownloadDialog();
-                }
-              });
-            }
-
-            if (retryMessage != null) {
-              debugPrint(
-                  'GoogleSTTTranslator: Model download - $languageName: $retryMessage');
-            } else {
-              debugPrint(
-                  'GoogleSTTTranslator: Model download - $languageName: ${(progress * 100).toStringAsFixed(1)}%');
-            }
-          }
-        },
-      );
-
-      await _translationService.initialize();
+      // Translation service is now backend-based (Azure Translator API)
+      // No initialization needed - uses backend API
       await _ttsService.initialize();
       await _stereoTtsService.initialize();
 
@@ -468,50 +409,9 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       _isStartingSession = true;
     });
 
-    // Add a small delay to show the loading state
-    await Future.delayed(const Duration(milliseconds: 300));
-
-    // CRITICAL: Download language models on-demand based on selected languages
-    try {
-      final selectedLanguageCodes = [
-        _speakerLanguages[0]?.code ?? '',
-        _speakerLanguages[1]?.code ?? ''
-      ].where((code) => code.isNotEmpty).toList();
-
-      debugPrint(
-          'GoogleSTTTranslator: Checking/downloading models for selected languages: $selectedLanguageCodes');
-
-      final modelsReady = await _translationService
-          .downloadLanguageModels(selectedLanguageCodes);
-
-      if (!modelsReady) {
-        // Close download dialog if still open
-        if (_isDownloadDialogShown) {
-          _closeDownloadDialog();
-        }
-        _showErrorDialog(
-            'Failed to download translation models. Please check your internet connection and try again.');
-        setState(() {
-          _isStartingSession = false;
-        });
-        return;
-      }
-
-      debugPrint('GoogleSTTTranslator: ✅ All translation models are ready');
-      // Dialog will close automatically via progress callback when progress reaches 100%
-    } catch (e) {
-      debugPrint(
-          'GoogleSTTTranslator: ❌ Error downloading translation models: $e');
-      // Close download dialog if still open
-      if (_isDownloadDialogShown) {
-        _closeDownloadDialog();
-      }
-      _showErrorDialog('Failed to download translation models: $e');
-      setState(() {
-        _isStartingSession = false;
-      });
-      return;
-    }
+    // No model downloads needed - translation uses Azure Translator API via backend
+    debugPrint(
+        'GoogleSTTTranslator: ✅ Translation service ready (Azure Translator API)');
 
     // Transition to main recording screen
     setState(() {
@@ -1111,45 +1011,39 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         return;
       }
 
-      // Check if on-device translation is supported
-      if (!_translationService.isTranslationSupported(
-          speaker1LangCode, speaker2LangCode)) {
-        debugPrint(
-            'GoogleSTTTranslator: On-device translation not supported for $speaker1LangCode -> $speaker2LangCode');
-        return;
-      }
-
-      // Translate Speaker 1's text to Speaker 2's language
+      // Translate Speaker 1's text to Speaker 2's language using Azure Translator API
       if (_transcriptions[0] != null && _transcriptions[0]!.isNotEmpty) {
         debugPrint(
             'GoogleSTTTranslator: Translating Speaker 1 text to $speaker2LangCode...');
-        final result1 = await _translationService.translateText(
-          _transcriptions[0]!,
-          speaker1LangCode,
-          speaker2LangCode,
+        final result = await TranslationService.translateText(
+          sourceLanguage: speaker1LangCode,
+          targetLanguage: speaker2LangCode,
+          content: _transcriptions[0]!,
         );
 
-        if (result1.isNotEmpty) {
-          _translations[0] = result1;
-          debugPrint('GoogleSTTTranslator: Speaker 1 translation: "$result1"');
+        if (result != null && result.translatedText.isNotEmpty) {
+          _translations[0] = result.translatedText;
+          debugPrint(
+              'GoogleSTTTranslator: Speaker 1 translation: "${result.translatedText}"');
         } else {
           debugPrint('GoogleSTTTranslator: Speaker 1 translation failed');
         }
       }
 
-      // Translate Speaker 2's text to Speaker 1's language
+      // Translate Speaker 2's text to Speaker 1's language using Azure Translator API
       if (_transcriptions[1] != null && _transcriptions[1]!.isNotEmpty) {
         debugPrint(
             'GoogleSTTTranslator: Translating Speaker 2 text to $speaker1LangCode...');
-        final result2 = await _translationService.translateText(
-          _transcriptions[1]!,
-          speaker2LangCode,
-          speaker1LangCode,
+        final result = await TranslationService.translateText(
+          sourceLanguage: speaker2LangCode,
+          targetLanguage: speaker1LangCode,
+          content: _transcriptions[1]!,
         );
 
-        if (result2.isNotEmpty) {
-          _translations[1] = result2;
-          debugPrint('GoogleSTTTranslator: Speaker 2 translation: "$result2"');
+        if (result != null && result.translatedText.isNotEmpty) {
+          _translations[1] = result.translatedText;
+          debugPrint(
+              'GoogleSTTTranslator: Speaker 2 translation: "${result.translatedText}"');
         } else {
           debugPrint('GoogleSTTTranslator: Speaker 2 translation failed');
         }
@@ -3120,171 +3014,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     );
   }
 
-  /// Show download dialog with progress bar
-  void _showDownloadDialog() {
-    if (!mounted || _isDownloadDialogShown) return;
-
-    _isDownloadDialogShown = true;
-    showDialog(
-      context: context,
-      barrierDismissible: false, // User cannot dismiss during download
-      builder: (dialogContext) => WillPopScope(
-        onWillPop: () async => false, // Prevent back button from closing
-        child: StatefulBuilder(
-          builder: (dialogContext, setDialogState) {
-            // Store setState function for progress updates
-            _downloadDialogSetter = setDialogState;
-
-            final progress = _downloadProgress;
-            final isDownloading = _isDownloadingModels;
-            final languageName = _downloadingModelName.isNotEmpty
-                ? _downloadingModelName
-                : 'Translation model';
-            final retryMessage = _downloadRetryMessage;
-
-            return AlertDialog(
-              backgroundColor: const Color(0xFF1D1E33),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-                side: const BorderSide(
-                  color: Color(0xFF00D9FF),
-                  width: 2,
-                ),
-              ),
-              content: SizedBox(
-                width: MediaQuery.of(context).size.width * 0.8,
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    // Spinner
-                    const CircularProgressIndicator(
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
-                    ),
-                    const SizedBox(height: 24),
-
-                    // Message
-                    Text(
-                      'Downloading $languageName model...',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Please wait while we download the translation model.',
-                      style: TextStyle(
-                        color: Colors.white.withOpacity(0.7),
-                        fontSize: 14,
-                      ),
-                      textAlign: TextAlign.center,
-                    ),
-                    // Show retry message if present
-                    if (retryMessage != null) ...[
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 8,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.orange.withOpacity(0.2),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(
-                            color: Colors.orange.withOpacity(0.5),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.refresh,
-                              color: Colors.orange,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 8),
-                            Flexible(
-                              child: Text(
-                                retryMessage,
-                                style: TextStyle(
-                                  color: Colors.orange,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w500,
-                                ),
-                                textAlign: TextAlign.center,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                    const SizedBox(height: 24),
-
-                    // Progress bar
-                    Container(
-                      width: double.infinity,
-                      height: 8,
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(4),
-                        color: Colors.white.withOpacity(0.1),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(4),
-                        child: LinearProgressIndicator(
-                          value: progress,
-                          backgroundColor: Colors.transparent,
-                          valueColor: const AlwaysStoppedAnimation<Color>(
-                            Color(0xFF00D9FF),
-                          ),
-                          minHeight: 8,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // Percentage
-                    Text(
-                      '${(progress * 100).toStringAsFixed(1)}%',
-                      style: const TextStyle(
-                        color: Color(0xFF00D9FF),
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    if (!isDownloading && progress >= 1.0) ...[
-                      const SizedBox(height: 8),
-                      const Text(
-                        '✓ Download Complete!',
-                        style: TextStyle(
-                          color: Colors.green,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            );
-          },
-        ),
-      ),
-    );
-  }
-
-  /// Close download dialog
-  void _closeDownloadDialog() {
-    if (!mounted || !_isDownloadDialogShown) return;
-
-    _isDownloadDialogShown = false;
-    _downloadDialogSetter = null; // Clear setState reference
-    Navigator.of(context).pop();
-    debugPrint('GoogleSTTTranslator: Download dialog closed');
-  }
+  // Download dialogs removed - no model downloads needed with Azure Translator API
 
   /// Start automatic translation mode
   Future<void> _startAutomaticMode() async {
@@ -3998,7 +3728,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _speaker2Player.dispose();
     _ttsService.dispose();
     _stereoTtsService.dispose();
-    _translationService.dispose();
+    // Translation service is static - no dispose needed
     // Note: No need to dispose SystemSound
 
     // Clean up automatic mode resources
@@ -4030,9 +3760,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
                 // Status text
                 Text(
-                  _isDownloadingModels
-                      ? 'Downloading $_downloadingModelName model...'
-                      : 'Initializing translator...',
+                  'Initializing translator...',
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,
@@ -4040,56 +3768,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                   ),
                   textAlign: TextAlign.center,
                 ),
-
-                // Show progress bar and percentage when downloading
-                if (_isDownloadingModels) ...[
-                  const SizedBox(height: 20),
-
-                  // Linear progress bar
-                  Container(
-                    width: double.infinity,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(4),
-                      color: Colors.white.withOpacity(0.1),
-                    ),
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: _downloadProgress,
-                        backgroundColor: Colors.transparent,
-                        valueColor: const AlwaysStoppedAnimation<Color>(
-                          Color(0xFF00D9FF),
-                        ),
-                        minHeight: 8,
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // Percentage text
-                  Text(
-                    '${(_downloadProgress * 100).toStringAsFixed(1)}%',
-                    style: const TextStyle(
-                      color: Color(0xFF00D9FF),
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-
-                  const SizedBox(height: 10),
-
-                  // Helper text
-                  Text(
-                    'Please wait, this may take a moment...',
-                    style: TextStyle(
-                      color: Colors.white.withOpacity(0.6),
-                      fontSize: 13,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
               ],
             ),
           ),
