@@ -17,6 +17,8 @@ import '../../services/enhanced_tts_service_robust.dart';
 import '../../services/native_audio_recorder_service.dart';
 import '../../services/stt_provider.dart';
 import '../../services/google_stt_provider.dart';
+import '../../services/soniox_realtime_service.dart';
+import '../../services/streaming_audio_recorder_service.dart';
 
 /// Google STT Translation - Records 2 speakers, performs on-device diarization,
 /// and separates audio into individual speaker files for playback
@@ -69,6 +71,17 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   bool _isRecording = false;
   bool _isProcessing = false;
   bool _isStartingSession = false;
+
+  // Real-time translation mode (NEW)
+  bool _isRealtimeMode = false; // Toggle between manual and real-time mode
+  final SonioxRealtimeService _sonioxService = SonioxRealtimeService();
+  final StreamingAudioRecorderService _streamingRecorder = StreamingAudioRecorderService();
+  StreamSubscription<SonioxResult>? _sonioxStreamSubscription;
+  StreamSubscription<Uint8List>? _audioChunkSubscription;
+  Timer? _audioPollingTimer; // Timer for polling audio file
+  int _lastReadPosition = 0; // Track last read position in audio file
+  Map<int, StringBuffer> _realtimeTranscriptions = {}; // Accumulate transcriptions per speaker
+  Map<int, StringBuffer> _realtimeTranslations = {}; // Accumulate translations per speaker
 
   // Audio paths
   String? _recordedAudioPath;
@@ -430,9 +443,19 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   Future<void> _toggleRecording() async {
     if (_isRecording) {
-      await _stopRecording();
+      // Stop recording based on mode
+      if (_isRealtimeMode) {
+        await _stopRealtimeSession();
+      } else {
+        await _stopRecording();
+      }
     } else {
-      await _startRecording();
+      // Start recording based on mode
+      if (_isRealtimeMode) {
+        await _startRealtimeSession();
+      } else {
+        await _startRecording();
+      }
     }
   }
 
@@ -556,6 +579,813 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         _isProcessing = false;
       });
     }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // REAL-TIME MODE METHODS (NEW)
+  // ═══════════════════════════════════════════════════════════════
+
+  /// Start real-time translation session using Soniox
+  Future<void> _startRealtimeSession() async {
+    try {
+      debugPrint('GoogleSTTTranslator: ═══ Starting Real-time Session ═══');
+
+      final hasPermission =
+          await _permissionService.requestMicrophonePermission();
+      if (!hasPermission) {
+        _showErrorDialog('Microphone permission is required for recording.');
+        return;
+      }
+
+      setState(() {
+        _isRecording = true;
+        _isProcessing = false;
+        // Clear previous results
+        _speaker1AudioPath = null;
+        _speaker2AudioPath = null;
+        _speaker1TtsAudioPath = null;
+        _speaker2TtsAudioPath = null;
+        _cachedStereoAudioPath = null;
+        _speakerSegments = [];
+        _transcriptions.clear();
+        _translations.clear();
+        _realtimeTranscriptions = {0: StringBuffer(), 1: StringBuffer()};
+        _realtimeTranslations = {0: StringBuffer(), 1: StringBuffer()};
+        _showTranslation = {0: false, 1: false};
+        _isPlayingTts1 = false;
+        _isPlayingTts2 = false;
+      });
+
+      debugPrint('GoogleSTTTranslator: Configuring audio route for recording...');
+      await _enterRecordingRoute();
+      await Future.delayed(const Duration(milliseconds: 200));
+
+      // Initialize Soniox service
+      debugPrint('GoogleSTTTranslator: Initializing Soniox service...');
+      await _sonioxService.initialize();
+
+      // Connect to Soniox WebSocket
+      final speaker1Lang = _speakerLanguages[0]?.code ?? 'en';
+      final speaker2Lang = _speakerLanguages[1]?.code ?? 'bn';
+      
+      debugPrint('GoogleSTTTranslator: Connecting to Soniox...');
+      debugPrint('GoogleSTTTranslator: Speaker 1 language: $speaker1Lang');
+      debugPrint('GoogleSTTTranslator: Speaker 2 language: $speaker2Lang');
+
+      await _sonioxService.connect(
+        languageA: speaker1Lang,
+        languageB: speaker2Lang,
+        enableSpeakerDiarization: true,
+      );
+
+      // Set up callbacks
+      _sonioxService.onConnected = () {
+        debugPrint('GoogleSTTTranslator: ✅ Soniox connected - starting audio stream');
+        _startAudioStreaming();
+      };
+
+      _sonioxService.onError = (error) {
+        debugPrint('GoogleSTTTranslator: ❌ Soniox error: $error');
+        _showErrorDialog('Real-time translation error: $error');
+        _stopRealtimeSession();
+      };
+
+      _sonioxService.onDisconnected = () {
+        debugPrint('GoogleSTTTranslator: ⚠️ Soniox disconnected');
+      };
+
+      // Listen to Soniox results
+      _sonioxStreamSubscription = _sonioxService.resultStream?.listen(
+        _handleSonioxResult,
+        onError: (error) {
+          debugPrint('GoogleSTTTranslator: ❌ Soniox stream error: $error');
+        },
+      );
+
+      // Play start recording sound
+      await _playStartRecordingSound();
+
+      // Start native audio recording (fallback approach)
+      final directory = await getApplicationDocumentsDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      _recordedAudioPath = '${directory.path}/realtime_recording_$timestamp.wav';
+
+      debugPrint('GoogleSTTTranslator: Starting native audio recorder...');
+      debugPrint('GoogleSTTTranslator: Recording path: $_recordedAudioPath');
+
+      // Use existing native recorder (works immediately)
+      final bool recordingStarted =
+          await _nativeRecorder.startRecording(_recordedAudioPath!);
+
+      if (!recordingStarted) {
+        debugPrint('GoogleSTTTranslator: ❌ Failed to start native recording');
+        _showErrorDialog('Failed to start recording. Please try again.');
+        await _sonioxService.disconnect();
+        return;
+      }
+
+      debugPrint('GoogleSTTTranslator: ✅ Native recording started');
+      
+      // Start polling audio file to send chunks to Soniox
+      debugPrint('GoogleSTTTranslator: Starting audio file polling for streaming...');
+      _startAudioFilePolling();
+
+      _pulseController.repeat(reverse: true);
+      _waveController.repeat();
+
+      debugPrint('GoogleSTTTranslator: ✅ Real-time session started successfully');
+      debugPrint('GoogleSTTTranslator: Audio chunks will be streamed to Soniox');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: ❌ Real-time session error: $e');
+      _showErrorDialog('Failed to start real-time session: $e');
+      setState(() {
+        _isRecording = false;
+      });
+    }
+  }
+
+  /// Stop real-time translation session
+  Future<void> _stopRealtimeSession() async {
+    try {
+      debugPrint('GoogleSTTTranslator: Stopping real-time session...');
+
+      // Stop audio polling timer
+      _audioPollingTimer?.cancel();
+      _audioPollingTimer = null;
+      _lastReadPosition = 0;
+
+      // Stop audio chunk subscription (if using streaming recorder)
+      await _audioChunkSubscription?.cancel();
+      _audioChunkSubscription = null;
+
+      // Play stop recording sound
+      await _playStopRecordingSound();
+
+      // Stop native audio recorder
+      await _nativeRecorder.stopRecording();
+
+      // Finalize Soniox stream
+      await _sonioxService.finalizeAudio();
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Disconnect from Soniox
+      await _sonioxStreamSubscription?.cancel();
+      await _sonioxService.disconnect();
+
+      setState(() {
+        _isRecording = false;
+        _isProcessing = false;
+      });
+
+      _pulseController.stop();
+      _waveController.stop();
+
+      debugPrint('GoogleSTTTranslator: ✅ Real-time session stopped');
+      
+      // Transfer accumulated text to main transcriptions/translations
+      _transcriptions[0] = _realtimeTranscriptions[0]?.toString() ?? '';
+      _transcriptions[1] = _realtimeTranscriptions[1]?.toString() ?? '';
+      _translations[0] = _realtimeTranslations[0]?.toString() ?? '';
+      _translations[1] = _realtimeTranslations[1]?.toString() ?? '';
+
+      debugPrint('GoogleSTTTranslator: Final transcriptions:');
+      debugPrint('  Speaker 0: ${_transcriptions[0]}');
+      debugPrint('  Speaker 1: ${_transcriptions[1]}');
+      debugPrint('GoogleSTTTranslator: Final translations:');
+      debugPrint('  Speaker 0: ${_translations[0]}');
+      debugPrint('  Speaker 1: ${_translations[1]}');
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: ❌ Stop real-time session error: $e');
+      setState(() {
+        _isRecording = false;
+        _isProcessing = false;
+      });
+    }
+  }
+
+  /// Start streaming audio to Soniox in chunks
+  /// NOTE: This method is no longer needed as streaming is handled by
+  /// the audio chunk subscription in _startRealtimeSession
+  void _startAudioStreaming() {
+    debugPrint('GoogleSTTTranslator: ✅ Audio streaming already configured via subscription');
+  }
+
+  /// Start polling audio file to simulate streaming
+  /// This is a fallback approach until native streaming is implemented
+  void _startAudioFilePolling() {
+    debugPrint('GoogleSTTTranslator: Starting audio file polling (100ms intervals)...');
+    
+    _lastReadPosition = 44; // Skip WAV header (44 bytes)
+    
+    // Poll every 100ms to read new audio data
+    _audioPollingTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+      try {
+        if (!_isRecording || _recordedAudioPath == null) {
+          debugPrint('GoogleSTTTranslator: ⚠️ Stopping audio polling - recording stopped');
+          timer.cancel();
+          return;
+        }
+
+        final audioFile = File(_recordedAudioPath!);
+        
+        // Check if file exists
+        if (!await audioFile.exists()) {
+          debugPrint('GoogleSTTTranslator: ⚠️ Audio file does not exist yet');
+          return;
+        }
+
+        // Get current file size
+        final fileSize = await audioFile.length();
+        
+        // Check if there's new data to read
+        if (fileSize > _lastReadPosition) {
+          // Read new data
+          final bytesToRead = fileSize - _lastReadPosition;
+          
+          // Limit chunk size to ~3200 bytes (100ms of 16kHz 16-bit mono audio)
+          final chunkSize = bytesToRead > 3200 ? 3200 : bytesToRead;
+          
+          // Open file and read from last position
+          final randomAccessFile = await audioFile.open(mode: FileMode.read);
+          await randomAccessFile.setPosition(_lastReadPosition);
+          final chunk = await randomAccessFile.read(chunkSize);
+          await randomAccessFile.close();
+          
+          if (chunk.isNotEmpty) {
+            // Send chunk to Soniox
+            await _sonioxService.sendAudio(chunk);
+            _lastReadPosition += chunk.length;
+            
+            debugPrint('GoogleSTTTranslator: 📤 Sent ${chunk.length} bytes to Soniox (position: $_lastReadPosition)');
+          }
+        }
+      } catch (e) {
+        debugPrint('GoogleSTTTranslator: ❌ Audio polling error: $e');
+      }
+    });
+    
+    debugPrint('GoogleSTTTranslator: ✅ Audio file polling started');
+  }
+
+  /// Handle Soniox real-time results (Transcription + Diarization ONLY)
+  /// Translation will be done separately via Azure API
+  void _handleSonioxResult(SonioxResult result) {
+    try {
+      debugPrint('GoogleSTTTranslator: ═══ Soniox Transcription Result ═══');
+      debugPrint('GoogleSTTTranslator: Tokens count: ${result.tokens.length}');
+      debugPrint('GoogleSTTTranslator: Speaker 1 language: ${_speakerLanguages[0]?.code}');
+      debugPrint('GoogleSTTTranslator: Speaker 2 language: ${_speakerLanguages[1]?.code}');
+
+      if (result.tokens.isEmpty) {
+        debugPrint('GoogleSTTTranslator: ⚠️ No tokens in result');
+        return;
+      }
+
+      // Group transcriptions by speaker
+      Map<int, String> transcriptionTexts = {};
+      Map<int, String> transcriptionLanguages = {};
+      Map<int, bool> hasFinalized = {};
+      
+      // Process all tokens (transcription only, no translation from Soniox)
+      for (var token in result.tokens) {
+        debugPrint('GoogleSTTTranslator: Token: "${token.text}" | Lang: ${token.language} | Speaker: ${token.speaker} | Final: ${token.isFinal}');
+        
+        // Filter out special tokens like <end>, <unk>, etc.
+        final tokenText = token.text.trim();
+        if (tokenText.startsWith('<') && tokenText.endsWith('>')) {
+          debugPrint('GoogleSTTTranslator: ⚠️ Skipping special token: $tokenText');
+          continue; // Skip special tokens
+        }
+        
+        // Skip empty tokens
+        if (tokenText.isEmpty) {
+          continue;
+        }
+        
+        final sonioxSpeakerId = token.speaker ?? 0;
+        final detectedLanguage = token.language;
+        
+        // Accumulate transcription text
+        transcriptionTexts[sonioxSpeakerId] = (transcriptionTexts[sonioxSpeakerId] ?? '') + token.text;
+        transcriptionLanguages[sonioxSpeakerId] = detectedLanguage;
+        
+        if (token.isFinal) {
+          hasFinalized[sonioxSpeakerId] = true;
+        }
+      }
+
+      // Process each speaker's transcription
+      transcriptionTexts.forEach((sonioxSpeakerId, transcriptionText) {
+        final detectedLanguage = transcriptionLanguages[sonioxSpeakerId] ?? '';
+        final isFinal = hasFinalized[sonioxSpeakerId] ?? false;
+        
+        debugPrint('GoogleSTTTranslator: ═══ Processing Soniox Speaker $sonioxSpeakerId ═══');
+        debugPrint('  Detected language: $detectedLanguage');
+        debugPrint('  Transcription: "$transcriptionText"');
+        debugPrint('  Is Final: $isFinal');
+        
+        // Map Soniox speaker to UI speaker based on detected language AND transcribed text
+        // This helps detect phonetic transcriptions (e.g., English spoken but written in Bengali script)
+        int uiSpeakerIndex = _mapSonioxSpeakerToUiSpeaker(sonioxSpeakerId, detectedLanguage, transcriptionText);
+        
+        debugPrint('GoogleSTTTranslator: Mapped Soniox Speaker $sonioxSpeakerId → UI Speaker $uiSpeakerIndex');
+        debugPrint('GoogleSTTTranslator: UI Speaker $uiSpeakerIndex configured language: ${_speakerLanguages[uiSpeakerIndex]?.code}');
+
+        // Initialize buffers if needed
+        if (_realtimeTranscriptions[uiSpeakerIndex] == null) {
+          _realtimeTranscriptions[uiSpeakerIndex] = StringBuffer();
+        }
+        if (_realtimeTranslations[uiSpeakerIndex] == null) {
+          _realtimeTranslations[uiSpeakerIndex] = StringBuffer();
+        }
+
+        // For final results, append and translate
+        if (isFinal) {
+          if (transcriptionText.isNotEmpty) {
+            // Append final transcription
+            if (_realtimeTranscriptions[uiSpeakerIndex]!.isNotEmpty) {
+              _realtimeTranscriptions[uiSpeakerIndex]!.write(' ');
+            }
+            _realtimeTranscriptions[uiSpeakerIndex]!.write(transcriptionText);
+            debugPrint('GoogleSTTTranslator: ✅ Appended FINAL transcription to UI Speaker $uiSpeakerIndex');
+          }
+
+          // Update UI with transcription immediately
+          if (mounted) {
+            setState(() {
+              _transcriptions[uiSpeakerIndex] = _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ?? '';
+            });
+            debugPrint('GoogleSTTTranslator: ✅ UI updated with transcription for UI Speaker $uiSpeakerIndex');
+          }
+
+          // Translate using Azure API and generate TTS
+          if (transcriptionText.isNotEmpty) {
+            debugPrint('GoogleSTTTranslator: 🌐 Translating via Azure API...');
+            _translateAndPlayRealtimeTts(
+              speakerIndex: uiSpeakerIndex,
+              transcribedText: transcriptionText.trim(),
+              sourceLanguage: detectedLanguage,
+            );
+          }
+        } else {
+          // Non-final (interim) results: Show transcription temporarily
+          if (mounted) {
+            final accumulatedTranscription = _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ?? '';
+            final interimTranscription = transcriptionText.isNotEmpty
+                ? '$accumulatedTranscription $transcriptionText'
+                : accumulatedTranscription;
+
+            setState(() {
+              _transcriptions[uiSpeakerIndex] = interimTranscription.trim();
+            });
+            debugPrint('GoogleSTTTranslator: ✅ UI updated with INTERIM transcription for UI Speaker $uiSpeakerIndex');
+          }
+        }
+      });
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: ❌ Error handling Soniox result: $e');
+      debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
+    }
+  }
+
+  /// Map Soniox speaker ID to UI speaker index based on detected language
+  /// This ensures that regardless of Soniox's speaker numbering, we display
+  /// text in the correct speaker section based on the language they're speaking
+  int _mapSonioxSpeakerToUiSpeaker(int sonioxSpeakerId, String detectedLanguage, String transcribedText) {
+    // Get configured languages for our UI speakers
+    final speaker1Lang = _speakerLanguages[0]?.code.toLowerCase() ?? '';
+    final speaker2Lang = _speakerLanguages[1]?.code.toLowerCase() ?? '';
+    final detectedLangLower = detectedLanguage.toLowerCase();
+    
+    debugPrint('GoogleSTTTranslator: Language Mapping:');
+    debugPrint('  UI Speaker 0 configured: $speaker1Lang');
+    debugPrint('  UI Speaker 1 configured: $speaker2Lang');
+    debugPrint('  Detected language: $detectedLangLower');
+    debugPrint('  Soniox speaker ID: $sonioxSpeakerId');
+    debugPrint('  Transcribed text: "$transcribedText"');
+    
+    // Check if text is phonetically transcribed (English words in Bengali/other script)
+    // If it looks like phonetic transcription, it might be the wrong language detection
+    final isPhoneticBengali = _isPhoneticTranscription(transcribedText, detectedLangLower);
+    if (isPhoneticBengali) {
+      debugPrint('GoogleSTTTranslator: ⚠️ Detected phonetic transcription!');
+      debugPrint('GoogleSTTTranslator: Likely English spoken but transcribed as $detectedLangLower');
+      
+      // If phonetic, assume it's actually the OTHER language
+      if (detectedLangLower == speaker2Lang) {
+        debugPrint('GoogleSTTTranslator: Mapping to UI Speaker 0 (likely English)');
+        return 0;
+      } else if (detectedLangLower == speaker1Lang) {
+        debugPrint('GoogleSTTTranslator: Mapping to UI Speaker 1 (likely Bengali)');
+        return 1;
+      }
+    }
+    
+    // Match based on language code
+    // If detected language matches Speaker 1's language, map to Speaker 1 (index 0)
+    // If detected language matches Speaker 2's language, map to Speaker 2 (index 1)
+    if (detectedLangLower == speaker1Lang || detectedLangLower.startsWith(speaker1Lang)) {
+      debugPrint('GoogleSTTTranslator: Language matches UI Speaker 0');
+      return 0;
+    } else if (detectedLangLower == speaker2Lang || detectedLangLower.startsWith(speaker2Lang)) {
+      debugPrint('GoogleSTTTranslator: Language matches UI Speaker 1');
+      return 1;
+    }
+    
+    // Fallback: use Soniox's speaker ID directly
+    debugPrint('GoogleSTTTranslator: ⚠️ No language match, using Soniox speaker ID: $sonioxSpeakerId');
+    return sonioxSpeakerId;
+  }
+
+  /// Check if text appears to be phonetically transcribed
+  /// (e.g., English words written in Bengali script like "গুড আফটারনুন")
+  bool _isPhoneticTranscription(String text, String detectedLanguage) {
+    if (detectedLanguage.toLowerCase() != 'bn') {
+      return false; // Only check for Bengali phonetic transcription
+    }
+    
+    // Common English words that appear phonetically in Bengali
+    final phoneticIndicators = [
+      'গুড', 'হাউ', 'আর', 'ইউ', 'হ্যালো', 'হাই', 'বাই', 'ইয়েস', 'নো',
+      'ওকে', 'থ্যাংক', 'প্লিজ', 'সরি', 'এক্সকিউজ', 'মি', 'ওয়েলকাম',
+      'আফটারনুন', 'মর্নিং', 'ইভনিং', 'ফাইন', 'নাইস', 'গ্রেট'
+    ];
+    
+    // Check if text contains multiple phonetic indicators
+    int phoneticCount = 0;
+    for (final indicator in phoneticIndicators) {
+      if (text.contains(indicator)) {
+        phoneticCount++;
+      }
+    }
+    
+    // If 2 or more phonetic indicators, it's likely phonetic transcription
+    return phoneticCount >= 2;
+  }
+
+  /// Translate transcribed text using Azure API and generate TTS
+  Future<void> _translateAndPlayRealtimeTts({
+    required int speakerIndex,
+    required String transcribedText,
+    required String sourceLanguage,
+  }) async {
+    try {
+      debugPrint('GoogleSTTTranslator: ═══ Azure Translation + TTS ═══');
+      debugPrint('GoogleSTTTranslator: Initial speaker: $speakerIndex');
+      debugPrint('GoogleSTTTranslator: Soniox detected language: $sourceLanguage');
+      debugPrint('GoogleSTTTranslator: Transcribed text: "$transcribedText"');
+
+      // CHECK FOR PHONETIC TRANSCRIPTION FIRST
+      final isPhonetic = _isPhoneticTranscription(transcribedText, sourceLanguage);
+      
+      int actualSpeakerIndex = speakerIndex;
+      String actualSourceLanguage = sourceLanguage;
+      String actualTranscribedText = transcribedText;
+      
+      if (isPhonetic) {
+        debugPrint('GoogleSTTTranslator: ⚠️ PHONETIC DETECTED! Text is likely English written in Bengali script');
+        
+        // Phonetic transcription means:
+        // - Soniox thought it was Bengali (sourceLanguage = 'bn')
+        // - But it's actually English spoken and written phonetically
+        // - So we need to:
+        //   1. Map to the OTHER speaker (English speaker)
+        //   2. Use English as the actual source language
+        //   3. First translate the phonetic text back to proper English
+        
+        actualSpeakerIndex = speakerIndex == 0 ? 1 : 0;
+        actualSourceLanguage = _speakerLanguages[actualSpeakerIndex]?.code ?? 'en';
+        
+        debugPrint('GoogleSTTTranslator: 🔄 CORRECTION: Speaker $speakerIndex → Speaker $actualSpeakerIndex');
+        debugPrint('GoogleSTTTranslator: 🔄 CORRECTION: Language $sourceLanguage → $actualSourceLanguage');
+        
+        // Clear the incorrect speaker's text
+        _realtimeTranscriptions[speakerIndex]?.clear();
+        _realtimeTranslations[speakerIndex]?.clear();
+        if (mounted) {
+          setState(() {
+            _transcriptions[speakerIndex] = '';
+            _translations[speakerIndex] = '';
+          });
+        }
+        
+        // Try to transliterate/translate phonetic Bengali back to English
+        // This is a workaround - we're asking Azure to translate from Bengali to English
+        // hoping it will recognize the phonetic pattern
+        debugPrint('GoogleSTTTranslator: 🌐 Attempting to recover English from phonetic Bengali...');
+        final recoveryResult = await TranslationService.translateText(
+          sourceLanguage: sourceLanguage, // 'bn' (what Soniox thought)
+          targetLanguage: actualSourceLanguage, // 'en' (what it actually is)
+          content: transcribedText,
+        );
+        
+        if (recoveryResult != null && recoveryResult.translatedText.isNotEmpty) {
+          actualTranscribedText = recoveryResult.translatedText;
+          debugPrint('GoogleSTTTranslator: ✅ Recovered English: "$actualTranscribedText"');
+        } else {
+          debugPrint('GoogleSTTTranslator: ⚠️ Could not recover English, using phonetic text as-is');
+        }
+        
+        // Initialize corrected speaker buffers if needed
+        if (_realtimeTranscriptions[actualSpeakerIndex] == null) {
+          _realtimeTranscriptions[actualSpeakerIndex] = StringBuffer();
+        }
+        if (_realtimeTranslations[actualSpeakerIndex] == null) {
+          _realtimeTranslations[actualSpeakerIndex] = StringBuffer();
+        }
+      }
+
+      // Now we have the ACTUAL speaker and ACTUAL source language
+      debugPrint('GoogleSTTTranslator: ═══ Final Processing ═══');
+      debugPrint('GoogleSTTTranslator: Actual speaker: $actualSpeakerIndex');
+      debugPrint('GoogleSTTTranslator: Actual source language: $actualSourceLanguage');
+      debugPrint('GoogleSTTTranslator: Actual transcribed text: "$actualTranscribedText"');
+
+      // Update transcription for the ACTUAL speaker
+      if (_realtimeTranscriptions[actualSpeakerIndex]!.isNotEmpty) {
+        _realtimeTranscriptions[actualSpeakerIndex]!.write(' ');
+      }
+      _realtimeTranscriptions[actualSpeakerIndex]!.write(actualTranscribedText);
+
+      // Determine target speaker and language for translation
+      final targetSpeakerIndex = actualSpeakerIndex == 0 ? 1 : 0;
+      final targetLanguage = _speakerLanguages[targetSpeakerIndex];
+
+      if (targetLanguage == null) {
+        debugPrint('GoogleSTTTranslator: ⚠️ Target language not configured');
+        return;
+      }
+
+      debugPrint('GoogleSTTTranslator: Target speaker: $targetSpeakerIndex');
+      debugPrint('GoogleSTTTranslator: Target language: ${targetLanguage.code}');
+
+      // Translate from ACTUAL source to target
+      final translationResult = await TranslationService.translateText(
+        sourceLanguage: actualSourceLanguage,
+        targetLanguage: targetLanguage.code,
+        content: actualTranscribedText,
+      );
+
+      if (translationResult == null || translationResult.translatedText.isEmpty) {
+        debugPrint('GoogleSTTTranslator: ❌ Azure translation failed');
+        return;
+      }
+
+      final translatedText = translationResult.translatedText;
+      debugPrint('GoogleSTTTranslator: ✅ Azure translation: "$translatedText"');
+
+      // Update translation for the ACTUAL speaker
+      if (_realtimeTranslations[actualSpeakerIndex]!.isNotEmpty) {
+        _realtimeTranslations[actualSpeakerIndex]!.write(' ');
+      }
+      _realtimeTranslations[actualSpeakerIndex]!.write(translatedText);
+
+      // Update UI
+      if (mounted) {
+        setState(() {
+          _transcriptions[actualSpeakerIndex] = _realtimeTranscriptions[actualSpeakerIndex]?.toString().trim() ?? '';
+          _translations[actualSpeakerIndex] = _realtimeTranslations[actualSpeakerIndex]?.toString().trim() ?? '';
+        });
+        debugPrint('GoogleSTTTranslator: ✅ UI updated for Speaker $actualSpeakerIndex');
+        debugPrint('GoogleSTTTranslator: Speaker $actualSpeakerIndex transcription: "${_transcriptions[actualSpeakerIndex]}"');
+        debugPrint('GoogleSTTTranslator: Speaker $actualSpeakerIndex translation: "${_translations[actualSpeakerIndex]}"');
+      }
+
+      // Generate and play TTS for the TARGET speaker
+      final targetGender = _speakerGenders[targetSpeakerIndex] ?? 'male';
+      final earpiece = _speakerEarpieces[targetSpeakerIndex] ?? 'left';
+
+      debugPrint('GoogleSTTTranslator: ═══ TTS Generation ═══');
+      debugPrint('GoogleSTTTranslator: TTS for target speaker: $targetSpeakerIndex');
+      debugPrint('GoogleSTTTranslator: TTS language: ${targetLanguage.code}');
+      debugPrint('GoogleSTTTranslator: TTS text: "$translatedText"');
+      debugPrint('GoogleSTTTranslator: TTS gender: $targetGender');
+      debugPrint('GoogleSTTTranslator: TTS earpiece: $earpiece');
+
+      // Generate TTS audio file
+      final ttsPath = await _stereoTtsService.generateMonoAudioFile(
+        translatedText,
+        targetLanguage.code,
+        gender: targetGender,
+      );
+
+      if (ttsPath == null || ttsPath.isEmpty) {
+        debugPrint('GoogleSTTTranslator: ❌ TTS generation failed');
+        return;
+      }
+
+      debugPrint('GoogleSTTTranslator: ✅ TTS generated: $ttsPath');
+
+      // Play TTS audio with stereo routing
+      await _playRealtimeTtsWithStereo(
+        speakerIndex: actualSpeakerIndex,
+        targetSpeakerIndex: targetSpeakerIndex,
+        ttsPath: ttsPath,
+        earpiece: earpiece,
+      );
+
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: ❌ Translation + TTS error: $e');
+      debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
+    }
+  }
+
+  /// Play TTS audio with stereo routing in real-time
+  Future<void> _playRealtimeTtsWithStereo({
+    required int speakerIndex,
+    required int targetSpeakerIndex,
+    required String ttsPath,
+    required String earpiece,
+  }) async {
+    try {
+      debugPrint('GoogleSTTTranslator: ═══ Playing TTS with Stereo Routing ═══');
+      debugPrint('GoogleSTTTranslator: Speaker: $speakerIndex');
+      debugPrint('GoogleSTTTranslator: Target speaker: $targetSpeakerIndex');
+      debugPrint('GoogleSTTTranslator: Earpiece: $earpiece');
+      debugPrint('GoogleSTTTranslator: TTS path: $ttsPath');
+
+      // Switch to playback route
+      await _enterPlaybackRoute();
+      await Future.delayed(const Duration(milliseconds: 300));
+
+      // Generate stereo audio file with TTS routed to correct earpiece
+      final tempDir = await getApplicationDocumentsDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+
+      debugPrint('GoogleSTTTranslator: Creating stereo audio with routing...');
+
+      // Create a silent audio file for the opposite channel
+      final silentAudioPath = await _createMatchingSilentAudioFile(ttsPath);
+      
+      if (silentAudioPath == null) {
+        debugPrint('GoogleSTTTranslator: ⚠️ Failed to create silent audio, using TTS for both channels');
+      }
+
+      // Route TTS to correct earpiece, silence to the other
+      final leftChannelPath = earpiece == 'left' ? ttsPath : (silentAudioPath ?? ttsPath);
+      final rightChannelPath = earpiece == 'right' ? ttsPath : (silentAudioPath ?? ttsPath);
+      
+      debugPrint('GoogleSTTTranslator: Left channel: ${earpiece == 'left' ? "TTS" : "Silent"}');
+      debugPrint('GoogleSTTTranslator: Right channel: ${earpiece == 'right' ? "TTS" : "Silent"}');
+      
+      final stereoPath = await _stereoTtsService.createTrueStereoAudioFile(
+        leftChannelPath,
+        rightChannelPath,
+        outputFileName: 'realtime_stereo_$timestamp.wav',
+      );
+
+      if (stereoPath == null || stereoPath.isEmpty) {
+        debugPrint('GoogleSTTTranslator: ❌ Failed to create stereo audio');
+        return;
+      }
+
+      debugPrint('GoogleSTTTranslator: ✅ Stereo audio created: $stereoPath');
+
+      // Play stereo audio
+      if (targetSpeakerIndex == 0) {
+        setState(() => _isPlayingTts1 = true);
+      } else {
+        setState(() => _isPlayingTts2 = true);
+      }
+
+      await _stereoTtsService.playStereoAudio(stereoPath);
+
+      if (mounted) {
+        setState(() {
+          _isPlayingTts1 = false;
+          _isPlayingTts2 = false;
+        });
+      }
+
+      debugPrint('GoogleSTTTranslator: ✅ TTS playback completed');
+
+      // Clean up temporary files
+      try {
+        final stereoFile = File(stereoPath);
+        if (await stereoFile.exists()) {
+          await stereoFile.delete();
+          debugPrint('GoogleSTTTranslator: ✅ Cleaned up temporary stereo file');
+        }
+        
+        if (silentAudioPath != null) {
+          final silentFile = File(silentAudioPath);
+          if (await silentFile.exists()) {
+            await silentFile.delete();
+            debugPrint('GoogleSTTTranslator: ✅ Cleaned up temporary silent file');
+          }
+        }
+      } catch (e) {
+        debugPrint('GoogleSTTTranslator: ⚠️ Failed to delete temporary files: $e');
+      }
+
+      // Switch back to recording route if still recording
+      if (_isRecording && _isRealtimeMode) {
+        await Future.delayed(const Duration(milliseconds: 200));
+        await _enterRecordingRoute();
+        debugPrint('GoogleSTTTranslator: ✅ Switched back to recording route');
+      }
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: ❌ TTS playback error: $e');
+      debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
+      if (mounted) {
+        setState(() {
+          _isPlayingTts1 = false;
+          _isPlayingTts2 = false;
+        });
+      }
+    }
+  }
+
+  /// Create a silent audio file with the same duration as the reference audio
+  Future<String?> _createMatchingSilentAudioFile(String referenceAudioPath) async {
+    try {
+      debugPrint('GoogleSTTTranslator: Creating silent audio file...');
+      
+      // Read reference audio file to get duration
+      final refFile = File(referenceAudioPath);
+      if (!await refFile.exists()) {
+        debugPrint('GoogleSTTTranslator: ❌ Reference audio file does not exist');
+        return null;
+      }
+      
+      final refBytes = await refFile.readAsBytes();
+      
+      // WAV file header is 44 bytes
+      // Data size is in bytes 40-43 (little-endian)
+      if (refBytes.length < 44) {
+        debugPrint('GoogleSTTTranslator: ❌ Reference audio file is too small');
+        return null;
+      }
+      
+      // Get audio data size from WAV header
+      final dataSize = refBytes[40] | 
+                      (refBytes[41] << 8) | 
+                      (refBytes[42] << 16) | 
+                      (refBytes[43] << 24);
+      
+      debugPrint('GoogleSTTTranslator: Reference audio data size: $dataSize bytes');
+      
+      // Create silent audio file with same size
+      final tempDir = await getApplicationDocumentsDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final silentPath = '${tempDir.path}/silent_$timestamp.wav';
+      
+      // Copy WAV header from reference file
+      final silentBytes = Uint8List(44 + dataSize);
+      silentBytes.setAll(0, refBytes.sublist(0, 44));
+      
+      // Fill audio data with zeros (silence)
+      for (int i = 44; i < silentBytes.length; i++) {
+        silentBytes[i] = 0;
+      }
+      
+      // Write silent audio file
+      final silentFile = File(silentPath);
+      await silentFile.writeAsBytes(silentBytes);
+      
+      debugPrint('GoogleSTTTranslator: ✅ Silent audio file created: $silentPath');
+      return silentPath;
+    } catch (e) {
+      debugPrint('GoogleSTTTranslator: ❌ Error creating silent audio: $e');
+      return null;
+    }
+  }
+
+  /// Toggle between manual and real-time mode
+  void _toggleTranslationMode() {
+    setState(() {
+      _isRealtimeMode = !_isRealtimeMode;
+    });
+    
+    debugPrint('GoogleSTTTranslator: Mode switched to: ${_isRealtimeMode ? "REAL-TIME" : "MANUAL"}');
+    
+    // Show mode info
+    final mode = _isRealtimeMode ? 'Real-time Mode' : 'Manual Mode';
+    final description = _isRealtimeMode
+        ? 'Continuous translation without stop button'
+        : 'Press stop to process translation';
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              mode,
+              style: const TextStyle(
+                fontWeight: FontWeight.bold,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(description),
+          ],
+        ),
+        backgroundColor: _isRealtimeMode ? Colors.purple : Colors.blue,
+        duration: const Duration(seconds: 3),
+      ),
+    );
   }
 
   Future<void> _processAudio() async {
@@ -3772,6 +4602,13 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     // Clean up noise meter resources
     _stopSoundLevelMonitoring();
 
+    // Clean up real-time resources
+    _audioPollingTimer?.cancel();
+    _audioChunkSubscription?.cancel();
+    _sonioxStreamSubscription?.cancel();
+    _sonioxService.dispose();
+    _streamingRecorder.dispose();
+
     super.dispose();
   }
 
@@ -3834,7 +4671,16 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         onPressed: () => Navigator.of(context).pop(),
       ),
       actions: [
-        if (!_showSpeakerSetup)
+        if (!_showSpeakerSetup) ...[
+          // Mode toggle button (Real-time / Manual)
+          IconButton(
+            icon: Icon(
+              _isRealtimeMode ? Icons.flash_on : Icons.flash_off,
+              color: _isRealtimeMode ? Colors.purple : Colors.white,
+            ),
+            tooltip: _isRealtimeMode ? 'Real-time Mode' : 'Manual Mode',
+            onPressed: _toggleTranslationMode,
+          ),
           IconButton(
             icon: const Icon(Icons.settings, color: Colors.white),
             onPressed: () {
@@ -3843,6 +4689,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               });
             },
           ),
+        ],
       ],
     );
   }
@@ -3864,6 +4711,61 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
+          // Mode indicator
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: _isRealtimeMode
+                  ? Colors.purple.withValues(alpha: 0.2)
+                  : Colors.blue.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _isRealtimeMode ? Colors.purple : Colors.blue,
+                width: 2,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _isRealtimeMode ? Icons.flash_on : Icons.flash_off,
+                  color: _isRealtimeMode ? Colors.purple : Colors.blue,
+                  size: 24,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isRealtimeMode ? 'Real-time Mode' : 'Manual Mode',
+                        style: TextStyle(
+                          color: _isRealtimeMode ? Colors.purple : Colors.blue,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _isRealtimeMode
+                            ? 'Continuous translation with instant TTS playback'
+                            : 'Press stop button to process translation',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                IconButton(
+                  icon: const Icon(Icons.swap_horiz, color: Colors.white),
+                  onPressed: _toggleTranslationMode,
+                  tooltip: 'Switch mode',
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
           ...List.generate(_numberOfSpeakers, (index) {
             return _buildSpeakerConfig(index);
           }),
@@ -4204,9 +5106,11 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         Expanded(
           child: _isProcessing
               ? _buildProcessingView()
-              : (_speaker1AudioPath != null && _speaker2AudioPath != null)
-                  ? _buildResultsView()
-                  : _buildIdleView(),
+              : (_isRealtimeMode && (_transcriptions.isNotEmpty || _translations.isNotEmpty))
+                  ? _buildRealtimeResultsView()
+                  : (_speaker1AudioPath != null && _speaker2AudioPath != null)
+                      ? _buildResultsView()
+                      : _buildIdleView(),
         ),
         _buildRecordingControls(),
       ],
@@ -4394,6 +5298,225 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           ],
         ),
       ),
+    );
+  }
+
+  /// Real-time results view for continuous translation
+  Widget _buildRealtimeResultsView() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          const SizedBox(height: 20),
+          // Real-time mode indicator
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.purple.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: Colors.purple.withValues(alpha: 0.5),
+                width: 2,
+              ),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  _isRecording ? Icons.mic : Icons.check_circle,
+                  color: Colors.purple,
+                  size: 30,
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isRecording ? 'Real-time Translation Active' : 'Translation Completed',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 18,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        _isRecording
+                            ? 'Listening and translating continuously...'
+                            : 'Review the translated conversation',
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 30),
+          // Speaker 1 transcription/translation
+          _buildRealtimeTranscriptionCard(
+            speakerIndex: 0,
+          ),
+          const SizedBox(height: 20),
+          // Speaker 2 transcription/translation
+          _buildRealtimeTranscriptionCard(
+            speakerIndex: 1,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build real-time transcription card for a speaker
+  Widget _buildRealtimeTranscriptionCard({
+    required int speakerIndex,
+  }) {
+    final speakerColor = _speakerColors[speakerIndex % _speakerColors.length];
+    final transcription = _transcriptions[speakerIndex] ?? '';
+    final translation = _translations[speakerIndex] ?? '';
+    final language = _speakerLanguages[speakerIndex];
+    final targetLanguage = _speakerLanguages[speakerIndex == 0 ? 1 : 0];
+
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1D1E33),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: speakerColor.withValues(alpha: 0.3),
+          width: 2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: speakerColor.withValues(alpha: 0.1),
+            blurRadius: 10,
+            spreadRadius: 2,
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Speaker header
+          Row(
+            children: [
+              Container(
+                width: 50,
+                height: 50,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: speakerColor.withValues(alpha: 0.2),
+                ),
+                child: Icon(
+                  Icons.person,
+                  color: speakerColor,
+                  size: 28,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      _speakerNames[speakerIndex],
+                      style: TextStyle(
+                        color: speakerColor,
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${language?.name ?? "Unknown"} → ${targetLanguage?.name ?? "Unknown"}',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          
+          // Transcription (Original)
+          _buildTextSection(
+            icon: Icons.mic,
+            title: 'Original (${language?.name ?? "Unknown"})',
+            text: transcription.isEmpty ? 'Waiting for speech...' : transcription,
+            color: speakerColor,
+            isEmpty: transcription.isEmpty,
+          ),
+          
+          const SizedBox(height: 16),
+          
+          // Translation
+          _buildTextSection(
+            icon: Icons.translate,
+            title: 'Translation (${targetLanguage?.name ?? "Unknown"})',
+            text: translation.isEmpty ? 'Waiting for translation...' : translation,
+            color: speakerColor,
+            isEmpty: translation.isEmpty,
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build text section for transcription or translation
+  Widget _buildTextSection({
+    required IconData icon,
+    required String title,
+    required String text,
+    required Color color,
+    required bool isEmpty,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: color, size: 16),
+            const SizedBox(width: 8),
+            Text(
+              title,
+              style: TextStyle(
+                color: color,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: color.withValues(alpha: 0.3),
+              width: 1,
+            ),
+          ),
+          child: Text(
+            text,
+            style: TextStyle(
+              color: isEmpty ? Colors.white38 : Colors.white,
+              fontSize: 15,
+              height: 1.5,
+              fontStyle: isEmpty ? FontStyle.italic : FontStyle.normal,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
