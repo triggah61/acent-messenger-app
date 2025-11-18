@@ -48,9 +48,10 @@ class TrueStereoAudioServiceRobust {
             iOS: AudioContextIOS(
               category: AVAudioSessionCategory.playback,
               options: {
-                // Note: allowBluetooth can only be used with playAndRecord or record category
-                // For playback-only, we use allowBluetoothA2DP which works with playback
-                AVAudioSessionOptions.allowBluetoothA2DP,
+                // Note: allowBluetooth and allowBluetoothA2DP can only be used with:
+                // playAndRecord, record, or multiRoute categories (not playback)
+                // For playback-only, we rely on Android's default routing behavior
+                // iOS will route to Bluetooth automatically if available
                 AVAudioSessionOptions.mixWithOthers,
               },
             ),

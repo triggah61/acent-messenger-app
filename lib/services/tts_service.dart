@@ -31,6 +31,7 @@ class TtsService {
   
   // Flag to use native player (for guaranteed A2DP routing)
   bool _useNativePlayer = true;  // Use native player by default for A2DP routing
+  
 
   /// Initialize the TTS service
   Future<void> initialize() async {
@@ -254,6 +255,12 @@ class TtsService {
         }
 
         if (fileReady) {
+          // CRITICAL: Add generous delay to ensure file system flush completes
+          // This gives OS time to flush write buffers and close file descriptors
+          // Prevents MEDIA_ERROR_SYSTEM in native MediaPlayer
+          debugPrint('TtsService: Waiting for file system flush (500ms)...');
+          await Future.delayed(const Duration(milliseconds: 500));
+          debugPrint('TtsService: ✅ File ready for playback');
           return audioPath;
         } else {
           debugPrint(
@@ -312,9 +319,10 @@ class TtsService {
             iOS: AudioContextIOS(
               category: AVAudioSessionCategory.playback,
               options: {
-                // Note: allowBluetooth can only be used with playAndRecord or record category
-                // For playback-only, we use allowBluetoothA2DP which works with playback
-                AVAudioSessionOptions.allowBluetoothA2DP,
+                // Note: allowBluetooth and allowBluetoothA2DP can only be used with:
+                // playAndRecord, record, or multiRoute categories (not playback)
+                // For playback-only, we rely on Android's default routing behavior
+                // iOS will route to Bluetooth automatically if available
                 AVAudioSessionOptions.mixWithOthers,
               },
             ),
@@ -355,6 +363,21 @@ class TtsService {
         _playbackCompleter = Completer<void>();
         
         try {
+          // CRITICAL: Set up method call handler for completion callback BEFORE starting playback
+          // This ensures we don't miss the completion notification
+          _nativeAudioChannel.setMethodCallHandler((call) async {
+            if (call.method == 'onNativePlaybackCompleted') {
+              debugPrint('TtsService: ✅ Received native playback completion callback');
+              if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+                _playbackCompleter!.complete();
+              }
+            } else if (call.method == 'onNativePlaybackStarted') {
+              debugPrint('TtsService: ✅ Native playback started (confirmed by callback)');
+            }
+          });
+          
+          debugPrint('TtsService: ✅ Completion callback handler set up - starting playback...');
+          
           // Start native playback
           final success = await _nativeAudioChannel.invokeMethod<bool>(
             'playAudioFileNative',
@@ -362,45 +385,142 @@ class TtsService {
           );
           
           if (success == true) {
-            debugPrint('TtsService: ✅ Native playback started - polling for completion...');
+            debugPrint('TtsService: ✅ Native playback initiated - waiting for completion...');
             
-            // Poll for playback completion (native player doesn't have a callback mechanism)
-            // Check every 100ms if playback is still ongoing
-            while (true) {
-              await Future.delayed(const Duration(milliseconds: 100));
-              
-              final isPlaying = await _nativeAudioChannel.invokeMethod<bool>(
-                'isNativeAudioPlaying',
+            debugPrint('TtsService: ⏳ Waiting for playback to complete...');
+            
+            // CRITICAL: Wait for completion with timeout as backup
+            // The callback should fire first via MediaPlayer.onCompletionListener
+            try {
+              await _playbackCompleter!.future.timeout(
+                const Duration(seconds: 30), // Maximum 30 seconds for TTS playback
+                onTimeout: () {
+                  debugPrint('TtsService: ⚠️ Completion callback timeout - checking status...');
+                  // Timeout backup: check if still playing
+                  _nativeAudioChannel.invokeMethod<bool>('isNativeAudioPlaying').then((isPlaying) {
+                    if (isPlaying != true) {
+                      debugPrint('TtsService: ✅ Playback actually completed (timeout was false alarm)');
+                      if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+                        _playbackCompleter!.complete();
+                      }
+                    } else {
+                      debugPrint('TtsService: ⚠️ Playback still in progress after timeout');
+                      // Force complete to prevent hanging, but log warning
+                      if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+                        _playbackCompleter!.complete();
+                      }
+                    }
+                  });
+                },
               );
               
-              if (isPlaying != true) {
-                debugPrint('TtsService: ✅ Native playback completed');
-                break;
-              }
+              debugPrint('TtsService: ✅ Native playback completed successfully');
+            } catch (timeoutError) {
+              debugPrint('TtsService: ⚠️ Completion wait timeout: $timeoutError');
+              // Completer will be completed by timeout handler
             }
-            
-            _playbackCompleter!.complete();
           } else {
             debugPrint('TtsService: ❌ Native playback failed - falling back to AudioPlayer');
             throw Exception('Native playback failed');
           }
         } catch (e) {
           debugPrint('TtsService: ❌ Native player error: $e');
+          debugPrint('TtsService: Error type: ${e.runtimeType}');
+          if (e is PlatformException) {
+            debugPrint('TtsService: Platform error code: ${e.code}');
+            debugPrint('TtsService: Platform error message: ${e.message}');
+            debugPrint('TtsService: Platform error details: ${e.details}');
+          }
           debugPrint('TtsService: Falling back to AudioPlayer...');
           
-          // Fallback to AudioPlayer if native player fails
-          _useNativePlayer = false;
+          // CRITICAL: Don't disable native player permanently - might work next time
+          // Just use AudioPlayer for this playback
+          
+          // CRITICAL: Stop native player completely before using AudioPlayer
+          // This prevents MediaPlayer conflicts (both use MediaPlayer internally)
+          try {
+            debugPrint('TtsService: Stopping native player to prevent MediaPlayer conflicts...');
+            await _nativeAudioChannel.invokeMethod('stopNativeAudio');
+            debugPrint('TtsService: ✅ Native player stopped');
+            // Give system time to release MediaPlayer resources
+            await Future.delayed(const Duration(milliseconds: 200));
+          } catch (stopError) {
+            debugPrint('TtsService: ⚠️ Could not stop native player: $stopError');
+            // Continue anyway
+          }
           
           // Continue with AudioPlayer playback
           _playbackCompleter = Completer<void>();
           
+          // CRITICAL: Ensure completion handler is set up BEFORE playback
+          // This ensures we don't miss completion events
+          _audioPlayer!.onPlayerComplete.listen((event) {
+            debugPrint('TtsService: ✅ AudioPlayer playback completed (fallback)');
+            if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+              _playbackCompleter!.complete();
+            }
+          });
+          
+          // CRITICAL: Re-apply AudioContext for AudioPlayer (without allowBluetoothA2DP)
+          try {
+            debugPrint('TtsService: Re-applying AudioContext for AudioPlayer fallback...');
+            await _audioPlayer!.setAudioContext(
+              AudioContext(
+                android: AudioContextAndroid(
+                  isSpeakerphoneOn: false,
+                  stayAwake: true,
+                  contentType: AndroidContentType.music,
+                  usageType: AndroidUsageType.media,
+                  audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+                ),
+                iOS: AudioContextIOS(
+                  category: AVAudioSessionCategory.playback,
+                  options: {
+                    AVAudioSessionOptions.mixWithOthers,
+                  },
+                ),
+              ),
+            );
+            debugPrint('TtsService: ✅ AudioContext re-applied for AudioPlayer');
+          } catch (audioContextError) {
+            debugPrint('TtsService: ⚠️ Failed to re-apply AudioContext: $audioContextError');
+            // Continue anyway - AudioPlayer might still route correctly
+          }
+          
+          // CRITICAL: Set volume to maximum (in case it was muted)
+          try {
+            await _audioPlayer!.setVolume(1.0);
+            debugPrint('TtsService: ✅ Volume set to 1.0');
+          } catch (volumeError) {
+            debugPrint('TtsService: ⚠️ Could not set volume: $volumeError');
+          }
+          
           debugPrint('TtsService: Starting playback via AudioPlayer (fallback)...');
           debugPrint('TtsService: Stream type: MEDIA (Android ContentType.music)');
           debugPrint('TtsService: Expected routing: Bluetooth A2DP → TWS speakers');
+          debugPrint('TtsService: File: $audioPath');
+          
           await _audioPlayer!.play(DeviceFileSource(audioPath));
           
           debugPrint('TtsService: ⏳ Waiting for playback to complete...');
-          await _playbackCompleter!.future;
+          
+          // CRITICAL: Add timeout to prevent hanging if completion never fires
+          try {
+            await _playbackCompleter!.future.timeout(
+              const Duration(seconds: 30),
+              onTimeout: () {
+                debugPrint('TtsService: ⚠️ Playback completion timeout (30s) - assuming completed');
+                if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+                  _playbackCompleter!.complete();
+                }
+              },
+            );
+          } catch (timeoutError) {
+            debugPrint('TtsService: ⚠️ Playback wait error: $timeoutError');
+          }
+        } finally {
+          // Clean up method call handler
+          _nativeAudioChannel.setMethodCallHandler(null);
         }
       } else {
         // Use AudioPlayer (fallback or if native player is disabled)

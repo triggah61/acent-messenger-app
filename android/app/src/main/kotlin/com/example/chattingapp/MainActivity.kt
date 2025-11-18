@@ -49,9 +49,6 @@ class MainActivity : FlutterActivity() {
         // Initialize Audio Profile service
         audioProfileService = AudioProfileService(this)
         
-        // Initialize Native Audio Player (for explicit A2DP routing)
-        nativeAudioPlayer = NativeAudioPlayer(this)
-        
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_PROFILE_CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "initializeAudioProfiles" -> {
@@ -119,7 +116,12 @@ class MainActivity : FlutterActivity() {
         }
         
         // Audio route channel: force using the phone's built-in microphone
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_ROUTE_CHANNEL).setMethodCallHandler { call, result ->
+        val audioRouteChannelInstance = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, AUDIO_ROUTE_CHANNEL)
+        
+        // CRITICAL: Initialize Native Audio Player AFTER channel is created (for completion callbacks)
+        nativeAudioPlayer = NativeAudioPlayer(this, audioRouteChannelInstance)
+        
+        audioRouteChannelInstance.setMethodCallHandler { call, result ->
             when (call.method) {
                 "playAudioFileNative" -> {
                     try {
@@ -132,16 +134,27 @@ class MainActivity : FlutterActivity() {
                         Log.d(TAG, "═══ Playing Audio File via Native Player (A2DP Routing) ═══")
                         Log.d(TAG, "File: $filePath")
                         
+                        // CRITICAL: Check if native player is initialized
+                        val player = nativeAudioPlayer
+                        if (player == null) {
+                            Log.e(TAG, "❌ Native audio player is null - not initialized")
+                            result.error("PLAYBACK_ERROR", "Native audio player not initialized", null)
+                            return@setMethodCallHandler
+                        }
+                        
                         // Use native player for guaranteed A2DP routing
-                        val success = nativeAudioPlayer?.playAudioFile(filePath) {
-                            // Playback completed - Flutter will poll for status
-                            Log.d(TAG, "✅ Native audio playback completed")
-                        } ?: false
+                        val success = player.playAudioFile(filePath) {
+                            // Playback completed - Flutter will receive callback via method channel
+                            Log.d(TAG, "✅ Native audio playback completed (callback invoked)")
+                        }
                         
                         if (success) {
+                            Log.d(TAG, "✅ Native playback initiated successfully")
                             result.success(true)
                         } else {
-                            result.error("PLAYBACK_ERROR", "Failed to start playback", null)
+                            Log.e(TAG, "❌ Native playback failed to start")
+                            Log.e(TAG, "   Check logcat for NativeAudioPlayer errors above")
+                            result.error("PLAYBACK_ERROR", "Failed to start playback - check logs for details", null)
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "❌ Error playing audio file: ${e.message}", e)
