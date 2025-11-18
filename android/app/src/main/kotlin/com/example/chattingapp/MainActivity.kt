@@ -191,10 +191,10 @@ class MainActivity : FlutterActivity() {
                         Log.d(TAG, "═══ Entering Playback Route (STEREO) ═══")
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
                         
-                        // STEP 1: Release any recording audio focus
+                        // STEP 0: Release any recording audio focus so playback can take priority
                         releaseAudioFocus()
                         
-                        // STEP 2: CRITICAL - Stop Bluetooth SCO (voice channel) completely
+                        // STEP 1: CRITICAL - Stop Bluetooth SCO (voice channel) completely
                         try { 
                             audioManager.stopBluetoothSco() 
                             Log.d(TAG, "✅ Stopped Bluetooth SCO")
@@ -208,12 +208,12 @@ class MainActivity : FlutterActivity() {
                             Log.w(TAG, "Failed to disable SCO: ${e.message}")
                         }
                         
-                        // STEP 3: CRITICAL - Set audio mode to NORMAL for media playback
+                        // STEP 2: CRITICAL - Set audio mode to NORMAL for media playback
                         // This enables stereo A2DP routing on TWS/Bluetooth headsets
                         audioManager.mode = AudioManager.MODE_NORMAL
                         Log.d(TAG, "✅ Set mode to NORMAL (media playback)")
                         
-                        // STEP 4: Ensure speakerphone is off so BT can be used
+                        // STEP 3: Ensure speakerphone is off so BT can be used
                         try { 
                             audioManager.isSpeakerphoneOn = false 
                             Log.d(TAG, "✅ Disabled speakerphone")
@@ -222,9 +222,9 @@ class MainActivity : FlutterActivity() {
                         }
                         
                         // NOTE: Audio focus is managed by AudioPlayer (via AudioContext)
-                        // Don't request it here to avoid conflicts
+                        // Don't release or request here to avoid interrupting ongoing recording focus
                         
-                        // STEP 5: For Android 12+ (API 31+), log additional info
+                        // STEP 4: For Android 12+ (API 31+), log additional info
                         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                             Log.d(TAG, "✅ Android 12+: System will route to A2DP/TWS stereo")
                         }

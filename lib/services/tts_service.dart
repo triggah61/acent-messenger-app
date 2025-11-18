@@ -228,6 +228,11 @@ class TtsService {
 
       debugPrint('TtsService: Playing audio file: $audioPath');
 
+      // CRITICAL: Wait 500ms before starting playback to ensure hardware is ready
+      // This prevents audio from being cut off at the beginning
+      debugPrint('TtsService: ⏳ Waiting 500ms for playback hardware to be ready...');
+      await Future.delayed(const Duration(milliseconds: 500));
+
       // Use AudioPlayer to play the audio file
       await _audioPlayer!.play(DeviceFileSource(audioPath));
     } catch (e) {
@@ -259,6 +264,11 @@ class TtsService {
 
       // Set language for TTS
       await _flutterTts!.setLanguage(ttsLanguage);
+
+      // CRITICAL: Wait 500ms before starting playback to ensure hardware is ready
+      // This prevents audio from being cut off at the beginning
+      debugPrint('TtsService: ⏳ Waiting 500ms for playback hardware to be ready...');
+      await Future.delayed(const Duration(milliseconds: 500));
 
       _isPlaying = true;
       await _flutterTts!.speak(text);

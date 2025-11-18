@@ -3,6 +3,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'dart:io';
 import 'dart:typed_data';
+import 'dart:async';
 
 /// True Stereo Audio Service that creates actual stereo WAV files
 /// with left and right channel separation for proper earpiece playback
@@ -40,13 +41,16 @@ class TrueStereoAudioServiceRobust {
               stayAwake: true,
               contentType: AndroidContentType.music,
               usageType: AndroidUsageType.media,
-              audioFocus: AndroidAudioFocus.gain, // Managed by audioplayers
+              // Allow playback while recording by requesting a focus mode
+              // that ducks instead of stopping competing audio (mic capture)
+              audioFocus: AndroidAudioFocus.gainTransientMayDuck,
             ),
             iOS: AudioContextIOS(
               category: AVAudioSessionCategory.playback,
               options: {
                 AVAudioSessionOptions.allowBluetooth,
                 AVAudioSessionOptions.allowBluetoothA2DP,
+                AVAudioSessionOptions.mixWithOthers,
               },
             ),
           ),
@@ -148,9 +152,32 @@ class TrueStereoAudioServiceRobust {
       debugPrint('  Right audio: $rightAudioPath');
       debugPrint('  Output: $outputPath');
 
+      // CRITICAL FIX: Ensure files are fully written before reading
+      // Add a small delay to ensure file system has flushed
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      // Verify file sizes are stable
+      final leftSizeBefore = await leftFile.length();
+      final rightSizeBefore = await rightFile.length();
+      await Future.delayed(const Duration(milliseconds: 50));
+      final leftSizeAfter = await leftFile.length();
+      final rightSizeAfter = await rightFile.length();
+      
+      if (leftSizeBefore != leftSizeAfter || rightSizeBefore != rightSizeAfter) {
+        debugPrint('TrueStereoAudioServiceRobust: ⚠️ File sizes changed, waiting for stability...');
+        debugPrint('TrueStereoAudioServiceRobust: Left: $leftSizeBefore → $leftSizeAfter');
+        debugPrint('TrueStereoAudioServiceRobust: Right: $rightSizeBefore → $rightSizeAfter');
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+      
       // Read both mono audio files
+      debugPrint('TrueStereoAudioServiceRobust: Reading left audio file (${await leftFile.length()} bytes)...');
       final leftAudioBytes = await leftFile.readAsBytes();
+      debugPrint('TrueStereoAudioServiceRobust: Read ${leftAudioBytes.length} bytes from left file');
+      
+      debugPrint('TrueStereoAudioServiceRobust: Reading right audio file (${await rightFile.length()} bytes)...');
       final rightAudioBytes = await rightFile.readAsBytes();
+      debugPrint('TrueStereoAudioServiceRobust: Read ${rightAudioBytes.length} bytes from right file');
 
       // Parse WAV headers and extract audio data with sample rate info
       final leftAudioInfo = _extractAudioDataFromWav(leftAudioBytes, 'Left');
@@ -315,15 +342,59 @@ class TrueStereoAudioServiceRobust {
       debugPrint('TrueStereoAudioServiceRobust: Audio Context: MUSIC/MEDIA (stereo A2DP)');
       debugPrint('TrueStereoAudioServiceRobust: Expected Output: TWS/Bluetooth stereo earpieces');
 
-      // Use AudioPlayer to play the stereo audio file
-      await _audioPlayer!.play(DeviceFileSource(stereoAudioPath));
+      // CRITICAL FIX: Wait for playback to complete
+      // Create a completer to wait for playback completion
+      final Completer<void> playbackCompleter = Completer<void>();
       
-      debugPrint('TrueStereoAudioServiceRobust: ✅ Playback started successfully');
+      // Listen for playback completion
+      final subscription = _audioPlayer!.onPlayerComplete.listen((event) {
+        debugPrint('TrueStereoAudioServiceRobust: ✅ Playback completed');
+        _isPlaying = false;
+        if (!playbackCompleter.isCompleted) {
+          playbackCompleter.complete();
+        }
+      });
+
+      // Also listen for errors
+      final errorSubscription = _audioPlayer!.onPlayerStateChanged.listen((state) {
+        if (state == PlayerState.stopped || state == PlayerState.completed) {
+          debugPrint('TrueStereoAudioServiceRobust: Player state changed to $state');
+          _isPlaying = false;
+          if (!playbackCompleter.isCompleted) {
+            playbackCompleter.complete();
+          }
+        }
+      });
+
+      // CRITICAL: Wait 500ms before starting playback to ensure hardware is ready
+      // This prevents audio from being cut off at the beginning
+      debugPrint('TrueStereoAudioServiceRobust: ⏳ Waiting 500ms for playback hardware to be ready...');
+      await Future.delayed(const Duration(milliseconds: 500));
+      
+      // Start playback
+      await _audioPlayer!.play(DeviceFileSource(stereoAudioPath));
+      debugPrint('TrueStereoAudioServiceRobust: ✅ Playback started, waiting for completion...');
+
+      // Wait for playback to complete (with timeout)
+      await playbackCompleter.future.timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          debugPrint('TrueStereoAudioServiceRobust: ⚠️ Playback timeout after 30 seconds');
+          _isPlaying = false;
+        },
+      );
+
+      // Clean up subscriptions
+      await subscription.cancel();
+      await errorSubscription.cancel();
+      
+      debugPrint('TrueStereoAudioServiceRobust: ✅ Playback finished successfully');
     } catch (e) {
       _isPlaying = false;
       debugPrint(
           'TrueStereoAudioServiceRobust: ❌ Error playing stereo audio file: $e');
       _onPlaybackError?.call();
+      rethrow;
     }
   }
 
@@ -363,17 +434,32 @@ class TrueStereoAudioServiceRobust {
         return null;
       }
 
-      // Check for "RIFF" header
-      if (String.fromCharCodes(wavBytes.sublist(0, 4)) != 'RIFF') {
+      // Check for "RIFF" header with detailed logging
+      final first4Bytes = wavBytes.length >= 4 
+          ? String.fromCharCodes(wavBytes.sublist(0, 4))
+          : 'N/A';
+      
+      if (first4Bytes != 'RIFF') {
         debugPrint(
-            'TrueStereoAudioServiceRobust: $fileLabel file is not a valid WAV file (missing RIFF header)');
+            'TrueStereoAudioServiceRobust: ❌ $fileLabel file is not a valid WAV file');
+        debugPrint('TrueStereoAudioServiceRobust: Expected: "RIFF", Found: "$first4Bytes"');
+        debugPrint('TrueStereoAudioServiceRobust: First 20 bytes (hex): ${wavBytes.length >= 20 ? wavBytes.sublist(0, 20).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ') : 'N/A'}');
+        debugPrint('TrueStereoAudioServiceRobust: First 20 bytes (ascii): ${wavBytes.length >= 20 ? String.fromCharCodes(wavBytes.sublist(0, 20).map((b) => b >= 32 && b < 127 ? b : 46)) : 'N/A'}');
         return null;
       }
 
       // Check for "WAVE" format
-      if (String.fromCharCodes(wavBytes.sublist(8, 12)) != 'WAVE') {
+      if (wavBytes.length < 12) {
         debugPrint(
-            'TrueStereoAudioServiceRobust: $fileLabel file is not a WAVE file (missing WAVE header)');
+            'TrueStereoAudioServiceRobust: ❌ $fileLabel file too small for WAVE header (${wavBytes.length} bytes)');
+        return null;
+      }
+      
+      final waveHeader = String.fromCharCodes(wavBytes.sublist(8, 12));
+      if (waveHeader != 'WAVE') {
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ❌ $fileLabel file is not a WAVE file');
+        debugPrint('TrueStereoAudioServiceRobust: Expected: "WAVE", Found: "$waveHeader"');
         return null;
       }
 

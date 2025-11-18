@@ -147,28 +147,100 @@ class EnhancedTtsServiceRobust {
       final result = await _flutterTts!.synthesizeToFile(text, audioPath);
 
       if (result == 1) {
-        // Verify the file was created and has content
-        final file = File(audioPath);
-        if (await file.exists()) {
-          final fileSize = await file.length();
-          debugPrint(
-              'EnhancedTtsServiceRobust: Mono audio file generated successfully: $audioPath');
-          debugPrint('EnhancedTtsServiceRobust: File size: $fileSize bytes');
+        debugPrint('EnhancedTtsServiceRobust: Audio file generation started: $audioPath');
 
-          if (fileSize < 44) {
+        // CRITICAL FIX: Wait for the file to be completely written
+        // synthesizeToFile() returns immediately after starting, but file writing happens asynchronously
+        // We must poll until the file has actual content (> 44 bytes for WAV header + data)
+        bool fileReady = false;
+        int attempts = 0;
+        const maxAttempts = 30; // 30 seconds timeout (should complete in 1-3 seconds)
+        const checkInterval = Duration(milliseconds: 100); // Check every 100ms
+
+        while (!fileReady && attempts < maxAttempts) {
+          await Future.delayed(checkInterval);
+          attempts++;
+
+          final file = File(audioPath);
+          if (await file.exists()) {
+            final fileSize = await file.length();
             debugPrint(
-                'EnhancedTtsServiceRobust: Warning - Generated file is too small ($fileSize bytes)');
-            // Don't return null, let the robust service handle it
+                'EnhancedTtsServiceRobust: File check attempt $attempts - Size: $fileSize bytes');
+
+            // File must have at least 44 bytes (WAV header) plus some audio data
+            // A typical TTS file for a short sentence is 10-50KB
+            if (fileSize > 44) {
+              // CRITICAL: Verify the file is a valid WAV file by checking header
+              try {
+                final fileBytes = await file.readAsBytes();
+                if (fileBytes.length >= 44) {
+                  // Check for RIFF header
+                  final riffHeader = String.fromCharCodes(fileBytes.sublist(0, 4));
+                  final waveHeader = fileBytes.length >= 12 
+                      ? String.fromCharCodes(fileBytes.sublist(8, 12))
+                      : '';
+                  
+                  if (riffHeader == 'RIFF' && waveHeader == 'WAVE') {
+                    // Valid WAV file - ensure it's fully written by checking file size stability
+                    // Wait a bit more to ensure file is completely flushed
+                    await Future.delayed(const Duration(milliseconds: 100));
+                    
+                    // Re-check file size to ensure it didn't change (file is stable)
+                    final stableSize = await file.length();
+                    if (stableSize == fileSize && stableSize > 44) {
+                      fileReady = true;
+                      debugPrint(
+                          'EnhancedTtsServiceRobust: ✅ Mono audio file generated successfully: $audioPath');
+                      debugPrint('EnhancedTtsServiceRobust: Final file size: $stableSize bytes');
+                      debugPrint('EnhancedTtsServiceRobust: ✅ Valid WAV file (RIFF/WAVE headers confirmed)');
+                      return audioPath;
+                    } else {
+                      debugPrint(
+                          'EnhancedTtsServiceRobust: File size changed ($fileSize → $stableSize), waiting for stability...');
+                    }
+                  } else {
+                    debugPrint(
+                        'EnhancedTtsServiceRobust: Invalid WAV header (RIFF=$riffHeader, WAVE=$waveHeader), waiting...');
+                  }
+                }
+              } catch (e) {
+                debugPrint('EnhancedTtsServiceRobust: Error validating WAV file: $e');
+                // Continue waiting
+              }
+            }
+          } else {
+            debugPrint(
+                'EnhancedTtsServiceRobust: File check attempt $attempts - File does not exist yet');
           }
 
-          return audioPath;
-        } else {
-          debugPrint('EnhancedTtsServiceRobust: File was not created');
-          return null;
+          // Log progress every 10 attempts (1 second)
+          if (attempts % 10 == 0) {
+            debugPrint(
+                'EnhancedTtsServiceRobust: Still waiting for TTS file to be written... (attempt $attempts/$maxAttempts)');
+          }
         }
+
+        // Timeout - file didn't get written
+        debugPrint(
+            'EnhancedTtsServiceRobust: ❌ Audio file generation timeout after $maxAttempts attempts');
+        debugPrint('EnhancedTtsServiceRobust: File path: $audioPath');
+        
+        // Check final file size
+        final file = File(audioPath);
+        if (await file.exists()) {
+          final finalSize = await file.length();
+          debugPrint('EnhancedTtsServiceRobust: Final file size at timeout: $finalSize bytes');
+          if (finalSize > 44) {
+            // File was written but we didn't catch it - return it anyway
+            debugPrint('EnhancedTtsServiceRobust: ✅ File has content, returning path');
+            return audioPath;
+          }
+        }
+        
+        return null;
       } else {
         debugPrint(
-            'EnhancedTtsServiceRobust: Failed to generate mono audio file (result: $result)');
+            'EnhancedTtsServiceRobust: ❌ Failed to generate mono audio file (result: $result)');
         return null;
       }
     } catch (e) {

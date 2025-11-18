@@ -61,7 +61,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   // Speaker-specific languages (fixed to 2 speakers)
   Map<int, Language> _speakerLanguages = {};
   final int _numberOfSpeakers = 2;
-  bool _showSpeakerSetup = true;
+  bool _showSpeakerSetup = false; // Skip setup screen, settings are in headers now
 
   // Speaker gender and earpiece configuration
   Map<int, String> _speakerGenders = {}; // 0: 'male', 1: 'female'
@@ -71,9 +71,12 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   bool _isRecording = false;
   bool _isProcessing = false;
   bool _isStartingSession = false;
+  bool _isRealtimeListeningPaused = false; // Mic paused while playback is running
+  bool _isPlaybackInProgress = false; // Playback actively running
+  bool _isTranslationInProgress = false; // Translation+TTS+Playback in progress (prevents concurrent processing)
 
   // Real-time translation mode (NEW)
-  bool _isRealtimeMode = false; // Toggle between manual and real-time mode
+  bool _isRealtimeMode = true; // Real-time mode enabled by default
   final SonioxRealtimeService _sonioxService = SonioxRealtimeService();
   final StreamingAudioRecorderService _streamingRecorder = StreamingAudioRecorderService();
   StreamSubscription<SonioxResult>? _sonioxStreamSubscription;
@@ -93,9 +96,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   String? _speaker2TtsAudioPath; // Speaker 2's translated text as audio
   String? _cachedStereoAudioPath; // Cached stereo audio file path
 
-  // API optimization: Store Voice 2's inferred language (no need to test both)
-  String?
-      _voice2InferredLanguage; // Voice 2's language inferred from Voice 1's detection
+  // API optimization: Store Voice 1's transcription from detection phase
   Map<String, dynamic>?
       _voice1CachedTranscription; // Store Voice 1's transcription from detection phase
 
@@ -118,7 +119,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   // Automatic translation system state
   bool _isAutomaticMode = false;
-  bool _isContinuousRecording = false;
   double _currentSoundLevel = 0.0;
   List<double> _soundLevelHistory = [];
   Timer? _silentDetectionTimer;
@@ -174,6 +174,13 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     const Color(0xFFE91E63), // Pink
   ];
 
+  // Scroll controllers for auto-scrolling to latest content in each speaker section
+  // Each speaker has separate controllers for transcription and translation
+  final ScrollController _speaker1TranscriptionScrollController = ScrollController();
+  final ScrollController _speaker1TranslationScrollController = ScrollController();
+  final ScrollController _speaker2TranscriptionScrollController = ScrollController();
+  final ScrollController _speaker2TranslationScrollController = ScrollController();
+
   bool _isInitialized = false;
 
   @override
@@ -184,17 +191,48 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _initializeAnimations();
   }
 
-  // Platform-channel helper: force phone mic even if BT/TWS connected
-  static const MethodChannel _audioRouteChannel = MethodChannel('audio_route');
-  Future<void> _forcePhoneMic() async {
-    try {
-      await _audioRouteChannel.invokeMethod('forcePhoneMic');
-      debugPrint('GoogleSTTTranslator: Forced phone mic via platform channel');
-    } catch (e) {
-      debugPrint('GoogleSTTTranslator: Failed to force phone mic: $e');
+
+  /// Auto-scroll to bottom of speaker section when new content is added
+  void _autoScrollToBottom(int speakerIndex, {bool isTranslation = false}) {
+    final transcriptionController = speakerIndex == 0 
+        ? _speaker1TranscriptionScrollController 
+        : _speaker2TranscriptionScrollController;
+    final translationController = speakerIndex == 0 
+        ? _speaker1TranslationScrollController 
+        : _speaker2TranslationScrollController;
+    
+    final controller = isTranslation ? translationController : transcriptionController;
+    
+    if (controller.hasClients) {
+      // Use a small delay to ensure the content is rendered
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (controller.hasClients) {
+          controller.animateTo(
+            controller.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
+    }
+    
+    // Also scroll the other section if it has content
+    final otherController = isTranslation ? transcriptionController : translationController;
+    if (otherController.hasClients) {
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (otherController.hasClients && otherController.position.maxScrollExtent > 0) {
+          otherController.animateTo(
+            otherController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOut,
+          );
+        }
+      });
     }
   }
 
+  // Platform-channel helper: force phone mic even if BT/TWS connected
+  static const MethodChannel _audioRouteChannel = MethodChannel('audio_route');
   Future<void> _enterRecordingRoute() async {
     try {
       await _audioRouteChannel.invokeMethod('enterRecordingRoute');
@@ -252,6 +290,33 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       // No initialization needed - uses backend API
       await _ttsService.initialize();
       await _stereoTtsService.initialize();
+
+      // CRITICAL: Configure sound effect player to use Bluetooth/TWS audio
+      // This ensures beeps play through the same output as TTS (stereo TWS headset)
+      try {
+        await _soundEffectPlayer.setAudioContext(
+          AudioContext(
+            android: AudioContextAndroid(
+              isSpeakerphoneOn: false,
+              stayAwake: true,
+              contentType: AndroidContentType.music,
+              usageType: AndroidUsageType.media,
+              audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+            ),
+            iOS: AudioContextIOS(
+              category: AVAudioSessionCategory.playback,
+              options: {
+                AVAudioSessionOptions.allowBluetooth,
+                AVAudioSessionOptions.allowBluetoothA2DP,
+                AVAudioSessionOptions.mixWithOthers,
+              },
+            ),
+          ),
+        );
+        debugPrint('GoogleSTTTranslator: ✅ Sound effect player configured for Bluetooth/TWS output');
+      } catch (e) {
+        debugPrint('GoogleSTTTranslator: ⚠️ Failed to configure sound effect player: $e');
+      }
 
       // Set up TTS service callbacks for UI state synchronization
       _ttsService.setPlaybackCompletedCallback(() {
@@ -506,6 +571,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
       setState(() {
         _isRecording = true;
+        _isRealtimeListeningPaused = false;
         // Clear previous results
         _speaker1AudioPath = null;
         _speaker2AudioPath = null;
@@ -563,6 +629,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       setState(() {
         _isRecording = false;
         _isProcessing = true;
+        _isRealtimeListeningPaused = false;
       });
 
       _pulseController.stop();
@@ -577,6 +644,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       setState(() {
         _isRecording = false;
         _isProcessing = false;
+        _isRealtimeListeningPaused = false;
       });
     }
   }
@@ -600,6 +668,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       setState(() {
         _isRecording = true;
         _isProcessing = false;
+        _isRealtimeListeningPaused = false;
         // Clear previous results
         _speaker1AudioPath = null;
         _speaker2AudioPath = null;
@@ -827,9 +896,124 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     debugPrint('GoogleSTTTranslator: ✅ Audio file polling started');
   }
 
+  /// Pause real-time listening so playback can take exclusive audio focus
+  /// OPTIMIZED: Reduced latency by parallelizing operations and minimizing delays
+  Future<bool> _pauseRealtimeListeningForPlayback() async {
+    if (!_isRealtimeMode) {
+      return false;
+    }
+
+    if (!_isRecording || _isRealtimeListeningPaused) {
+      // Already paused or not actively recording
+      return _isRealtimeListeningPaused;
+    }
+
+    debugPrint('GoogleSTTTranslator: ⏸️ Pausing real-time listening for playback...');
+
+    // OPTIMIZATION: Stop polling and recording in parallel
+    _audioPollingTimer?.cancel();
+    _audioPollingTimer = null;
+    _lastReadPosition = 44;
+
+    // Execute stop recording and route switch in parallel
+    final stopRecordingFuture = _nativeRecorder.stopRecording().catchError((e) {
+      debugPrint('GoogleSTTTranslator: ⚠️ Error pausing native recorder: $e');
+      return null;
+    });
+
+    final routeSwitchFuture = _enterPlaybackRoute().catchError((e) {
+      debugPrint('GoogleSTTTranslator: ⚠️ Error switching to playback route: $e');
+    });
+
+    // Wait for both operations in parallel
+    await Future.wait([stopRecordingFuture, routeSwitchFuture]);
+
+    _recordedAudioPath = null;
+
+    setState(() {
+      _isRecording = false;
+      _isRealtimeListeningPaused = true;
+    });
+
+    // Play stop sound after state is updated (non-blocking)
+    _playStopRecordingSound().catchError((e) {
+      debugPrint('GoogleSTTTranslator: ⚠️ Unable to play pause notification sound: $e');
+    });
+
+    debugPrint('GoogleSTTTranslator: ✅ Paused listening (optimized)');
+    return true;
+  }
+
+  /// Resume microphone capture after playback finishes
+  /// OPTIMIZED: Reduced latency by parallelizing operations and minimizing delays
+  Future<void> _resumeRealtimeListeningAfterPlayback() async {
+    if (!_isRealtimeMode || !_isRealtimeListeningPaused) {
+      return;
+    }
+
+    // CRITICAL: Wait for playback to completely finish
+    if (_isPlaybackInProgress) {
+      debugPrint('GoogleSTTTranslator: ⚠️ Playback still in progress, waiting...');
+      int attempts = 0;
+      while (_isPlaybackInProgress && attempts < 50) { // Max 5 seconds
+        await Future.delayed(const Duration(milliseconds: 100));
+        attempts++;
+      }
+      if (_isPlaybackInProgress) {
+        debugPrint('GoogleSTTTranslator: ⚠️ Timeout waiting for playback to finish');
+      }
+    }
+
+    debugPrint('GoogleSTTTranslator: ▶️ Resuming real-time listening after playback...');
+
+    // OPTIMIZATION: Prepare recording path while playing start sound
+    final directory = await getApplicationDocumentsDirectory();
+    final timestamp = DateTime.now().millisecondsSinceEpoch;
+    _recordedAudioPath = '${directory.path}/realtime_recording_$timestamp.wav';
+
+    // OPTIMIZATION: Play start beep and switch route in parallel
+    final soundFuture = _playStartRecordingSound().catchError((e) {
+      debugPrint('GoogleSTTTranslator: ⚠️ Unable to play resume notification sound: $e');
+    });
+
+    final routeFuture = _enterRecordingRoute().catchError((e) {
+      debugPrint('GoogleSTTTranslator: ⚠️ Failed to enter recording route: $e');
+    });
+
+    // Wait for both to complete
+    await Future.wait([soundFuture, routeFuture]);
+
+    // OPTIMIZATION: Reduced delay - route switching is faster now
+    await Future.delayed(const Duration(milliseconds: 100)); // Reduced from 200ms
+
+    // Start native recording
+    final bool recordingStarted =
+        await _nativeRecorder.startRecording(_recordedAudioPath!);
+
+    if (!recordingStarted) {
+      debugPrint('GoogleSTTTranslator: ❌ Failed to resume native recorder after playback');
+      _showErrorDialog(
+          'Failed to resume microphone after playback. Please restart the real-time session.');
+      return;
+    }
+
+    _lastReadPosition = 44;
+    _audioPollingTimer?.cancel();
+    _audioPollingTimer = null;
+
+    setState(() {
+      _isRecording = true;
+      _isRealtimeListeningPaused = false;
+    });
+
+    _startAudioFilePolling();
+
+    debugPrint('GoogleSTTTranslator: ✅ Real-time listening resumed (optimized)');
+  }
+
   /// Handle Soniox real-time results (Transcription + Diarization ONLY)
   /// Translation will be done separately via Azure API
-  void _handleSonioxResult(SonioxResult result) {
+  Future<void> _handleSonioxResult(SonioxResult result) async {
     try {
       debugPrint('GoogleSTTTranslator: ═══ Soniox Transcription Result ═══');
       debugPrint('GoogleSTTTranslator: Tokens count: ${result.tokens.length}');
@@ -875,7 +1059,10 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       }
 
       // Process each speaker's transcription
-      transcriptionTexts.forEach((sonioxSpeakerId, transcriptionText) {
+      // CRITICAL: Use for loop instead of forEach to support async/await
+      for (final entry in transcriptionTexts.entries) {
+        final sonioxSpeakerId = entry.key;
+        final transcriptionText = entry.value;
         final detectedLanguage = transcriptionLanguages[sonioxSpeakerId] ?? '';
         final isFinal = hasFinalized[sonioxSpeakerId] ?? false;
         
@@ -916,32 +1103,39 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               _transcriptions[uiSpeakerIndex] = _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ?? '';
             });
             debugPrint('GoogleSTTTranslator: ✅ UI updated with transcription for UI Speaker $uiSpeakerIndex');
+            // Auto-scroll to latest content (transcription)
+            _autoScrollToBottom(uiSpeakerIndex, isTranslation: false);
           }
 
-          // Translate using Azure API and generate TTS
+          // Translate using Azure API and generate TTS (ONLY FOR FINAL)
+          // CRITICAL: AWAIT this to ensure playback finishes before resuming recording
           if (transcriptionText.isNotEmpty) {
             debugPrint('GoogleSTTTranslator: 🌐 Translating via Azure API...');
-            _translateAndPlayRealtimeTts(
+            await _translateAndPlayRealtimeTts(
               speakerIndex: uiSpeakerIndex,
               transcribedText: transcriptionText.trim(),
               sourceLanguage: detectedLanguage,
             );
           }
         } else {
-          // Non-final (interim) results: Show transcription temporarily
+          // Non-final (interim) results: Show interim text WITHOUT adding to buffer
+          // CRITICAL FIX: Don't append interim results, just display them temporarily
           if (mounted) {
             final accumulatedTranscription = _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ?? '';
-            final interimTranscription = transcriptionText.isNotEmpty
+            // Show accumulated + current interim (but don't save interim to buffer)
+            final displayText = accumulatedTranscription.isNotEmpty && transcriptionText.isNotEmpty
                 ? '$accumulatedTranscription $transcriptionText'
-                : accumulatedTranscription;
+                : (transcriptionText.isNotEmpty ? transcriptionText : accumulatedTranscription);
 
             setState(() {
-              _transcriptions[uiSpeakerIndex] = interimTranscription.trim();
+              _transcriptions[uiSpeakerIndex] = displayText.trim();
             });
-            debugPrint('GoogleSTTTranslator: ✅ UI updated with INTERIM transcription for UI Speaker $uiSpeakerIndex');
+            debugPrint('GoogleSTTTranslator: ✅ UI updated with INTERIM transcription for UI Speaker $uiSpeakerIndex (not saved to buffer)');
+            // Auto-scroll to latest content (transcription)
+            _autoScrollToBottom(uiSpeakerIndex, isTranslation: false);
           }
         }
-      });
+      }
     } catch (e) {
       debugPrint('GoogleSTTTranslator: ❌ Error handling Soniox result: $e');
       debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
@@ -1029,6 +1223,14 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     required String transcribedText,
     required String sourceLanguage,
   }) async {
+    // CRITICAL: Prevent concurrent translation+playback
+    if (_isTranslationInProgress) {
+      debugPrint('GoogleSTTTranslator: ⚠️ Translation already in progress, skipping this request');
+      return;
+    }
+
+    _isTranslationInProgress = true;
+    
     try {
       debugPrint('GoogleSTTTranslator: ═══ Azure Translation + TTS ═══');
       debugPrint('GoogleSTTTranslator: Initial speaker: $speakerIndex');
@@ -1101,11 +1303,16 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint('GoogleSTTTranslator: Actual source language: $actualSourceLanguage');
       debugPrint('GoogleSTTTranslator: Actual transcribed text: "$actualTranscribedText"');
 
-      // Update transcription for the ACTUAL speaker
-      if (_realtimeTranscriptions[actualSpeakerIndex]!.isNotEmpty) {
-        _realtimeTranscriptions[actualSpeakerIndex]!.write(' ');
+      // CRITICAL FIX: Don't write transcription here - it's already written in _handleSonioxResult
+      // Only write if this is a corrected speaker (phonetic case)
+      if (isPhonetic && actualSpeakerIndex != speakerIndex) {
+        // Update transcription for the corrected ACTUAL speaker
+        if (_realtimeTranscriptions[actualSpeakerIndex]!.isNotEmpty) {
+          _realtimeTranscriptions[actualSpeakerIndex]!.write(' ');
+        }
+        _realtimeTranscriptions[actualSpeakerIndex]!.write(actualTranscribedText);
+        debugPrint('GoogleSTTTranslator: ✅ Transcription written to corrected speaker buffer');
       }
-      _realtimeTranscriptions[actualSpeakerIndex]!.write(actualTranscribedText);
 
       // Determine target speaker and language for translation
       final targetSpeakerIndex = actualSpeakerIndex == 0 ? 1 : 0;
@@ -1134,21 +1341,27 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       final translatedText = translationResult.translatedText;
       debugPrint('GoogleSTTTranslator: ✅ Azure translation: "$translatedText"');
 
-      // Update translation for the ACTUAL speaker
+      // Update translation buffer for the ACTUAL speaker
       if (_realtimeTranslations[actualSpeakerIndex]!.isNotEmpty) {
         _realtimeTranslations[actualSpeakerIndex]!.write(' ');
       }
       _realtimeTranslations[actualSpeakerIndex]!.write(translatedText);
 
-      // Update UI
+      // Update UI with translation (transcription was already updated in _handleSonioxResult)
       if (mounted) {
         setState(() {
-          _transcriptions[actualSpeakerIndex] = _realtimeTranscriptions[actualSpeakerIndex]?.toString().trim() ?? '';
+          // Only update translation here, transcription is already set
           _translations[actualSpeakerIndex] = _realtimeTranslations[actualSpeakerIndex]?.toString().trim() ?? '';
+          // Update transcription only if speaker was corrected (phonetic case)
+          if (isPhonetic && actualSpeakerIndex != speakerIndex) {
+            _transcriptions[actualSpeakerIndex] = _realtimeTranscriptions[actualSpeakerIndex]?.toString().trim() ?? '';
+          }
         });
         debugPrint('GoogleSTTTranslator: ✅ UI updated for Speaker $actualSpeakerIndex');
         debugPrint('GoogleSTTTranslator: Speaker $actualSpeakerIndex transcription: "${_transcriptions[actualSpeakerIndex]}"');
         debugPrint('GoogleSTTTranslator: Speaker $actualSpeakerIndex translation: "${_translations[actualSpeakerIndex]}"');
+        // Auto-scroll to latest content (translation)
+        _autoScrollToBottom(actualSpeakerIndex, isTranslation: true);
       }
 
       // Generate and play TTS for the TARGET speaker
@@ -1187,10 +1400,15 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     } catch (e) {
       debugPrint('GoogleSTTTranslator: ❌ Translation + TTS error: $e');
       debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
+    } finally {
+      // CRITICAL: Always release the lock
+      _isTranslationInProgress = false;
+      debugPrint('GoogleSTTTranslator: ✅ Translation lock released');
     }
   }
 
-  /// Play TTS audio with stereo routing in real-time
+  /// Play TTS audio with stereo routing in real-time.
+  /// Recording pauses during playback and resumes afterwards.
   Future<void> _playRealtimeTtsWithStereo({
     required int speakerIndex,
     required int targetSpeakerIndex,
@@ -1198,18 +1416,26 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     required String earpiece,
   }) async {
     try {
-      debugPrint('GoogleSTTTranslator: ═══ Playing TTS with Stereo Routing ═══');
+      debugPrint('GoogleSTTTranslator: ═══ Playing TTS with Stereo Routing (REAL-TIME MODE) ═══');
       debugPrint('GoogleSTTTranslator: Speaker: $speakerIndex');
       debugPrint('GoogleSTTTranslator: Target speaker: $targetSpeakerIndex');
       debugPrint('GoogleSTTTranslator: Earpiece: $earpiece');
       debugPrint('GoogleSTTTranslator: TTS path: $ttsPath');
+      debugPrint('GoogleSTTTranslator: ⚠️ Mic will pause during playback to avoid interference');
 
-      // Switch to playback route
-      await _enterPlaybackRoute();
-      await Future.delayed(const Duration(milliseconds: 300));
+      // Set playback in progress flag BEFORE pausing
+      _isPlaybackInProgress = true;
+
+      if (_isRealtimeMode) {
+        await _pauseRealtimeListeningForPlayback();
+      }
+
+      // OPTIMIZATION: Reduced delay - route switching is handled in pause method
+      if (_isRealtimeMode) {
+        await Future.delayed(const Duration(milliseconds: 150)); // Reduced from 300ms
+      }
 
       // Generate stereo audio file with TTS routed to correct earpiece
-      final tempDir = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
 
       debugPrint('GoogleSTTTranslator: Creating stereo audio with routing...');
@@ -1248,7 +1474,15 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         setState(() => _isPlayingTts2 = true);
       }
 
+      debugPrint('GoogleSTTTranslator: 🔊 Starting playback (mic paused)...');
+      
+      // CRITICAL: Wait for playback to COMPLETE before proceeding
       await _stereoTtsService.playStereoAudio(stereoPath);
+      
+      debugPrint('GoogleSTTTranslator: ✅ TTS playback completed');
+      
+      // OPTIMIZATION: Reduced delay - audio hardware finishes faster
+      await Future.delayed(const Duration(milliseconds: 150)); // Reduced from 300ms
 
       if (mounted) {
         setState(() {
@@ -1257,10 +1491,12 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         });
       }
 
-      debugPrint('GoogleSTTTranslator: ✅ TTS playback completed');
-
-      // Clean up temporary files
+      // CRITICAL: Clean up temporary files AFTER playback is completely finished
+      // This prevents file deletion while audio is still playing
+      // OPTIMIZATION: Reduced delay - files can be cleaned up faster
       try {
+        await Future.delayed(const Duration(milliseconds: 100)); // Reduced from 200ms
+        
         final stereoFile = File(stereoPath);
         if (await stereoFile.exists()) {
           await stereoFile.delete();
@@ -1274,15 +1510,15 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             debugPrint('GoogleSTTTranslator: ✅ Cleaned up temporary silent file');
           }
         }
+        
+        // Also clean up the original TTS file
+        final ttsFile = File(ttsPath);
+        if (await ttsFile.exists()) {
+          await ttsFile.delete();
+          debugPrint('GoogleSTTTranslator: ✅ Cleaned up original TTS file');
+        }
       } catch (e) {
         debugPrint('GoogleSTTTranslator: ⚠️ Failed to delete temporary files: $e');
-      }
-
-      // Switch back to recording route if still recording
-      if (_isRecording && _isRealtimeMode) {
-        await Future.delayed(const Duration(milliseconds: 200));
-        await _enterRecordingRoute();
-        debugPrint('GoogleSTTTranslator: ✅ Switched back to recording route');
       }
     } catch (e) {
       debugPrint('GoogleSTTTranslator: ❌ TTS playback error: $e');
@@ -1293,6 +1529,16 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           _isPlayingTts2 = false;
         });
       }
+    } finally {
+      // Clear playback in progress flag BEFORE resuming
+      _isPlaybackInProgress = false;
+      
+      // Don't switch routes here - let _resumeRealtimeListeningAfterPlayback handle it
+      // This ensures the start beep plays in playback mode (TWS) before switching to recording
+      
+      if (_isRealtimeListeningPaused) {
+        await _resumeRealtimeListeningAfterPlayback();
+      }
     }
   }
 
@@ -1300,6 +1546,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   Future<String?> _createMatchingSilentAudioFile(String referenceAudioPath) async {
     try {
       debugPrint('GoogleSTTTranslator: Creating silent audio file...');
+      debugPrint('GoogleSTTTranslator: Reference file: $referenceAudioPath');
       
       // Read reference audio file to get duration
       final refFile = File(referenceAudioPath);
@@ -1308,31 +1555,122 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         return null;
       }
       
+      // CRITICAL FIX: Wait a bit and verify file is stable before reading
+      // This ensures the file is fully written and flushed to disk
+      await Future.delayed(const Duration(milliseconds: 100));
+      
+      // Verify file size is stable
+      final initialSize = await refFile.length();
+      await Future.delayed(const Duration(milliseconds: 50));
+      final stableSize = await refFile.length();
+      
+      if (initialSize != stableSize) {
+        debugPrint('GoogleSTTTranslator: ⚠️ File size changed ($initialSize → $stableSize), waiting...');
+        await Future.delayed(const Duration(milliseconds: 200));
+      }
+      
       final refBytes = await refFile.readAsBytes();
+      debugPrint('GoogleSTTTranslator: Read ${refBytes.length} bytes from reference file');
       
       // WAV file header is 44 bytes
       // Data size is in bytes 40-43 (little-endian)
       if (refBytes.length < 44) {
-        debugPrint('GoogleSTTTranslator: ❌ Reference audio file is too small');
+        debugPrint('GoogleSTTTranslator: ❌ Reference audio file is too small (${refBytes.length} bytes)');
         return null;
       }
       
-      // Get audio data size from WAV header
-      final dataSize = refBytes[40] | 
-                      (refBytes[41] << 8) | 
-                      (refBytes[42] << 16) | 
-                      (refBytes[43] << 24);
+      // CRITICAL: Validate WAV file header
+      final riffHeader = String.fromCharCodes(refBytes.sublist(0, 4));
+      final waveHeader = refBytes.length >= 12 
+          ? String.fromCharCodes(refBytes.sublist(8, 12))
+          : '';
+      
+      if (riffHeader != 'RIFF') {
+        debugPrint('GoogleSTTTranslator: ❌ Invalid WAV file - missing RIFF header (found: $riffHeader)');
+        return null;
+      }
+      
+      if (waveHeader != 'WAVE') {
+        debugPrint('GoogleSTTTranslator: ❌ Invalid WAV file - missing WAVE header (found: $waveHeader)');
+        return null;
+      }
+      
+      debugPrint('GoogleSTTTranslator: ✅ Valid WAV file header confirmed (RIFF/WAVE)');
+      
+      // Find "data" chunk in WAV file
+      // Some WAV files have additional chunks before the data chunk
+      int dataChunkOffset = -1;
+      int dataSize = 0;
+      
+      // Search for "data" chunk (starts at byte 12 after RIFF header)
+      for (int i = 12; i < refBytes.length - 8; i++) {
+        if (i + 4 <= refBytes.length) {
+          final chunkId = String.fromCharCodes(refBytes.sublist(i, i + 4));
+          if (chunkId == 'data') {
+            dataChunkOffset = i + 4;
+            // Read data chunk size (4 bytes, little-endian)
+            if (dataChunkOffset + 4 <= refBytes.length) {
+              dataSize = refBytes[dataChunkOffset] | 
+                         (refBytes[dataChunkOffset + 1] << 8) | 
+                         (refBytes[dataChunkOffset + 2] << 16) | 
+                         (refBytes[dataChunkOffset + 3] << 24);
+              debugPrint('GoogleSTTTranslator: Found data chunk at offset $dataChunkOffset');
+              debugPrint('GoogleSTTTranslator: Data chunk size: $dataSize bytes');
+              break;
+            }
+          }
+        }
+      }
+      
+      // Fallback: Use bytes 40-43 if data chunk not found (standard WAV format)
+      if (dataSize == 0 || dataChunkOffset == -1) {
+        debugPrint('GoogleSTTTranslator: ⚠️ Data chunk not found, using standard header location');
+        dataSize = refBytes[40] | 
+                   (refBytes[41] << 8) | 
+                   (refBytes[42] << 16) | 
+                   (refBytes[43] << 24);
+      }
       
       debugPrint('GoogleSTTTranslator: Reference audio data size: $dataSize bytes');
+      
+      if (dataSize <= 0) {
+        debugPrint('GoogleSTTTranslator: ❌ Invalid data size ($dataSize bytes)');
+        // Calculate data size from file size if header is wrong
+        dataSize = refBytes.length - 44;
+        debugPrint('GoogleSTTTranslator: ⚠️ Using calculated data size: $dataSize bytes (file size - header)');
+      }
+      
+      if (dataSize <= 0) {
+        debugPrint('GoogleSTTTranslator: ❌ Cannot create silent file - invalid data size');
+        return null;
+      }
       
       // Create silent audio file with same size
       final tempDir = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final silentPath = '${tempDir.path}/silent_$timestamp.wav';
       
-      // Copy WAV header from reference file
+      // Copy WAV header from reference file (first 44 bytes)
       final silentBytes = Uint8List(44 + dataSize);
-      silentBytes.setAll(0, refBytes.sublist(0, 44));
+      if (refBytes.length >= 44) {
+        silentBytes.setAll(0, refBytes.sublist(0, 44));
+      } else {
+        debugPrint('GoogleSTTTranslator: ❌ Cannot copy header - file too small');
+        return null;
+      }
+      
+      // Update file size in RIFF header (bytes 4-7)
+      final totalFileSize = 36 + dataSize; // 36 = WAV header size minus RIFF size field
+      silentBytes[4] = totalFileSize & 0xFF;
+      silentBytes[5] = (totalFileSize >> 8) & 0xFF;
+      silentBytes[6] = (totalFileSize >> 16) & 0xFF;
+      silentBytes[7] = (totalFileSize >> 24) & 0xFF;
+      
+      // Update data chunk size in header (bytes 40-43)
+      silentBytes[40] = dataSize & 0xFF;
+      silentBytes[41] = (dataSize >> 8) & 0xFF;
+      silentBytes[42] = (dataSize >> 16) & 0xFF;
+      silentBytes[43] = (dataSize >> 24) & 0xFF;
       
       // Fill audio data with zeros (silence)
       for (int i = 44; i < silentBytes.length; i++) {
@@ -1343,49 +1681,21 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       final silentFile = File(silentPath);
       await silentFile.writeAsBytes(silentBytes);
       
+      // Verify the file was written correctly
+      final writtenSize = await silentFile.length();
       debugPrint('GoogleSTTTranslator: ✅ Silent audio file created: $silentPath');
+      debugPrint('GoogleSTTTranslator: Silent file size: $writtenSize bytes (expected: ${silentBytes.length})');
+      
+      if (writtenSize != silentBytes.length) {
+        debugPrint('GoogleSTTTranslator: ⚠️ Silent file size mismatch!');
+      }
+      
       return silentPath;
     } catch (e) {
       debugPrint('GoogleSTTTranslator: ❌ Error creating silent audio: $e');
+      debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
       return null;
     }
-  }
-
-  /// Toggle between manual and real-time mode
-  void _toggleTranslationMode() {
-    setState(() {
-      _isRealtimeMode = !_isRealtimeMode;
-    });
-    
-    debugPrint('GoogleSTTTranslator: Mode switched to: ${_isRealtimeMode ? "REAL-TIME" : "MANUAL"}');
-    
-    // Show mode info
-    final mode = _isRealtimeMode ? 'Real-time Mode' : 'Manual Mode';
-    final description = _isRealtimeMode
-        ? 'Continuous translation without stop button'
-        : 'Press stop to process translation';
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              mode,
-              style: const TextStyle(
-                fontWeight: FontWeight.bold,
-                fontSize: 16,
-              ),
-            ),
-            const SizedBox(height: 4),
-            Text(description),
-          ],
-        ),
-        backgroundColor: _isRealtimeMode ? Colors.purple : Colors.blue,
-        duration: const Duration(seconds: 3),
-      ),
-    );
   }
 
   Future<void> _processAudio() async {
@@ -2432,188 +2742,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     return bestLanguage ?? preferredLanguages[0];
   }
 
-  /// Detect language of a diarized voice by testing both languages and picking the best result
-  Future<Map<String, dynamic>> _detectVoiceLanguage(
-      String audioPath, List<String> preferredLanguages) async {
-    try {
-      final file = File(audioPath);
-      if (!await file.exists()) {
-        debugPrint(
-            'GoogleSTTTranslator: Audio file does not exist: $audioPath');
-        return {'language': null, 'confidence': 0.0, 'text': null};
-      }
-
-      final audioBytes = await file.readAsBytes();
-      if (audioBytes.isEmpty) {
-        debugPrint('GoogleSTTTranslator: Audio file is empty: $audioPath');
-        return {'language': null, 'confidence': 0.0, 'text': null};
-      }
-
-      debugPrint(
-          'GoogleSTTTranslator: Testing voice with both languages: $audioPath');
-      debugPrint(
-          'GoogleSTTTranslator: Preferred languages: $preferredLanguages');
-
-      // Test each preferred language and pick the best result
-      final Map<String, Map<String, dynamic>> languageResults = {};
-
-      for (final language in preferredLanguages) {
-        try {
-          debugPrint('GoogleSTTTranslator: Testing with language: $language');
-
-          final result = await _sttProvider.transcribeWithDiarization(
-            audioBytes: audioBytes,
-            languageCode: _mapLanguageToGoogleCode(language),
-            alternativeLanguages: [
-              _mapLanguageToGoogleCode(language),
-              _mapLanguageToGoogleCode(preferredLanguages[1]),
-            ],
-            minSpeakers: 1,
-            maxSpeakers: 1,
-          );
-
-          if (result != null) {
-            final text = result.fullTranscript.isNotEmpty
-                ? result.fullTranscript
-                : result.segments.map((s) => s.text).join(' ');
-            final avgConfidence = result.segments.isNotEmpty
-                ? result.segments
-                        .map((s) => s.confidence)
-                        .reduce((a, b) => a + b) /
-                    result.segments.length
-                : 0.0;
-
-            languageResults[language] = {
-              'text': text,
-              'confidence': avgConfidence,
-              'segmentCount': result.segments.length,
-              'textLength': text.length,
-            };
-
-            debugPrint('GoogleSTTTranslator: Language $language result:');
-            debugPrint('  Text: "$text"');
-            debugPrint('  Avg Confidence: $avgConfidence');
-            debugPrint('  Segments: ${result.segments.length}');
-            debugPrint('  Text Length: ${text.length}');
-          }
-        } catch (e) {
-          debugPrint(
-              'GoogleSTTTranslator: Error testing language $language: $e');
-        }
-      }
-
-      // Find the best language based on confidence and text quality
-      String? bestLanguage;
-      double bestScore = 0.0;
-      String bestText = '';
-
-      for (final entry in languageResults.entries) {
-        final language = entry.key;
-        final result = entry.value;
-        final confidence = result['confidence'] as double;
-        final textLength = result['textLength'] as int;
-        final segmentCount = result['segmentCount'] as int;
-
-        // Calculate a composite score: confidence + text length bonus + segment count bonus
-        final score = confidence +
-            (textLength > 0 ? 0.1 : 0.0) +
-            (segmentCount > 0 ? 0.05 : 0.0);
-
-        debugPrint(
-            'GoogleSTTTranslator: Language $language score: $score (confidence: $confidence, length: $textLength, segments: $segmentCount)');
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestLanguage = language;
-          bestText = result['text'] as String;
-        }
-      }
-
-      debugPrint(
-          'GoogleSTTTranslator: Best language match: $bestLanguage (score: $bestScore)');
-      debugPrint('GoogleSTTTranslator: Best text: "$bestText"');
-
-      return {
-        'language': bestLanguage,
-        'confidence': bestScore,
-        'text': bestText,
-        'allResults': languageResults,
-      };
-    } catch (e) {
-      debugPrint(
-          'GoogleSTTTranslator: Language detection error for $audioPath: $e');
-      return {'language': null, 'confidence': 0.0, 'text': null};
-    }
-  }
-
-  /// Calculate language match score between detected and preferred language
-  double _calculateLanguageMatchScore(String detectedLanguage,
-      String preferredLanguage, double originalConfidence) {
-    // Normalize language codes
-    final detected = detectedLanguage.toLowerCase().trim();
-    final preferred = preferredLanguage.toLowerCase().trim();
-
-    debugPrint(
-        'GoogleSTTTranslator: Calculating match score: "$detected" vs "$preferred"');
-
-    // Extract primary language codes (e.g., 'en' from 'en-US')
-    final detectedPrimary = detected.split('-')[0].split('_')[0];
-    final preferredPrimary = preferred.split('-')[0].split('_')[0];
-
-    // Exact match - highest score
-    if (detected == preferred) {
-      debugPrint('GoogleSTTTranslator: Exact match: $detected');
-      return originalConfidence * 1.0;
-    }
-
-    // Primary language code match - high score
-    if (detectedPrimary == preferredPrimary) {
-      debugPrint('GoogleSTTTranslator: Primary code match: $detectedPrimary');
-      return originalConfidence * 0.9;
-    }
-
-    // Partial match - medium score
-    if (detected.contains(preferred) || preferred.contains(detected)) {
-      debugPrint(
-          'GoogleSTTTranslator: Partial match: $detected contains $preferred');
-      return originalConfidence * 0.8;
-    }
-
-    // Handle common language variations
-    final languageVariations = {
-      'en': ['english', 'eng', 'en-us', 'en-gb'],
-      'bn': ['bengali', 'bangla', 'ben', 'bn-bd', 'bn-in'],
-      'hi': ['hindi', 'hin', 'hi-in'],
-      'es': ['spanish', 'spa', 'es-es', 'es-mx'],
-      'fr': ['french', 'fra', 'fr-fr', 'fr-ca'],
-      'de': ['german', 'deu', 'de-de'],
-      'ja': ['japanese', 'jpn', 'ja-jp'],
-      'ko': ['korean', 'kor', 'ko-kr'],
-      'zh': ['chinese', 'chi', 'zh-cn', 'zh-tw'],
-      'ar': ['arabic', 'ara', 'ar-sa'],
-      'pt': ['portuguese', 'por', 'pt-br', 'pt-pt'],
-      'ru': ['russian', 'rus', 'ru-ru'],
-    };
-
-    // Check if detected language matches any variation of preferred language
-    for (final entry in languageVariations.entries) {
-      if (entry.key == preferredPrimary) {
-        for (final variation in entry.value) {
-          if (detected.contains(variation) ||
-              detectedPrimary.contains(variation)) {
-            debugPrint(
-                'GoogleSTTTranslator: Variation match: $detected matches $variation for $preferred');
-            return originalConfidence * 0.7;
-          }
-        }
-      }
-    }
-
-    // No match found - very low score
-    debugPrint('GoogleSTTTranslator: No match found: $detected vs $preferred');
-    return originalConfidence * 0.1;
-  }
-
   /// Assign speakers based on language detection results
   Future<Map<String, String>> _assignSpeakersByLanguage(String voice1Path,
       String voice2Path, List<String> preferredLanguages) async {
@@ -2698,9 +2826,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint(
           'GoogleSTTTranslator: 🚀 OPTIMIZATION: Will transcribe Voice 2 with inferred language ($voice2AssignedLanguage)');
       debugPrint('GoogleSTTTranslator: This will use 1 API call for Voice 2');
-
-      // Store the inferred language for Voice 2 (for reference, though we determine speaker from Voice 1 language)
-      _voice2InferredLanguage = voice2AssignedLanguage;
 
       debugPrint('GoogleSTTTranslator: ===== OPTIMIZATION COMPLETE =====');
       debugPrint('GoogleSTTTranslator: Total API calls used: 2 (Voice 1 only)');
@@ -3857,27 +3982,12 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   // Download dialogs removed - no model downloads needed with Azure Translator API
 
-  /// Start automatic translation mode
-  Future<void> _startAutomaticMode() async {
-    if (_isAutomaticMode) return;
-
-    setState(() {
-      _isAutomaticMode = true;
-    });
-
-    debugPrint('GoogleSTTTranslator: Starting automatic translation mode');
-
-    // Start the continuous translation loop
-    await _startContinuousTranslationLoop();
-  }
-
   /// Stop automatic translation mode
   Future<void> _stopAutomaticMode() async {
     if (!_isAutomaticMode) return;
 
     setState(() {
       _isAutomaticMode = false;
-      _isContinuousRecording = false;
     });
 
     // Stop any ongoing recording
@@ -3913,16 +4023,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     });
   }
 
-  /// Start continuous translation loop
-  Future<void> _startContinuousTranslationLoop() async {
-    if (!_isAutomaticMode) return;
-
-    debugPrint('GoogleSTTTranslator: Starting continuous translation loop');
-
-    // Start recording with sound level monitoring
-    await _startAutomaticRecording();
-  }
-
   /// Start automatic recording with sound level monitoring
   Future<void> _startAutomaticRecording() async {
     if (!_isAutomaticMode || _isRecording) return;
@@ -3939,7 +4039,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       // This prevents deleting TTS files that are still being used.
 
       setState(() {
-        _isContinuousRecording = true;
         _isRecording = true;
         _isSilentDetectionActive = false;
         _silentDetectionCountdown = 0;
@@ -4001,7 +4100,6 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       debugPrint('GoogleSTTTranslator: Error starting automatic recording: $e');
       setState(() {
         _isRecording = false;
-        _isContinuousRecording = false;
       });
     }
   }
@@ -4483,101 +4581,102 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     }
   }
 
-  /// Clean up files from previous cycle
-  Future<void> _cleanupPreviousCycleFiles() async {
-    try {
-      debugPrint('GoogleSTTTranslator: Cleaning up previous cycle files...');
-
-      int deletedCount = 0;
-
-      // NOTE: TTS files are cleaned up separately after stereo generation
-      // This prevents deleting files that are still being used
-
-      // Delete cached stereo audio file
-      if (_cachedStereoAudioPath != null) {
-        final stereoFile = File(_cachedStereoAudioPath!);
-        if (await stereoFile.exists()) {
-          await stereoFile.delete();
-          deletedCount++;
-          debugPrint(
-              'GoogleSTTTranslator: Deleted cached stereo: $_cachedStereoAudioPath');
-        }
-        _cachedStereoAudioPath = null;
-      }
-
-      // Delete previous speaker audio files from diarization
-      if (_speaker1AudioPath != null) {
-        final sp1File = File(_speaker1AudioPath!);
-        if (await sp1File.exists()) {
-          await sp1File.delete();
-          deletedCount++;
-        }
-        _speaker1AudioPath = null;
-      }
-
-      if (_speaker2AudioPath != null) {
-        final sp2File = File(_speaker2AudioPath!);
-        if (await sp2File.exists()) {
-          await sp2File.delete();
-          deletedCount++;
-        }
-        _speaker2AudioPath = null;
-      }
-
-      debugPrint(
-          'GoogleSTTTranslator: ✅ Cleaned up $deletedCount files from previous cycle');
-    } catch (e) {
-      debugPrint('GoogleSTTTranslator: Error cleaning up files: $e');
-      // Don't block new cycle if cleanup fails
-    }
-  }
-
-  /// Play start recording sound effect using system sound
   /// Play start recording sound effect
   /// Uses custom sound file if available, falls back to system sound
+  /// Ensures sound plays through TWS/Bluetooth headset
   Future<void> _playStartRecordingSound() async {
     try {
+      debugPrint('GoogleSTTTranslator: 🔊 Playing START recording beep...');
+      
+      // Ensure we're in playback mode for the beep
+      if (_isRealtimeMode) {
+        await _enterPlaybackRoute();
+        await Future.delayed(const Duration(milliseconds: 200)); // Wait for route to stabilize
+      }
+      
       // Try to play custom sound file first
       try {
-        await _soundEffectPlayer
-            .play(AssetSource('sounds/recording_start.mp3'));
-        debugPrint(
-            'GoogleSTTTranslator: ✅ Played START recording sound (custom)');
+        final completer = Completer<void>();
+        
+        // Listen for completion
+        final subscription = _soundEffectPlayer.onPlayerComplete.listen((event) {
+          if (!completer.isCompleted) completer.complete();
+        });
+        
+        await _soundEffectPlayer.play(AssetSource('sounds/recording_start.mp3'));
+        
+        // Wait for playback to complete (with timeout)
+        await completer.future.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {
+            debugPrint('GoogleSTTTranslator: ⚠️ Start beep playback timeout');
+          },
+        );
+        
+        await subscription.cancel();
+        debugPrint('GoogleSTTTranslator: ✅ Played START recording beep (custom) in TWS');
       } catch (e) {
         // Fallback to system sound if custom file not available
-        debugPrint(
-            'GoogleSTTTranslator: Custom sound not found, using system sound');
+        debugPrint('GoogleSTTTranslator: Custom sound not found, using system beep');
         SystemSound.play(SystemSoundType.click);
-        debugPrint(
-            'GoogleSTTTranslator: ✅ Played START recording sound (system click)');
+        await Future.delayed(const Duration(milliseconds: 100)); // Give system sound time to play
+        debugPrint('GoogleSTTTranslator: ✅ Played START recording beep (system)');
       }
+      
+      // Add small delay before switching to recording mode
+      await Future.delayed(const Duration(milliseconds: 150));
     } catch (e) {
-      debugPrint(
-          'GoogleSTTTranslator: ❌ Error playing start recording sound: $e');
+      debugPrint('GoogleSTTTranslator: ❌ Error playing start recording sound: $e');
       // Don't block recording if sound effect fails
     }
   }
 
   /// Play stop recording sound effect
   /// Uses custom sound file if available, falls back to system sound
+  /// Ensures sound plays through TWS/Bluetooth headset
   Future<void> _playStopRecordingSound() async {
     try {
+      debugPrint('GoogleSTTTranslator: 🔊 Playing STOP recording beep...');
+      
+      // Ensure we're in playback mode for the beep
+      if (_isRealtimeMode) {
+        await _enterPlaybackRoute();
+        await Future.delayed(const Duration(milliseconds: 200)); // Wait for route to stabilize
+      }
+      
       // Try to play custom sound file first
       try {
+        final completer = Completer<void>();
+        
+        // Listen for completion
+        final subscription = _soundEffectPlayer.onPlayerComplete.listen((event) {
+          if (!completer.isCompleted) completer.complete();
+        });
+        
         await _soundEffectPlayer.play(AssetSource('sounds/recording_stop.mp3'));
-        debugPrint(
-            'GoogleSTTTranslator: ✅ Played STOP recording sound (custom)');
+        
+        // Wait for playback to complete (with timeout)
+        await completer.future.timeout(
+          const Duration(seconds: 2),
+          onTimeout: () {
+            debugPrint('GoogleSTTTranslator: ⚠️ Stop beep playback timeout');
+          },
+        );
+        
+        await subscription.cancel();
+        debugPrint('GoogleSTTTranslator: ✅ Played STOP recording beep (custom) in TWS');
       } catch (e) {
         // Fallback to system sound if custom file not available
-        debugPrint(
-            'GoogleSTTTranslator: Custom sound not found, using system sound');
+        debugPrint('GoogleSTTTranslator: Custom sound not found, using system beep');
         SystemSound.play(SystemSoundType.alert);
-        debugPrint(
-            'GoogleSTTTranslator: ✅ Played STOP recording sound (system alert)');
+        await Future.delayed(const Duration(milliseconds: 100)); // Give system sound time to play
+        debugPrint('GoogleSTTTranslator: ✅ Played STOP recording beep (system)');
       }
+      
+      // Add small delay after beep before continuing
+      await Future.delayed(const Duration(milliseconds: 150));
     } catch (e) {
-      debugPrint(
-          'GoogleSTTTranslator: ❌ Error playing stop recording sound: $e');
+      debugPrint('GoogleSTTTranslator: ❌ Error playing stop recording sound: $e');
       // Don't block processing if sound effect fails
     }
   }
@@ -4608,6 +4707,12 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     _sonioxStreamSubscription?.cancel();
     _sonioxService.dispose();
     _streamingRecorder.dispose();
+
+    // Clean up scroll controllers
+    _speaker1TranscriptionScrollController.dispose();
+    _speaker1TranslationScrollController.dispose();
+    _speaker2TranscriptionScrollController.dispose();
+    _speaker2TranslationScrollController.dispose();
 
     super.dispose();
   }
@@ -4649,8 +4754,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     return Scaffold(
       backgroundColor: const Color(0xFF0A0E27),
       appBar: _buildAppBar(),
-      body:
-          _showSpeakerSetup ? _buildSpeakerSetupScreen() : _buildMainContent(),
+      body: _buildMainContent(),
     );
   }
 
@@ -4659,7 +4763,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
       backgroundColor: const Color(0xFF1D1E33),
       elevation: 0,
       title: const Text(
-        'Google STT Translation',
+        'Stereo Translation',
         style: TextStyle(
           color: Colors.white,
           fontSize: 20,
@@ -4671,25 +4775,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
         onPressed: () => Navigator.of(context).pop(),
       ),
       actions: [
-        if (!_showSpeakerSetup) ...[
-          // Mode toggle button (Real-time / Manual)
-          IconButton(
-            icon: Icon(
-              _isRealtimeMode ? Icons.flash_on : Icons.flash_off,
-              color: _isRealtimeMode ? Colors.purple : Colors.white,
-            ),
-            tooltip: _isRealtimeMode ? 'Real-time Mode' : 'Manual Mode',
-            onPressed: _toggleTranslationMode,
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings, color: Colors.white),
-            onPressed: () {
-              setState(() {
-                _showSpeakerSetup = true;
-              });
-            },
-          ),
-        ],
+        // Settings can be accessed via speaker headers now
       ],
     );
   }
@@ -4711,24 +4797,22 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 12),
-          // Mode indicator
+          // Real-time mode info (always enabled)
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: _isRealtimeMode
-                  ? Colors.purple.withValues(alpha: 0.2)
-                  : Colors.blue.withValues(alpha: 0.2),
+              color: Colors.purple.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _isRealtimeMode ? Colors.purple : Colors.blue,
+                color: Colors.purple,
                 width: 2,
               ),
             ),
             child: Row(
               children: [
-                Icon(
-                  _isRealtimeMode ? Icons.flash_on : Icons.flash_off,
-                  color: _isRealtimeMode ? Colors.purple : Colors.blue,
+                const Icon(
+                  Icons.flash_on,
+                  color: Colors.purple,
                   size: 24,
                 ),
                 const SizedBox(width: 12),
@@ -4736,31 +4820,24 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        _isRealtimeMode ? 'Real-time Mode' : 'Manual Mode',
+                      const Text(
+                        'Real-time Mode',
                         style: TextStyle(
-                          color: _isRealtimeMode ? Colors.purple : Colors.blue,
+                          color: Colors.purple,
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       const SizedBox(height: 4),
-                      Text(
-                        _isRealtimeMode
-                            ? 'Continuous translation with instant TTS playback'
-                            : 'Press stop button to process translation',
-                        style: const TextStyle(
+                      const Text(
+                        'Continuous translation with instant TTS playback',
+                        style: TextStyle(
                           color: Colors.white70,
                           fontSize: 12,
                         ),
                       ),
                     ],
                   ),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.swap_horiz, color: Colors.white),
-                  onPressed: _toggleTranslationMode,
-                  tooltip: 'Switch mode',
                 ),
               ],
             ),
@@ -4852,7 +4929,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               ),
               const SizedBox(width: 10),
               Text(
-                _speakerNames[speakerIndex],
+                _getSpeakerDisplayName(speakerIndex),
                 style: TextStyle(
                   color: speakerColor,
                   fontSize: 16,
@@ -5101,111 +5178,19 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   Widget _buildMainContent() {
     return Column(
       children: [
-        _buildSpeakerInfoBar(),
         _buildSoundLevelGraph(),
         Expanded(
           child: _isProcessing
               ? _buildProcessingView()
-              : (_isRealtimeMode && (_transcriptions.isNotEmpty || _translations.isNotEmpty))
-                  ? _buildRealtimeResultsView()
-                  : (_speaker1AudioPath != null && _speaker2AudioPath != null)
-                      ? _buildResultsView()
-                      : _buildIdleView(),
+              : (_speaker1AudioPath != null && _speaker2AudioPath != null)
+                  ? _buildResultsView()
+                  : _buildRealtimeResultsView(), // Always show main translation screen for language selection
         ),
         _buildRecordingControls(),
       ],
     );
   }
 
-  Widget _buildSpeakerInfoBar() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      color: const Color(0xFF1D1E33),
-      child: Row(
-        children: List.generate(_numberOfSpeakers, (index) {
-          final speakerColor = _speakerColors[index % _speakerColors.length];
-          final language = _speakerLanguages[index];
-          return Expanded(
-            child: Container(
-              margin:
-                  EdgeInsets.only(right: index < _numberOfSpeakers - 1 ? 8 : 0),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color: speakerColor.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(
-                  color: speakerColor.withValues(alpha: 0.3),
-                ),
-              ),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.person,
-                    color: speakerColor,
-                    size: 20,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    _speakerNames[index],
-                    style: TextStyle(
-                      color: speakerColor,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  Text(
-                    language?.name ?? 'Unknown',
-                    style: TextStyle(
-                      color: speakerColor.withValues(alpha: 0.8),
-                      fontSize: 10,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  // Gender and Earpiece Configuration
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        _speakerGenders[index] == 'female'
-                            ? Icons.female
-                            : Icons.male,
-                        color: speakerColor.withValues(alpha: 0.7),
-                        size: 12,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _speakerGenders[index]?.toUpperCase() ?? 'M',
-                        style: TextStyle(
-                          color: speakerColor.withValues(alpha: 0.7),
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      Icon(
-                        Icons.headphones,
-                        color: speakerColor.withValues(alpha: 0.7),
-                        size: 12,
-                      ),
-                      const SizedBox(width: 4),
-                      Text(
-                        _speakerEarpieces[index]?.toUpperCase() ?? 'L',
-                        style: TextStyle(
-                          color: speakerColor.withValues(alpha: 0.7),
-                          fontSize: 9,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        }),
-      ),
-    );
-  }
 
   Widget _buildProcessingView() {
     return Center(
@@ -5302,52 +5287,233 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
   }
 
   /// Real-time results view for continuous translation
+  /// OPTIMIZED: Fixed-height sections with side-by-side transcription/translation
   Widget _buildRealtimeResultsView() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(20),
+    // OPTIMIZED: Use flexible layout instead of fixed height to prevent overflow
+    return Column(
+      children: [
+        // Two responsive speaker sections stacked vertically (50% each)
+        Expanded(
+          flex: 1,
+          child: _buildRealtimeSpeakerSection(
+            speakerIndex: 0,
+          ),
+        ),
+        // Divider
+        Container(
+          height: 1,
+          color: Colors.white.withValues(alpha: 0.1),
+        ),
+        // Speaker 2 section (bottom)
+        Expanded(
+          flex: 1,
+          child: _buildRealtimeSpeakerSection(
+            speakerIndex: 1,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Build real-time speaker section with responsive layout and side-by-side layout
+  /// OPTIMIZED: Responsive height (flexible), side-by-side transcription/translation, auto-scrolling
+  Widget _buildRealtimeSpeakerSection({
+    required int speakerIndex,
+  }) {
+    final speakerColor = _speakerColors[speakerIndex % _speakerColors.length];
+    final transcription = _transcriptions[speakerIndex] ?? '';
+    final translation = _translations[speakerIndex] ?? '';
+    final language = _speakerLanguages[speakerIndex];
+    final targetLanguage = _speakerLanguages[speakerIndex == 0 ? 1 : 0];
+    final transcriptionScrollController = speakerIndex == 0 
+        ? _speaker1TranscriptionScrollController 
+        : _speaker2TranscriptionScrollController;
+    final translationScrollController = speakerIndex == 0 
+        ? _speaker1TranslationScrollController 
+        : _speaker2TranslationScrollController;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0xFF1D1E33),
+        border: Border(
+          top: BorderSide(
+            color: speakerColor.withValues(alpha: 0.2),
+            width: speakerIndex == 0 ? 1 : 0,
+          ),
+          bottom: BorderSide(
+            color: speakerColor.withValues(alpha: 0.2),
+            width: speakerIndex == 1 ? 1 : 0,
+          ),
+        ),
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const SizedBox(height: 20),
-          // Real-time mode indicator
+          // Speaker header with inline settings (OPTIMIZED: More compact)
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: Colors.purple.withValues(alpha: 0.2),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: Colors.purple.withValues(alpha: 0.5),
-                width: 2,
+              color: speakerColor.withValues(alpha: 0.1),
+              border: Border(
+                bottom: BorderSide(
+                  color: speakerColor.withValues(alpha: 0.3),
+                  width: 1,
+                ),
               ),
             ),
             child: Row(
               children: [
-                Icon(
-                  _isRecording ? Icons.mic : Icons.check_circle,
-                  color: Colors.purple,
-                  size: 30,
+                // Speaker icon (smaller)
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: speakerColor.withValues(alpha: 0.2),
+                  ),
+                  child: Icon(
+                    Icons.person,
+                    color: speakerColor,
+                    size: 16,
+                  ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
+                // Speaker name (compact)
+                Text(
+                  _getSpeakerDisplayName(speakerIndex),
+                  style: TextStyle(
+                    color: speakerColor,
+                    fontSize: 13,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // Language, Gender, Earpiece settings (all in one row)
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      Text(
-                        _isRecording ? 'Real-time Translation Active' : 'Translation Completed',
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
+                      // Language dropdown (compact)
+                      Expanded(
+                        flex: 2,
+                        child: Container(
+                          height: 28,
+                          padding: const EdgeInsets.symmetric(horizontal: 6),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0A0E21),
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(
+                              color: speakerColor.withValues(alpha: 0.3),
+                              width: 1,
+                            ),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<Language>(
+                              value: language,
+                              isDense: true,
+                              isExpanded: true,
+                              dropdownColor: const Color(0xFF1D1E33),
+                              style: TextStyle(
+                                color: speakerColor,
+                                fontSize: 10,
+                                fontWeight: FontWeight.w500,
+                              ),
+                              icon: Icon(
+                                Icons.arrow_drop_down,
+                                color: speakerColor,
+                                size: 16,
+                              ),
+                              items: _supportedLanguages.map((lang) {
+                                return DropdownMenuItem<Language>(
+                                  value: lang,
+                                  child: Text(
+                                    lang.name,
+                                    style: const TextStyle(fontSize: 10),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                );
+                              }).toList(),
+                              onChanged: (Language? newLanguage) {
+                                if (newLanguage != null) {
+                                  setState(() {
+                                    _speakerLanguages[speakerIndex] = newLanguage;
+                                  });
+                                }
+                              },
+                            ),
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        _isRecording
-                            ? 'Listening and translating continuously...'
-                            : 'Review the translated conversation',
-                        style: const TextStyle(
-                          color: Colors.white70,
-                          fontSize: 14,
+                      const SizedBox(width: 4),
+                      // Gender selector (compact)
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            _speakerGenders[speakerIndex] = 
+                                _speakerGenders[speakerIndex] == 'male' ? 'female' : 'male';
+                          });
+                        },
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: speakerColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(
+                              color: speakerColor.withValues(alpha: 0.4),
+                              width: 1,
+                            ),
+                          ),
+                          child: Icon(
+                            _speakerGenders[speakerIndex] == 'female'
+                                ? Icons.female
+                                : Icons.male,
+                            color: speakerColor,
+                            size: 14,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      // Earpiece selector (compact)
+                      GestureDetector(
+                        onTap: () {
+                          setState(() {
+                            final newEarpiece = _speakerEarpieces[speakerIndex] == 'left' ? 'right' : 'left';
+                            _speakerEarpieces[speakerIndex] = newEarpiece;
+                            // Auto-assign opposite to other speaker
+                            final otherIndex = speakerIndex == 0 ? 1 : 0;
+                            _speakerEarpieces[otherIndex] = newEarpiece == 'left' ? 'right' : 'left';
+                          });
+                        },
+                        child: Container(
+                          width: 28,
+                          height: 28,
+                          decoration: BoxDecoration(
+                            color: speakerColor.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(5),
+                            border: Border.all(
+                              color: speakerColor.withValues(alpha: 0.4),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.headphones,
+                                color: speakerColor,
+                                size: 12,
+                              ),
+                              const SizedBox(width: 1),
+                              Text(
+                                _speakerEarpieces[speakerIndex] == 'left' ? 'L' : 'R',
+                                style: TextStyle(
+                                  color: speakerColor,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -5356,169 +5522,127 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               ],
             ),
           ),
-          const SizedBox(height: 30),
-          // Speaker 1 transcription/translation
-          _buildRealtimeTranscriptionCard(
-            speakerIndex: 0,
-          ),
-          const SizedBox(height: 20),
-          // Speaker 2 transcription/translation
-          _buildRealtimeTranscriptionCard(
-            speakerIndex: 1,
+          // Side-by-side transcription and translation
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // Transcription section (left)
+                Expanded(
+                  child: _buildScrollableTextSection(
+                    scrollController: transcriptionScrollController,
+                    icon: Icons.mic,
+                    title: 'Original',
+                    subtitle: language?.name ?? 'Unknown',
+                    text: transcription.isEmpty ? 'Ready to Record' : transcription,
+                    color: speakerColor,
+                    isEmpty: transcription.isEmpty,
+                  ),
+                ),
+                // Divider
+                Container(
+                  width: 1,
+                  color: Colors.white.withValues(alpha: 0.1),
+                ),
+                // Translation section (right)
+                Expanded(
+                  child: _buildScrollableTextSection(
+                    scrollController: translationScrollController,
+                    icon: Icons.translate,
+                    title: 'Translation',
+                    subtitle: targetLanguage?.name ?? 'Unknown',
+                    text: translation.isEmpty ? 'Ready to Record' : translation,
+                    color: speakerColor,
+                    isEmpty: translation.isEmpty,
+                  ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  /// Build real-time transcription card for a speaker
-  Widget _buildRealtimeTranscriptionCard({
-    required int speakerIndex,
-  }) {
-    final speakerColor = _speakerColors[speakerIndex % _speakerColors.length];
-    final transcription = _transcriptions[speakerIndex] ?? '';
-    final translation = _translations[speakerIndex] ?? '';
-    final language = _speakerLanguages[speakerIndex];
-    final targetLanguage = _speakerLanguages[speakerIndex == 0 ? 1 : 0];
-
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: speakerColor.withValues(alpha: 0.3),
-          width: 2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: speakerColor.withValues(alpha: 0.1),
-            blurRadius: 10,
-            spreadRadius: 2,
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Speaker header
-          Row(
-            children: [
-              Container(
-                width: 50,
-                height: 50,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: speakerColor.withValues(alpha: 0.2),
-                ),
-                child: Icon(
-                  Icons.person,
-                  color: speakerColor,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      _speakerNames[speakerIndex],
-                      style: TextStyle(
-                        color: speakerColor,
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${language?.name ?? "Unknown"} → ${targetLanguage?.name ?? "Unknown"}',
-                      style: const TextStyle(
-                        color: Colors.white70,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          
-          // Transcription (Original)
-          _buildTextSection(
-            icon: Icons.mic,
-            title: 'Original (${language?.name ?? "Unknown"})',
-            text: transcription.isEmpty ? 'Waiting for speech...' : transcription,
-            color: speakerColor,
-            isEmpty: transcription.isEmpty,
-          ),
-          
-          const SizedBox(height: 16),
-          
-          // Translation
-          _buildTextSection(
-            icon: Icons.translate,
-            title: 'Translation (${targetLanguage?.name ?? "Unknown"})',
-            text: translation.isEmpty ? 'Waiting for translation...' : translation,
-            color: speakerColor,
-            isEmpty: translation.isEmpty,
-          ),
-        ],
-      ),
-    );
-  }
-
-  /// Build text section for transcription or translation
-  Widget _buildTextSection({
+  /// Build scrollable text section for transcription or translation
+  Widget _buildScrollableTextSection({
+    required ScrollController scrollController,
     required IconData icon,
     required String title,
+    required String subtitle,
     required String text,
     required Color color,
     required bool isEmpty,
   }) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: color, size: 16),
-            const SizedBox(width: 8),
-            Text(
-              title,
-              style: TextStyle(
-                color: color,
-                fontSize: 14,
-                fontWeight: FontWeight.bold,
+    return Container(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.05),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Section header (OPTIMIZED: More compact)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              border: Border(
+                bottom: BorderSide(
+                  color: color.withValues(alpha: 0.2),
+                  width: 1,
+                ),
               ),
             ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: color.withValues(alpha: 0.3),
-              width: 1,
+            child: Row(
+              children: [
+                Icon(icon, color: color, size: 12),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          color: color.withValues(alpha: 0.7),
+                          fontSize: 9,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
-          child: Text(
-            text,
-            style: TextStyle(
-              color: isEmpty ? Colors.white38 : Colors.white,
-              fontSize: 15,
-              height: 1.5,
-              fontStyle: isEmpty ? FontStyle.italic : FontStyle.normal,
+          // Scrollable content (OPTIMIZED: Reduced padding)
+          Expanded(
+            child: SingleChildScrollView(
+              controller: scrollController,
+              padding: const EdgeInsets.all(8),
+              child: Text(
+                text,
+                style: TextStyle(
+                  color: isEmpty ? Colors.white38 : Colors.white,
+                  fontSize: 18,
+                  height: 1.5,
+                  fontStyle: isEmpty ? FontStyle.italic : FontStyle.normal,
+                ),
+              ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
+
 
   Widget _buildResultsView() {
     return SingleChildScrollView(
@@ -5628,8 +5752,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        _speakerNames[speakerIndex] ??
-                            'Speaker ${speakerIndex + 1}',
+                        _getSpeakerDisplayName(speakerIndex),
                         style: TextStyle(
                           color: speakerColor,
                           fontSize: 18,
@@ -5690,6 +5813,14 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     );
   }
 
+  /// Get display name for a speaker (with fallback)
+  String _getSpeakerDisplayName(int speakerIndex) {
+    if (speakerIndex >= 0 && speakerIndex < _speakerNames.length) {
+      return _speakerNames[speakerIndex];
+    }
+    return 'Speaker ${speakerIndex + 1}';
+  }
+
   /// Get the target language name for translation display
   String _getTargetLanguageName(int speakerIndex) {
     // If this is Speaker 1, the target language is Speaker 2's language
@@ -5705,12 +5836,12 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
     String? translation,
     required bool showTranslation,
   }) {
-    final displayText =
+    final String? translatedText =
         showTranslation && translation != null && translation.isNotEmpty
             ? translation
-            : transcription;
-    final isTranslated =
-        showTranslation && translation != null && translation.isNotEmpty;
+            : null;
+    final bool hasTranslation = translatedText != null;
+    final displayText = translatedText ?? transcription;
 
     return Container(
       width: double.infinity,
@@ -5730,13 +5861,13 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           Row(
             children: [
               Icon(
-                isTranslated ? Icons.translate : Icons.subtitles,
+                hasTranslation ? Icons.translate : Icons.subtitles,
                 color: speakerColor,
                 size: 18,
               ),
               const SizedBox(width: 8),
               Text(
-                isTranslated ? 'Translation:' : 'Transcription:',
+                hasTranslation ? 'Translation:' : 'Transcription:',
                 style: TextStyle(
                   color: speakerColor,
                   fontSize: 14,
@@ -5745,7 +5876,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               ),
               const Spacer(),
               // Translation toggle button
-              if (translation != null && translation.isNotEmpty)
+              if (hasTranslation)
                 GestureDetector(
                   onTap: () => _toggleTranslation(speakerIndex),
                   child: Container(
@@ -5763,13 +5894,13 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          isTranslated ? Icons.subtitles : Icons.translate,
+                          hasTranslation ? Icons.subtitles : Icons.translate,
                           color: speakerColor,
                           size: 14,
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          isTranslated ? 'Original' : 'Translate',
+                          hasTranslation ? 'Original' : 'Translate',
                           style: TextStyle(
                             color: speakerColor,
                             fontSize: 12,
@@ -5795,8 +5926,8 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               displayText,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 15,
-                height: 1.4,
+                fontSize: 18,
+                height: 1.5,
               ),
             ),
           ),
@@ -5811,7 +5942,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
               ),
               const SizedBox(width: 4),
               Text(
-                isTranslated
+                hasTranslation
                     ? 'Translated to ${_getTargetLanguageName(speakerIndex)}'
                     : 'Original: ${_speakerLanguages[speakerIndex]?.name ?? 'Unknown'}',
                 style: TextStyle(
@@ -5823,9 +5954,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             ],
           ),
           // TTS play button for translated text (show in counter speaker's bubble)
-          if (isTranslated &&
-              translation != null &&
-              translation.isNotEmpty) ...[
+          if (hasTranslation) ...[
             const SizedBox(height: 12),
             _buildTtsPlayButton(speakerIndex, speakerColor),
           ],
@@ -6081,8 +6210,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
           ),
           const SizedBox(height: 16),
           ..._speakerSegments.take(10).map((segment) {
-            final speakerName = _speakerNames[segment.speakerId] ??
-                'Speaker ${segment.speakerId + 1}';
+            final speakerName = _getSpeakerDisplayName(segment.speakerId);
             final speakerColor =
                 _speakerColors[segment.speakerId % _speakerColors.length];
 
@@ -6155,7 +6283,7 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
 
   Widget _buildRecordingControls() {
     return Container(
-      padding: const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       color: const Color(0xFF1D1E33),
       child: SafeArea(
         child: Column(
@@ -6178,46 +6306,117 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
             //   ),
             // ],
 
-            // Manual Recording Controls (only show when not in automatic mode)
+            // Manual Recording Controls with 3-column layout: Status (left), Mic (center), Empty (right)
             if (!_isAutomaticMode) ...[
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  GestureDetector(
-                    onTap: _isProcessing ? null : _toggleRecording,
-                    child: AnimatedBuilder(
-                      animation: _pulseAnimation,
-                      builder: (context, child) {
-                        return Transform.scale(
-                          scale: _isRecording ? _pulseAnimation.value : 1.0,
-                          child: Container(
-                            width: 80,
-                            height: 80,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
+                  // Left: Status indicator
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: _isRecording
+                              ? Colors.red.withValues(alpha: 0.2)
+                              : (_isRealtimeListeningPaused
+                                  ? Colors.orange.withValues(alpha: 0.2)
+                                  : Colors.green.withValues(alpha: 0.2)),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: _isRecording
+                                ? Colors.red.withValues(alpha: 0.5)
+                                : (_isRealtimeListeningPaused
+                                    ? Colors.orange.withValues(alpha: 0.5)
+                                    : Colors.green.withValues(alpha: 0.5)),
+                            width: 1,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              _isRecording
+                                  ? Icons.mic
+                                  : _isRealtimeListeningPaused
+                                      ? Icons.hearing_disabled
+                                      : Icons.check_circle,
                               color: _isRecording
                                   ? Colors.red
-                                  : const Color(0xFF00D9FF),
-                              boxShadow: _isRecording
-                                  ? [
-                                      BoxShadow(
-                                        color:
-                                            Colors.red.withValues(alpha: 0.3),
-                                        blurRadius: 20,
-                                        spreadRadius: 5,
-                                      ),
-                                    ]
-                                  : [],
+                                  : (_isRealtimeListeningPaused
+                                      ? Colors.orange
+                                      : Colors.green),
+                              size: 14,
                             ),
-                            child: Icon(
-                              _isRecording ? Icons.stop : Icons.mic,
-                              color: Colors.white,
-                              size: 40,
+                            const SizedBox(width: 4),
+                            Text(
+                              _isRecording
+                                  ? 'Recording'
+                                  : _isRealtimeListeningPaused
+                                      ? 'Playing'
+                                      : 'Ready',
+                              style: TextStyle(
+                                color: _isRecording
+                                    ? Colors.red
+                                    : (_isRealtimeListeningPaused
+                                        ? Colors.orange
+                                        : Colors.green),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                        );
-                      },
+                          ],
+                        ),
+                      ),
                     ),
+                  ),
+                  // Center: Mic button (always centered)
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.center,
+                      child: GestureDetector(
+                        onTap: _isProcessing ? null : _toggleRecording,
+                        child: AnimatedBuilder(
+                          animation: _pulseAnimation,
+                          builder: (context, child) {
+                            return Transform.scale(
+                              scale: _isRecording ? _pulseAnimation.value : 1.0,
+                              child: Container(
+                                width: 70,
+                                height: 70,
+                                decoration: BoxDecoration(
+                                  shape: BoxShape.circle,
+                                  color: _isRecording
+                                      ? Colors.red
+                                      : const Color(0xFF00D9FF),
+                                  boxShadow: _isRecording
+                                      ? [
+                                          BoxShadow(
+                                            color:
+                                                Colors.red.withValues(alpha: 0.3),
+                                            blurRadius: 15,
+                                            spreadRadius: 3,
+                                          ),
+                                        ]
+                                      : [],
+                                ),
+                                child: Icon(
+                                  _isRecording ? Icons.stop : Icons.mic,
+                                  color: Colors.white,
+                                  size: 36,
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+                    ),
+                  ),
+                  // Right: Empty slot for future use
+                  Expanded(
+                    child: Container(),
                   ),
                 ],
               ),
@@ -6251,10 +6450,17 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                     decoration: BoxDecoration(
                       color: _isRecording
                           ? Colors.green.withValues(alpha: 0.2)
-                          : Colors.blue.withValues(alpha: 0.2),
+                          : (_isRealtimeListeningPaused
+                                  ? Colors.orange
+                                  : Colors.blue)
+                              .withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: _isRecording ? Colors.green : Colors.blue,
+                        color: _isRecording
+                            ? Colors.green
+                            : _isRealtimeListeningPaused
+                                ? Colors.orange
+                                : Colors.blue,
                         width: 1,
                       ),
                     ),
@@ -6262,15 +6468,31 @@ class _GoogleSTTTranslatorState extends State<GoogleSTTTranslator>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Icon(
-                          _isRecording ? Icons.mic : Icons.pause,
-                          color: _isRecording ? Colors.green : Colors.blue,
+                          _isRecording
+                              ? Icons.mic
+                              : _isRealtimeListeningPaused
+                                  ? Icons.hearing_disabled
+                                  : Icons.pause,
+                          color: _isRecording
+                              ? Colors.green
+                              : _isRealtimeListeningPaused
+                                  ? Colors.orange
+                                  : Colors.blue,
                           size: 16,
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          _isRecording ? 'Listening...' : 'Processing...',
+                          _isRecording
+                              ? 'Listening...'
+                              : _isRealtimeListeningPaused
+                                  ? 'Playing translation...'
+                                  : 'Processing...',
                           style: TextStyle(
-                            color: _isRecording ? Colors.green : Colors.blue,
+                            color: _isRecording
+                                ? Colors.green
+                                : _isRealtimeListeningPaused
+                                    ? Colors.orange
+                                    : Colors.blue,
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
