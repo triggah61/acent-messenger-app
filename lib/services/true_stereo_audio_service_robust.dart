@@ -48,17 +48,18 @@ class TrueStereoAudioServiceRobust {
             iOS: AudioContextIOS(
               category: AVAudioSessionCategory.playback,
               options: {
-                AVAudioSessionOptions.allowBluetooth,
+                // Note: allowBluetooth can only be used with playAndRecord or record category
+                // For playback-only, we use allowBluetoothA2DP which works with playback
                 AVAudioSessionOptions.allowBluetoothA2DP,
                 AVAudioSessionOptions.mixWithOthers,
               },
             ),
           ),
         );
-        
+
         // Set player mode to STREAM for proper media playback
         await _audioPlayer!.setPlayerMode(PlayerMode.mediaPlayer);
-        
+
         debugPrint(
             'TrueStereoAudioServiceRobust: ✅ Audio context set for stereo playback');
         debugPrint(
@@ -155,29 +156,37 @@ class TrueStereoAudioServiceRobust {
       // CRITICAL FIX: Ensure files are fully written before reading
       // Add a small delay to ensure file system has flushed
       await Future.delayed(const Duration(milliseconds: 100));
-      
+
       // Verify file sizes are stable
       final leftSizeBefore = await leftFile.length();
       final rightSizeBefore = await rightFile.length();
       await Future.delayed(const Duration(milliseconds: 50));
       final leftSizeAfter = await leftFile.length();
       final rightSizeAfter = await rightFile.length();
-      
-      if (leftSizeBefore != leftSizeAfter || rightSizeBefore != rightSizeAfter) {
-        debugPrint('TrueStereoAudioServiceRobust: ⚠️ File sizes changed, waiting for stability...');
-        debugPrint('TrueStereoAudioServiceRobust: Left: $leftSizeBefore → $leftSizeAfter');
-        debugPrint('TrueStereoAudioServiceRobust: Right: $rightSizeBefore → $rightSizeAfter');
+
+      if (leftSizeBefore != leftSizeAfter ||
+          rightSizeBefore != rightSizeAfter) {
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ⚠️ File sizes changed, waiting for stability...');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: Left: $leftSizeBefore → $leftSizeAfter');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: Right: $rightSizeBefore → $rightSizeAfter');
         await Future.delayed(const Duration(milliseconds: 200));
       }
-      
+
       // Read both mono audio files
-      debugPrint('TrueStereoAudioServiceRobust: Reading left audio file (${await leftFile.length()} bytes)...');
+      debugPrint(
+          'TrueStereoAudioServiceRobust: Reading left audio file (${await leftFile.length()} bytes)...');
       final leftAudioBytes = await leftFile.readAsBytes();
-      debugPrint('TrueStereoAudioServiceRobust: Read ${leftAudioBytes.length} bytes from left file');
-      
-      debugPrint('TrueStereoAudioServiceRobust: Reading right audio file (${await rightFile.length()} bytes)...');
+      debugPrint(
+          'TrueStereoAudioServiceRobust: Read ${leftAudioBytes.length} bytes from left file');
+
+      debugPrint(
+          'TrueStereoAudioServiceRobust: Reading right audio file (${await rightFile.length()} bytes)...');
       final rightAudioBytes = await rightFile.readAsBytes();
-      debugPrint('TrueStereoAudioServiceRobust: Read ${rightAudioBytes.length} bytes from right file');
+      debugPrint(
+          'TrueStereoAudioServiceRobust: Read ${rightAudioBytes.length} bytes from right file');
 
       // Parse WAV headers and extract audio data with sample rate info
       final leftAudioInfo = _extractAudioDataFromWav(leftAudioBytes, 'Left');
@@ -203,8 +212,10 @@ class TrueStereoAudioServiceRobust {
       final rightBitsPerSample = rightAudioInfo?['bitsPerSample'] as int? ?? 16;
 
       debugPrint('TrueStereoAudioServiceRobust: ═══ Sample Rate Analysis ═══');
-      debugPrint('  Left audio:  $leftSampleRate Hz, $leftChannels ch, $leftBitsPerSample bits');
-      debugPrint('  Right audio: $rightSampleRate Hz, $rightChannels ch, $rightBitsPerSample bits');
+      debugPrint(
+          '  Left audio:  $leftSampleRate Hz, $leftChannels ch, $leftBitsPerSample bits');
+      debugPrint(
+          '  Right audio: $rightSampleRate Hz, $rightChannels ch, $rightBitsPerSample bits');
 
       // CRITICAL FIX: Detect and handle sample rate mismatch
       // Different TTS voices (male/female) can generate different sample rates
@@ -215,19 +226,23 @@ class TrueStereoAudioServiceRobust {
 
       if (leftSampleRate != rightSampleRate) {
         // SAMPLE RATE MISMATCH DETECTED!
-        debugPrint('TrueStereoAudioServiceRobust: ⚠️ SAMPLE RATE MISMATCH DETECTED!');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ⚠️ SAMPLE RATE MISMATCH DETECTED!');
         debugPrint('  This causes one speaker to play slow/weird');
         debugPrint('  Resampling to match...');
-        
+
         // Use the higher sample rate as target (better quality)
-        targetSampleRate = leftSampleRate > rightSampleRate ? leftSampleRate : rightSampleRate;
+        targetSampleRate =
+            leftSampleRate > rightSampleRate ? leftSampleRate : rightSampleRate;
         debugPrint('  Target sample rate: $targetSampleRate Hz');
 
         // Resample the audio data that doesn't match
         if (leftData != null) {
           if (leftSampleRate != targetSampleRate) {
-            debugPrint('  Resampling LEFT audio: $leftSampleRate Hz → $targetSampleRate Hz');
-            leftAudioData = _resampleAudio(leftData, leftSampleRate, targetSampleRate);
+            debugPrint(
+                '  Resampling LEFT audio: $leftSampleRate Hz → $targetSampleRate Hz');
+            leftAudioData =
+                _resampleAudio(leftData, leftSampleRate, targetSampleRate);
             debugPrint('  ✅ Left audio resampled successfully');
           } else {
             leftAudioData = leftData;
@@ -238,8 +253,10 @@ class TrueStereoAudioServiceRobust {
 
         if (rightData != null) {
           if (rightSampleRate != targetSampleRate) {
-            debugPrint('  Resampling RIGHT audio: $rightSampleRate Hz → $targetSampleRate Hz');
-            rightAudioData = _resampleAudio(rightData, rightSampleRate, targetSampleRate);
+            debugPrint(
+                '  Resampling RIGHT audio: $rightSampleRate Hz → $targetSampleRate Hz');
+            rightAudioData =
+                _resampleAudio(rightData, rightSampleRate, targetSampleRate);
             debugPrint('  ✅ Right audio resampled successfully');
           } else {
             rightAudioData = rightData;
@@ -248,13 +265,15 @@ class TrueStereoAudioServiceRobust {
           rightAudioData = _createSilentAudio(targetSampleRate, 1.0);
         }
 
-        debugPrint('TrueStereoAudioServiceRobust: ✅ Sample rate normalization complete');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ✅ Sample rate normalization complete');
       } else {
         // Sample rates match, no resampling needed
         targetSampleRate = leftSampleRate;
         leftAudioData = leftData ?? _createSilentAudio(targetSampleRate, 1.0);
         rightAudioData = rightData ?? _createSilentAudio(targetSampleRate, 1.0);
-        debugPrint('TrueStereoAudioServiceRobust: ✅ Sample rates match ($targetSampleRate Hz) - no resampling needed');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ✅ Sample rates match ($targetSampleRate Hz) - no resampling needed');
       }
 
       debugPrint('TrueStereoAudioServiceRobust: Final configuration:');
@@ -263,8 +282,8 @@ class TrueStereoAudioServiceRobust {
       debugPrint('  Bits per sample: 16');
 
       // Calculate audio durations for logging
-      final leftDuration =
-          leftAudioData.length / (targetSampleRate * 2); // 2 bytes per 16-bit sample
+      final leftDuration = leftAudioData.length /
+          (targetSampleRate * 2); // 2 bytes per 16-bit sample
       final rightDuration = rightAudioData.length / (targetSampleRate * 2);
       debugPrint(
           'TrueStereoAudioServiceRobust: Left audio duration: ${leftDuration.toStringAsFixed(2)} seconds');
@@ -311,8 +330,9 @@ class TrueStereoAudioServiceRobust {
     }
 
     try {
-      debugPrint('TrueStereoAudioServiceRobust: ═══ Starting Stereo Playback ═══');
-      
+      debugPrint(
+          'TrueStereoAudioServiceRobust: ═══ Starting Stereo Playback ═══');
+
       if (_isPlaying) {
         await stop();
       }
@@ -324,13 +344,14 @@ class TrueStereoAudioServiceRobust {
             'TrueStereoAudioServiceRobust: ❌ Stereo audio file does not exist: $stereoAudioPath');
         return;
       }
-      
+
       // Verify file size
       final fileSize = await file.length();
       debugPrint('TrueStereoAudioServiceRobust: File size: $fileSize bytes');
-      
+
       if (fileSize < 44) {
-        debugPrint('TrueStereoAudioServiceRobust: ❌ File too small (corrupted)');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: ❌ File too small (corrupted)');
         return;
       }
 
@@ -339,13 +360,15 @@ class TrueStereoAudioServiceRobust {
 
       debugPrint('TrueStereoAudioServiceRobust: ✅ Playing stereo audio file');
       debugPrint('TrueStereoAudioServiceRobust: Path: $stereoAudioPath');
-      debugPrint('TrueStereoAudioServiceRobust: Audio Context: MUSIC/MEDIA (stereo A2DP)');
-      debugPrint('TrueStereoAudioServiceRobust: Expected Output: TWS/Bluetooth stereo earpieces');
+      debugPrint(
+          'TrueStereoAudioServiceRobust: Audio Context: MUSIC/MEDIA (stereo A2DP)');
+      debugPrint(
+          'TrueStereoAudioServiceRobust: Expected Output: TWS/Bluetooth stereo earpieces');
 
       // CRITICAL FIX: Wait for playback to complete
       // Create a completer to wait for playback completion
       final Completer<void> playbackCompleter = Completer<void>();
-      
+
       // Listen for playback completion
       final subscription = _audioPlayer!.onPlayerComplete.listen((event) {
         debugPrint('TrueStereoAudioServiceRobust: ✅ Playback completed');
@@ -356,9 +379,11 @@ class TrueStereoAudioServiceRobust {
       });
 
       // Also listen for errors
-      final errorSubscription = _audioPlayer!.onPlayerStateChanged.listen((state) {
+      final errorSubscription =
+          _audioPlayer!.onPlayerStateChanged.listen((state) {
         if (state == PlayerState.stopped || state == PlayerState.completed) {
-          debugPrint('TrueStereoAudioServiceRobust: Player state changed to $state');
+          debugPrint(
+              'TrueStereoAudioServiceRobust: Player state changed to $state');
           _isPlaying = false;
           if (!playbackCompleter.isCompleted) {
             playbackCompleter.complete();
@@ -368,18 +393,21 @@ class TrueStereoAudioServiceRobust {
 
       // CRITICAL: Wait 500ms before starting playback to ensure hardware is ready
       // This prevents audio from being cut off at the beginning
-      debugPrint('TrueStereoAudioServiceRobust: ⏳ Waiting 500ms for playback hardware to be ready...');
+      debugPrint(
+          'TrueStereoAudioServiceRobust: ⏳ Waiting 500ms for playback hardware to be ready...');
       await Future.delayed(const Duration(milliseconds: 500));
-      
+
       // Start playback
       await _audioPlayer!.play(DeviceFileSource(stereoAudioPath));
-      debugPrint('TrueStereoAudioServiceRobust: ✅ Playback started, waiting for completion...');
+      debugPrint(
+          'TrueStereoAudioServiceRobust: ✅ Playback started, waiting for completion...');
 
       // Wait for playback to complete (with timeout)
       await playbackCompleter.future.timeout(
         const Duration(seconds: 30),
         onTimeout: () {
-          debugPrint('TrueStereoAudioServiceRobust: ⚠️ Playback timeout after 30 seconds');
+          debugPrint(
+              'TrueStereoAudioServiceRobust: ⚠️ Playback timeout after 30 seconds');
           _isPlaying = false;
         },
       );
@@ -387,8 +415,9 @@ class TrueStereoAudioServiceRobust {
       // Clean up subscriptions
       await subscription.cancel();
       await errorSubscription.cancel();
-      
-      debugPrint('TrueStereoAudioServiceRobust: ✅ Playback finished successfully');
+
+      debugPrint(
+          'TrueStereoAudioServiceRobust: ✅ Playback finished successfully');
     } catch (e) {
       _isPlaying = false;
       debugPrint(
@@ -435,16 +464,19 @@ class TrueStereoAudioServiceRobust {
       }
 
       // Check for "RIFF" header with detailed logging
-      final first4Bytes = wavBytes.length >= 4 
+      final first4Bytes = wavBytes.length >= 4
           ? String.fromCharCodes(wavBytes.sublist(0, 4))
           : 'N/A';
-      
+
       if (first4Bytes != 'RIFF') {
         debugPrint(
             'TrueStereoAudioServiceRobust: ❌ $fileLabel file is not a valid WAV file');
-        debugPrint('TrueStereoAudioServiceRobust: Expected: "RIFF", Found: "$first4Bytes"');
-        debugPrint('TrueStereoAudioServiceRobust: First 20 bytes (hex): ${wavBytes.length >= 20 ? wavBytes.sublist(0, 20).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ') : 'N/A'}');
-        debugPrint('TrueStereoAudioServiceRobust: First 20 bytes (ascii): ${wavBytes.length >= 20 ? String.fromCharCodes(wavBytes.sublist(0, 20).map((b) => b >= 32 && b < 127 ? b : 46)) : 'N/A'}');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: Expected: "RIFF", Found: "$first4Bytes"');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: First 20 bytes (hex): ${wavBytes.length >= 20 ? wavBytes.sublist(0, 20).map((b) => b.toRadixString(16).padLeft(2, '0')).join(' ') : 'N/A'}');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: First 20 bytes (ascii): ${wavBytes.length >= 20 ? String.fromCharCodes(wavBytes.sublist(0, 20).map((b) => b >= 32 && b < 127 ? b : 46)) : 'N/A'}');
         return null;
       }
 
@@ -454,12 +486,13 @@ class TrueStereoAudioServiceRobust {
             'TrueStereoAudioServiceRobust: ❌ $fileLabel file too small for WAVE header (${wavBytes.length} bytes)');
         return null;
       }
-      
+
       final waveHeader = String.fromCharCodes(wavBytes.sublist(8, 12));
       if (waveHeader != 'WAVE') {
         debugPrint(
             'TrueStereoAudioServiceRobust: ❌ $fileLabel file is not a WAVE file');
-        debugPrint('TrueStereoAudioServiceRobust: Expected: "WAVE", Found: "$waveHeader"');
+        debugPrint(
+            'TrueStereoAudioServiceRobust: Expected: "WAVE", Found: "$waveHeader"');
         return null;
       }
 
@@ -637,11 +670,11 @@ class TrueStereoAudioServiceRobust {
 
   /// Resample audio data from one sample rate to another
   /// Uses linear interpolation for simplicity and speed
-  /// 
+  ///
   /// [audioData] - The input audio data (16-bit PCM, little-endian)
   /// [fromRate] - The current sample rate of the audio
   /// [toRate] - The target sample rate
-  /// 
+  ///
   /// Returns resampled audio data
   List<int> _resampleAudio(List<int> audioData, int fromRate, int toRate) {
     try {
@@ -654,7 +687,8 @@ class TrueStereoAudioServiceRobust {
       for (int i = 0; i < audioData.length; i += 2) {
         if (i + 1 < audioData.length) {
           // Read 16-bit little-endian sample
-          final sample = (audioData[i] & 0xFF) | ((audioData[i + 1] & 0xFF) << 8);
+          final sample =
+              (audioData[i] & 0xFF) | ((audioData[i + 1] & 0xFF) << 8);
           // Convert to signed 16-bit
           final signedSample = sample > 32767 ? sample - 65536 : sample;
           inputSamples.add(signedSample);

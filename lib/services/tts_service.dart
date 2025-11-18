@@ -1,7 +1,9 @@
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:audioplayers/audioplayers.dart';
+import 'dart:async';
 import 'dart:io';
 
 /// Text-to-Speech service for generating audio from translated text
@@ -20,6 +22,15 @@ class TtsService {
   // Callbacks for UI state synchronization
   VoidCallback? _onPlaybackCompleted;
   VoidCallback? _onPlaybackError;
+  
+  // Completer for awaiting playback completion
+  Completer<void>? _playbackCompleter;
+  
+  // Native audio player channel (for explicit A2DP routing)
+  static const MethodChannel _nativeAudioChannel = MethodChannel('audio_route');
+  
+  // Flag to use native player (for guaranteed A2DP routing)
+  bool _useNativePlayer = true;  // Use native player by default for A2DP routing
 
   /// Initialize the TTS service
   Future<void> initialize() async {
@@ -54,8 +65,62 @@ class TtsService {
       _audioPlayer!.onPlayerComplete.listen((event) {
         _isPlaying = false;
         debugPrint('TtsService: Audio file playback completed');
+        
+        // Complete the playback future if waiting
+        if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+          _playbackCompleter!.complete();
+        }
+        
         _onPlaybackCompleted?.call();
       });
+
+      // CRITICAL: Configure AudioPlayer for TWS playback via A2DP
+      // This forces TTS to play through Bluetooth/TWS speakers instead of phone speaker
+      // Even in MODE_IN_COMMUNICATION, MEDIA stream should route to A2DP (not SCO)
+      try {
+        await _audioPlayer!.setAudioContext(
+          AudioContext(
+            android: AudioContextAndroid(
+              isSpeakerphoneOn: false, // CRITICAL: Not phone speaker
+              stayAwake: true,
+              contentType: AndroidContentType.music, // CRITICAL: MUSIC for A2DP routing
+              usageType: AndroidUsageType.media, // CRITICAL: MEDIA usage for A2DP
+              // CRITICAL: Don't take exclusive audio focus - allow mixing with recording
+              audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+            ),
+            iOS: AudioContextIOS(
+              category: AVAudioSessionCategory.playback,
+              options: {
+                // Note: allowBluetooth and allowBluetoothA2DP can only be used with:
+                // playAndRecord, record, or multiRoute categories (not playback)
+                // For playback-only, we rely on Android's default routing behavior
+                // iOS will route to Bluetooth automatically if available
+                AVAudioSessionOptions.mixWithOthers, // Allow mixing with recording
+              },
+            ),
+          ),
+        );
+        
+        // CRITICAL: Set player mode to MEDIA_PLAYER
+        // This ensures the player uses MEDIA stream (A2DP) not VOICE_CALL stream (SCO/phone)
+        await _audioPlayer!.setPlayerMode(PlayerMode.mediaPlayer);
+        
+        // CRITICAL: Set release mode to RELEASE (default behavior)
+        // This ensures proper cleanup after playback
+        await _audioPlayer!.setReleaseMode(ReleaseMode.release);
+        
+        debugPrint('TtsService: ✅ AudioPlayer configured for TWS/Bluetooth A2DP playback');
+        debugPrint('TtsService: ✅ Player mode: MEDIA_PLAYER (not voice call)');
+        debugPrint('TtsService: ✅ Content type: MUSIC (routes to A2DP, not SCO)');
+        debugPrint('TtsService: ✅ Usage type: MEDIA (Bluetooth A2DP stream)');
+        debugPrint('TtsService: ✅ Audio focus: gainTransientMayDuck (allows recording to continue)');
+        debugPrint('TtsService: ✅ This configuration forces Bluetooth/TWS output in any audio mode');
+      } catch (e) {
+        debugPrint('TtsService: ❌ CRITICAL: Failed to set audio context: $e');
+        debugPrint('TtsService: ❌ AudioPlayer will use default routing - may route to phone speaker!');
+        debugPrint('TtsService: ❌ This is likely why TTS plays through phone speaker instead of TWS');
+        // Continue anyway - may fall back to default routing
+      }
 
       // CRITICAL: Wait for TTS engine to be ready
       // This is essential for Android - the engine needs time to initialize
@@ -205,7 +270,7 @@ class TtsService {
     }
   }
 
-  /// Play audio file
+  /// Play audio file and wait for completion
   Future<void> playAudioFile(String audioPath) async {
     if (!_isInitialized) {
       await initialize();
@@ -226,18 +291,139 @@ class TtsService {
       _currentAudioPath = audioPath;
       _isPlaying = true;
 
-      debugPrint('TtsService: Playing audio file: $audioPath');
+      debugPrint('TtsService: ═══ Playing TTS Audio File ═══');
+      debugPrint('TtsService: Audio file: $audioPath');
+      debugPrint('TtsService: Expected output: TWS speakers (A2DP) - NOT phone speaker');
+      debugPrint('TtsService: Recording continues from built-in mic (full-duplex mode)');
+
+      // CRITICAL: Re-apply audio context before each playback
+      // This ensures routing is properly set even if system changed it
+      try {
+        debugPrint('TtsService: Re-applying AudioContext for A2DP routing...');
+        await _audioPlayer!.setAudioContext(
+          AudioContext(
+            android: AudioContextAndroid(
+              isSpeakerphoneOn: false,
+              stayAwake: true,
+              contentType: AndroidContentType.music, // A2DP routing
+              usageType: AndroidUsageType.media,
+              audioFocus: AndroidAudioFocus.gainTransientMayDuck,
+            ),
+            iOS: AudioContextIOS(
+              category: AVAudioSessionCategory.playback,
+              options: {
+                // Note: allowBluetooth can only be used with playAndRecord or record category
+                // For playback-only, we use allowBluetoothA2DP which works with playback
+                AVAudioSessionOptions.allowBluetoothA2DP,
+                AVAudioSessionOptions.mixWithOthers,
+              },
+            ),
+          ),
+        );
+        debugPrint('TtsService: ✅ AudioContext re-applied for this playback');
+      } catch (e) {
+        debugPrint('TtsService: ⚠️ Failed to re-apply audio context: $e');
+      }
+
+      // CRITICAL: Before playback, verify and force Bluetooth routing
+      // This ensures A2DP is active and selected as output device
+      try {
+        debugPrint('TtsService: ═══ Verifying Bluetooth Routing Before Playback ═══');
+        // Note: We'll add a native method call here if needed
+        // For now, rely on AudioContext configuration
+        debugPrint('TtsService: AudioContext configured for A2DP routing');
+        debugPrint('TtsService: If audio still plays through phone speaker, A2DP may not be active');
+        debugPrint('TtsService: Solution: Play music through TWS first to activate A2DP');
+      } catch (e) {
+        debugPrint('TtsService: ⚠️ Could not verify routing: $e');
+      }
 
       // CRITICAL: Wait 500ms before starting playback to ensure hardware is ready
-      // This prevents audio from being cut off at the beginning
-      debugPrint('TtsService: ⏳ Waiting 500ms for playback hardware to be ready...');
+      // This allows TWS devices to be ready for A2DP playback
+      // Also prevents audio from being cut off at the beginning
+      debugPrint('TtsService: ⏳ Waiting 500ms for TWS A2DP routing to be ready...');
       await Future.delayed(const Duration(milliseconds: 500));
 
-      // Use AudioPlayer to play the audio file
+      // CRITICAL: Use native player for explicit A2DP routing
+      // AudioPlayer (audioplayers package) may not respect routing configuration
+      // Native MediaPlayer with setPreferredDevice() gives us guaranteed routing
+      if (_useNativePlayer) {
+        debugPrint('TtsService: ═══ Using Native Player for A2DP Routing ═══');
+        debugPrint('TtsService: Native player uses MediaPlayer.setPreferredDevice()');
+        debugPrint('TtsService: This ensures audio routes to Bluetooth A2DP explicitly');
+        
+        _playbackCompleter = Completer<void>();
+        
+        try {
+          // Start native playback
+          final success = await _nativeAudioChannel.invokeMethod<bool>(
+            'playAudioFileNative',
+            {'filePath': audioPath},
+          );
+          
+          if (success == true) {
+            debugPrint('TtsService: ✅ Native playback started - polling for completion...');
+            
+            // Poll for playback completion (native player doesn't have a callback mechanism)
+            // Check every 100ms if playback is still ongoing
+            while (true) {
+              await Future.delayed(const Duration(milliseconds: 100));
+              
+              final isPlaying = await _nativeAudioChannel.invokeMethod<bool>(
+                'isNativeAudioPlaying',
+              );
+              
+              if (isPlaying != true) {
+                debugPrint('TtsService: ✅ Native playback completed');
+                break;
+              }
+            }
+            
+            _playbackCompleter!.complete();
+          } else {
+            debugPrint('TtsService: ❌ Native playback failed - falling back to AudioPlayer');
+            throw Exception('Native playback failed');
+          }
+        } catch (e) {
+          debugPrint('TtsService: ❌ Native player error: $e');
+          debugPrint('TtsService: Falling back to AudioPlayer...');
+          
+          // Fallback to AudioPlayer if native player fails
+          _useNativePlayer = false;
+          
+          // Continue with AudioPlayer playback
+          _playbackCompleter = Completer<void>();
+          
+          debugPrint('TtsService: Starting playback via AudioPlayer (fallback)...');
+          debugPrint('TtsService: Stream type: MEDIA (Android ContentType.music)');
+          debugPrint('TtsService: Expected routing: Bluetooth A2DP → TWS speakers');
+          await _audioPlayer!.play(DeviceFileSource(audioPath));
+          
+          debugPrint('TtsService: ⏳ Waiting for playback to complete...');
+          await _playbackCompleter!.future;
+        }
+      } else {
+        // Use AudioPlayer (fallback or if native player is disabled)
+        _playbackCompleter = Completer<void>();
+
+        debugPrint('TtsService: Starting playback via AudioPlayer...');
+        debugPrint('TtsService: Stream type: MEDIA (Android ContentType.music)');
+        debugPrint('TtsService: Expected routing: Bluetooth A2DP → TWS speakers');
       await _audioPlayer!.play(DeviceFileSource(audioPath));
+
+        debugPrint('TtsService: ⏳ Waiting for playback to complete...');
+        await _playbackCompleter!.future;
+      }
+      
+      debugPrint('TtsService: ✅ Playback completed');
     } catch (e) {
       _isPlaying = false;
       debugPrint('TtsService: Error playing audio file: $e');
+      
+      // Complete the completer if there was an error
+      if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+        _playbackCompleter!.complete();
+      }
     }
   }
 

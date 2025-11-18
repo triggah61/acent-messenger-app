@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'google_stt_translator.dart';
-import 'assemblyai_stt_translator.dart';
+import 'mono_stt_translator.dart';
 
 class TranslatorHub extends StatelessWidget {
   const TranslatorHub({super.key});
@@ -32,13 +32,13 @@ class TranslatorHub extends StatelessWidget {
               ),
               const SizedBox(height: 40),
 
-              // Google STT Translator Card
+              // Stereo Translation Card
               _buildTranslatorCard(
                 context,
-                title: 'Google STT Translation',
+                title: 'Stereo Translation',
                 description:
-                    'Record 2 speakers with Google STT diarization, auto-separate voices, translate text, and play back each speaker with gender-based TTS and earpiece configuration',
-                icon: Icons.cloud_queue,
+                    'True stereo playback with left/right earpiece separation. Record 2 speakers, translate, and play TTS in each earpiece independently with full audio mode switching.',
+                icon: Icons.surround_sound,
                 color: const Color(0xFF4CAF50),
                 onTap: () {
                   Navigator.push(
@@ -50,25 +50,25 @@ class TranslatorHub extends StatelessWidget {
                 },
               ),
 
-              // const SizedBox(height: 20),
+              const SizedBox(height: 20),
 
-              // // AssemblyAI STT Translator Card
-              // _buildTranslatorCard(
-              //   context,
-              //   title: 'AssemblyAI STT Translation',
-              //   description:
-              //       'Record 2 speakers with AssemblyAI automatic language detection, speaker diarization, auto-separate voices, translate text, and play back each speaker with gender-based TTS and earpiece configuration',
-              //   icon: Icons.auto_awesome,
-              //   color: const Color(0xFF2196F3),
-              //   onTap: () {
-              //     Navigator.push(
-              //       context,
-              //       MaterialPageRoute(
-              //         builder: (context) => const AssemblyAiSttTranslator(),
-              //       ),
-              //     );
-              //   },
-              // ),
+              // Mono Translation Card
+              _buildTranslatorCard(
+                context,
+                title: 'Mono Translation',
+                description:
+                    'Full-duplex translation with simultaneous recording and playback. Continuous recording while TTS plays in mono mode through TWS. No audio mode switching required.',
+                icon: Icons.hearing,
+                color: const Color(0xFF2196F3),
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => const MonoSTTTranslator(),
+                    ),
+                  );
+                },
+              ),
 
               // Add bottom padding for better scrolling experience
               const SizedBox(height: 40),
