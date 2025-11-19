@@ -2,7 +2,7 @@ import 'package:acent_messenger/views/contacts/contacts.dart';
 import 'package:acent_messenger/views/settings/settings.dart';
 import 'package:acent_messenger/views/status/status.dart';
 import 'package:acent_messenger/views/wallet/wallet_screen.dart';
-import 'package:acent_messenger/views/translator/translator_hub.dart';
+import 'package:acent_messenger/views/translator/realtime_translator.dart';
 import 'package:flutter/material.dart';
 
 import '../views/chats/chat_screen.dart';
@@ -24,7 +24,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
     ContactsScreen(),
     // CallsScreen(),
     StatusScreen(),
-    const TranslatorHub(),
+    const RealtimeTranslator(),
     WalletScreen(),
     // SearchScreen(),
     SettingsScreen()

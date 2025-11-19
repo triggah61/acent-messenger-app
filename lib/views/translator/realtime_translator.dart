@@ -22,7 +22,7 @@ import '../../services/soniox_realtime_service.dart';
 import '../../services/streaming_audio_recorder_service.dart';
 import '../../services/bluetooth_service.dart';
 
-/// TTS Queue Item for Mono Translation
+/// TTS Queue Item for Realtime Translation
 /// PRODUCTION-READY: Pre-generation architecture with stereo channel routing
 /// Phase 1: Generate TTS file → Convert to stereo → Store file path in queue
 /// Phase 2: Pick file path → Play immediately (no generation latency)
@@ -44,17 +44,17 @@ class TtsQueueItem {
   });
 }
 
-/// Mono STT Translation - Full-duplex translation with simultaneous recording and playback
-/// Uses mono TTS playback (no stereo separation) with continuous recording
-class MonoSTTTranslator extends StatefulWidget {
+/// Realtime Translation - Full-duplex translation with simultaneous recording and playback
+/// Real-time transcription, translation, and TTS playback with stereo channel routing
+class RealtimeTranslator extends StatefulWidget {
   final SttProvider? provider;
-  const MonoSTTTranslator({super.key, this.provider});
+  const RealtimeTranslator({super.key, this.provider});
 
   @override
-  State<MonoSTTTranslator> createState() => _MonoSTTTranslatorState();
+  State<RealtimeTranslator> createState() => _RealtimeTranslatorState();
 }
 
-class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
+class _RealtimeTranslatorState extends State<RealtimeTranslator>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   // Services
   final ConfigService _configService = ConfigService.instance;
@@ -208,7 +208,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
   bool _isInitialized = false;
 
-  // MONO TRANSLATION: TTS Queue System
+  // REALTIME TRANSLATION: TTS Queue System
   final Queue<TtsQueueItem> _ttsQueue = Queue<TtsQueueItem>();
   bool _isProcessingQueue = false;
   String? _currentPlayingTtsPath;
@@ -231,7 +231,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     // When app comes back to foreground, re-initialize A2DP mode
     // This ensures audio routing is correct after being backgrounded
     if (state == AppLifecycleState.resumed) {
-      debugPrint('MonoSTTTranslator: App resumed - re-initializing A2DP mode');
+      debugPrint('RealtimeTranslator: App resumed - re-initializing A2DP mode');
       _initializeContinuousA2DPMode();
     }
   }
@@ -281,83 +281,83 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   Future<void> _enterRecordingRoute() async {
     try {
       await _audioRouteChannel.invokeMethod('enterRecordingRoute');
-      debugPrint('GoogleSTTTranslator: Entered recording route (phone mic)');
+      debugPrint('RealtimeTranslator: Entered recording route (phone mic)');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Failed to enter recording route: $e');
+      debugPrint('RealtimeTranslator: Failed to enter recording route: $e');
     }
   }
 
-  /// MONO TRANSLATION: Initialize continuous A2DP mode (NO switching)
+  /// REALTIME TRANSLATION: Initialize continuous A2DP mode (NO switching)
   /// Uses MODE_NORMAL approach: Phone mic input + A2DP output simultaneously
   Future<void> _initializeContinuousA2DPMode() async {
     try {
-      debugPrint('MonoSTTTranslator: ═══ Initializing Continuous A2DP Mode (MODE_NORMAL) ═══');
-      debugPrint('MonoSTTTranslator: Solution: MODE_NORMAL enables simultaneous:');
-      debugPrint('MonoSTTTranslator: - Recording from phone mic (AudioRecord MIC source)');
-      debugPrint('MonoSTTTranslator: - Playback through TWS via A2DP (MEDIA stream routing)');
-      debugPrint('MonoSTTTranslator: - NO mode switching during session');
-      debugPrint('MonoSTTTranslator: - NO SCO activation (Bluetooth stays in A2DP mode)');
+      debugPrint('RealtimeTranslator: ═══ Initializing Continuous A2DP Mode (MODE_NORMAL) ═══');
+      debugPrint('RealtimeTranslator: Solution: MODE_NORMAL enables simultaneous:');
+      debugPrint('RealtimeTranslator: - Recording from phone mic (AudioRecord MIC source)');
+      debugPrint('RealtimeTranslator: - Playback through TWS via A2DP (MEDIA stream routing)');
+      debugPrint('RealtimeTranslator: - NO mode switching during session');
+      debugPrint('RealtimeTranslator: - NO SCO activation (Bluetooth stays in A2DP mode)');
       
       await _audioRouteChannel.invokeMethod('enterContinuousA2DPMode');
       
-      debugPrint('MonoSTTTranslator: ✅ Continuous A2DP mode initialized');
-      debugPrint('MonoSTTTranslator: ✅ AudioManager mode: NORMAL (media mode)');
-      debugPrint('MonoSTTTranslator: ✅ Bluetooth SCO: OFF (A2DP active)');
-      debugPrint('MonoSTTTranslator: ✅ Recording source: Phone built-in mic (MIC source)');
-      debugPrint('MonoSTTTranslator: ✅ Playback output: TWS speakers via A2DP (MEDIA stream)');
-      debugPrint('MonoSTTTranslator: ✅ Full-duplex: Both input and output active simultaneously');
+      debugPrint('RealtimeTranslator: ✅ Continuous A2DP mode initialized');
+      debugPrint('RealtimeTranslator: ✅ AudioManager mode: NORMAL (media mode)');
+      debugPrint('RealtimeTranslator: ✅ Bluetooth SCO: OFF (A2DP active)');
+      debugPrint('RealtimeTranslator: ✅ Recording source: Phone built-in mic (MIC source)');
+      debugPrint('RealtimeTranslator: ✅ Playback output: TWS speakers via A2DP (MEDIA stream)');
+      debugPrint('RealtimeTranslator: ✅ Full-duplex: Both input and output active simultaneously');
       
       // CRITICAL: Verify audio routing after initialization
       try {
-        debugPrint('MonoSTTTranslator: ═══ Verifying Audio Routing ═══');
+        debugPrint('RealtimeTranslator: ═══ Verifying Audio Routing ═══');
         final routingInfo = await _audioRouteChannel.invokeMethod<Map>('checkAudioRouting');
         if (routingInfo != null) {
-          debugPrint('MonoSTTTranslator: Audio routing status:');
-          debugPrint('MonoSTTTranslator:   - Mode: ${routingInfo["mode"]}');
-          debugPrint('MonoSTTTranslator:   - A2DP on: ${routingInfo["isBluetoothA2dpOn"]}');
-          debugPrint('MonoSTTTranslator:   - SCO on: ${routingInfo["isBluetoothScoOn"]}');
-          debugPrint('MonoSTTTranslator:   - Has Bluetooth A2DP device: ${routingInfo["hasBluetoothA2dp"]}');
+          debugPrint('RealtimeTranslator: Audio routing status:');
+          debugPrint('RealtimeTranslator:   - Mode: ${routingInfo["mode"]}');
+          debugPrint('RealtimeTranslator:   - A2DP on: ${routingInfo["isBluetoothA2dpOn"]}');
+          debugPrint('RealtimeTranslator:   - SCO on: ${routingInfo["isBluetoothScoOn"]}');
+          debugPrint('RealtimeTranslator:   - Has Bluetooth A2DP device: ${routingInfo["hasBluetoothA2dp"]}');
           
           if (routingInfo["isBluetoothA2dpOn"] == true && routingInfo["hasBluetoothA2dp"] == true) {
-            debugPrint('MonoSTTTranslator: ✅ Bluetooth A2DP is active - routing should work');
+            debugPrint('RealtimeTranslator: ✅ Bluetooth A2DP is active - routing should work');
           } else {
-            debugPrint('MonoSTTTranslator: ⚠️ WARNING: A2DP may not be active!');
-            debugPrint('MonoSTTTranslator: ⚠️ Audio may route to phone speaker');
-            debugPrint('MonoSTTTranslator: ⚠️ Solution: Play music through TWS first to activate A2DP');
+            debugPrint('RealtimeTranslator: ⚠️ WARNING: A2DP may not be active!');
+            debugPrint('RealtimeTranslator: ⚠️ Audio may route to phone speaker');
+            debugPrint('RealtimeTranslator: ⚠️ Solution: Play music through TWS first to activate A2DP');
           }
         }
       } catch (e) {
-        debugPrint('MonoSTTTranslator: ⚠️ Could not verify routing: $e');
+        debugPrint('RealtimeTranslator: ⚠️ Could not verify routing: $e');
       }
       
       // Allow time for audio system to stabilize and A2DP to be ready
       await Future.delayed(const Duration(milliseconds: 500));
-      debugPrint('MonoSTTTranslator: ✅ Audio system ready for full-duplex operation');
-      debugPrint('MonoSTTTranslator: ✅ Expected behavior: TTS plays through TWS, recording from phone mic');
+      debugPrint('RealtimeTranslator: ✅ Audio system ready for full-duplex operation');
+      debugPrint('RealtimeTranslator: ✅ Expected behavior: TTS plays through TWS, recording from phone mic');
     } catch (e) {
-      debugPrint('MonoSTTTranslator: ❌ Failed to initialize continuous A2DP mode: $e');
+      debugPrint('RealtimeTranslator: ❌ Failed to initialize continuous A2DP mode: $e');
       // Will fall back to default routing
     }
   }
 
   Future<void> _enterPlaybackRoute() async {
-    // MONO TRANSLATION: NO-OP in continuous A2DP mode
+    // REALTIME TRANSLATION: NO-OP in continuous A2DP mode
     // Mode stays NORMAL throughout - no switching needed
-    debugPrint('MonoSTTTranslator: Continuous A2DP - no route switching (mode stays NORMAL)');
+    debugPrint('RealtimeTranslator: Continuous A2DP - no route switching (mode stays NORMAL)');
   }
 
   Future<void> _returnToRecordingRoute() async {
-    // MONO TRANSLATION: NO-OP in continuous A2DP mode
+    // REALTIME TRANSLATION: NO-OP in continuous A2DP mode
     // Mode stays NORMAL throughout - no switching needed
-    debugPrint('MonoSTTTranslator: Continuous A2DP - staying in NORMAL mode');
+    debugPrint('RealtimeTranslator: Continuous A2DP - staying in NORMAL mode');
   }
 
-  /// MONO TRANSLATION: Initialize Bluetooth service and check connection
+  /// REALTIME TRANSLATION: Initialize Bluetooth service and check connection
   Future<void> _initializeBluetoothAndCheck() async {
     try {
       // Initialize Bluetooth service
       await _bluetoothService.initialize();
-      debugPrint('MonoSTTTranslator: Bluetooth service initialized');
+      debugPrint('RealtimeTranslator: Bluetooth service initialized');
       
       // Wait a bit for initialization to complete and for Bluetooth profiles to be ready
       await Future.delayed(const Duration(milliseconds: 1000));
@@ -366,45 +366,45 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // This checks both A2DP and HEADSET profiles
       final deviceInfo = await _bluetoothService.checkConnection();
       
-      debugPrint('MonoSTTTranslator: ═══ Bluetooth Connection Check ═══');
-      debugPrint('MonoSTTTranslator: Connected: ${deviceInfo.isConnected}');
-      debugPrint('MonoSTTTranslator: Device Name: ${deviceInfo.deviceName}');
+      debugPrint('RealtimeTranslator: ═══ Bluetooth Connection Check ═══');
+      debugPrint('RealtimeTranslator: Connected: ${deviceInfo.isConnected}');
+      debugPrint('RealtimeTranslator: Device Name: ${deviceInfo.deviceName}');
       
       if (!deviceInfo.isConnected && mounted) {
         // Show dialog asking user to connect TWS
-        debugPrint('MonoSTTTranslator: ⚠️ No Bluetooth device connected');
+        debugPrint('RealtimeTranslator: ⚠️ No Bluetooth device connected');
         // Don't show dialog immediately - let user see the screen first
         // Show it when they try to start recording instead
         // The check will happen again when they try to start recording
       } else if (deviceInfo.isConnected) {
-        debugPrint('MonoSTTTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
-        debugPrint('MonoSTTTranslator: Ready for Mono Translation');
+        debugPrint('RealtimeTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
+        debugPrint('RealtimeTranslator: Ready for Realtime Translation');
       }
     } catch (e) {
-      debugPrint('MonoSTTTranslator: ❌ Error checking Bluetooth: $e');
-      debugPrint('MonoSTTTranslator: Stack trace: ${StackTrace.current}');
+      debugPrint('RealtimeTranslator: ❌ Error checking Bluetooth: $e');
+      debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
       // If check fails, don't block - let user try and check again when starting
-      debugPrint('MonoSTTTranslator: ⚠️ Bluetooth check failed, will check again when starting recording');
+      debugPrint('RealtimeTranslator: ⚠️ Bluetooth check failed, will check again when starting recording');
     }
   }
   
-  /// MONO TRANSLATION: Check Bluetooth before starting recording
+  /// REALTIME TRANSLATION: Check Bluetooth before starting recording
   Future<bool> _checkBluetoothBeforeRecording() async {
     try {
       final deviceInfo = await _bluetoothService.checkConnection();
       
       if (!deviceInfo.isConnected) {
-        debugPrint('MonoSTTTranslator: ⚠️ No Bluetooth device connected before recording');
+        debugPrint('RealtimeTranslator: ⚠️ No Bluetooth device connected before recording');
         if (mounted) {
           _showBluetoothConnectionDialog();
         }
         return false;
       }
       
-      debugPrint('MonoSTTTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
+      debugPrint('RealtimeTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
       return true;
     } catch (e) {
-      debugPrint('MonoSTTTranslator: ❌ Error checking Bluetooth before recording: $e');
+      debugPrint('RealtimeTranslator: ❌ Error checking Bluetooth before recording: $e');
       if (mounted) {
         _showBluetoothConnectionDialog();
       }
@@ -412,7 +412,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     }
   }
 
-  /// MONO TRANSLATION: Show Bluetooth connection dialog
+  /// REALTIME TRANSLATION: Show Bluetooth connection dialog
   void _showBluetoothConnectionDialog({bool allowRetry = true}) {
     showDialog(
       context: context,
@@ -425,7 +425,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             style: TextStyle(color: Colors.white),
           ),
           content: const Text(
-            'Mono Translation requires a Bluetooth TWS (True Wireless Stereo) headset to be connected.\n\nPlease ensure your TWS earpieces are connected and try again.',
+            'Realtime Translation requires a Bluetooth TWS (True Wireless Stereo) headset to be connected.\n\nPlease ensure your TWS earpieces are connected and try again.',
             style: TextStyle(color: Colors.white70),
           ),
           actions: [
@@ -434,13 +434,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
                 onPressed: () async {
                   Navigator.of(context).pop();
                   // Retry Bluetooth check
-                  debugPrint('MonoSTTTranslator: Retrying Bluetooth check...');
+                  debugPrint('RealtimeTranslator: Retrying Bluetooth check...');
                   final deviceInfo = await _bluetoothService.checkConnection();
                   if (deviceInfo.isConnected) {
-                    debugPrint('MonoSTTTranslator: ✅ Bluetooth now connected: ${deviceInfo.deviceName}');
+                    debugPrint('RealtimeTranslator: ✅ Bluetooth now connected: ${deviceInfo.deviceName}');
                     // User can now try starting recording again
                   } else {
-                    debugPrint('MonoSTTTranslator: ⚠️ Still not connected');
+                    debugPrint('RealtimeTranslator: ⚠️ Still not connected');
                     // Show dialog again if still not connected
                     if (mounted) {
                       _showBluetoothConnectionDialog(allowRetry: true);
@@ -476,23 +476,23 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     String channel,
   ) async {
     try {
-      debugPrint('MonoSTTTranslator: ═══ Converting Mono to Stereo ═══');
-      debugPrint('MonoSTTTranslator: Mono file: $monoFilePath');
-      debugPrint('MonoSTTTranslator: Target channel: $channel');
+      debugPrint('RealtimeTranslator: ═══ Converting Mono to Stereo ═══');
+      debugPrint('RealtimeTranslator: Mono file: $monoFilePath');
+      debugPrint('RealtimeTranslator: Target channel: $channel');
 
       // Read mono file
       final monoFile = File(monoFilePath);
       if (!await monoFile.exists()) {
-        debugPrint('MonoSTTTranslator: ❌ Mono file does not exist');
+        debugPrint('RealtimeTranslator: ❌ Mono file does not exist');
         return null;
       }
 
       final monoBytes = await monoFile.readAsBytes();
-      debugPrint('MonoSTTTranslator: Read ${monoBytes.length} bytes from mono file');
+      debugPrint('RealtimeTranslator: Read ${monoBytes.length} bytes from mono file');
 
       // Extract audio data and metadata from WAV file
       if (monoBytes.length < 44) {
-        debugPrint('MonoSTTTranslator: ❌ File too small to be valid WAV');
+        debugPrint('RealtimeTranslator: ❌ File too small to be valid WAV');
         return null;
       }
 
@@ -505,14 +505,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final channels = monoBytes[22] | (monoBytes[23] << 8);
       final bitsPerSample = monoBytes[34] | (monoBytes[35] << 8);
 
-      debugPrint('MonoSTTTranslator: WAV metadata:');
-      debugPrint('MonoSTTTranslator:   Sample rate: $sampleRate Hz');
-      debugPrint('MonoSTTTranslator:   Channels: $channels');
-      debugPrint('MonoSTTTranslator:   Bits per sample: $bitsPerSample');
+      debugPrint('RealtimeTranslator: WAV metadata:');
+      debugPrint('RealtimeTranslator:   Sample rate: $sampleRate Hz');
+      debugPrint('RealtimeTranslator:   Channels: $channels');
+      debugPrint('RealtimeTranslator:   Bits per sample: $bitsPerSample');
 
       // Extract audio data (skip 44-byte header)
       final audioData = monoBytes.sublist(44);
-      debugPrint('MonoSTTTranslator: Extracted ${audioData.length} bytes of audio data');
+      debugPrint('RealtimeTranslator: Extracted ${audioData.length} bytes of audio data');
 
       // Create stereo data with channel routing
       final stereoData = <int>[];
@@ -572,24 +572,24 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final stereoFile = File(stereoPath);
       await stereoFile.writeAsBytes(stereoWav);
 
-      debugPrint('MonoSTTTranslator: ✅ Stereo file created successfully');
-      debugPrint('MonoSTTTranslator:   Path: $stereoPath');
-      debugPrint('MonoSTTTranslator:   Size: ${stereoWav.length} bytes');
-      debugPrint('MonoSTTTranslator:   Channel: $channel');
-      debugPrint('MonoSTTTranslator:   Sample rate: $sampleRate Hz');
+      debugPrint('RealtimeTranslator: ✅ Stereo file created successfully');
+      debugPrint('RealtimeTranslator:   Path: $stereoPath');
+      debugPrint('RealtimeTranslator:   Size: ${stereoWav.length} bytes');
+      debugPrint('RealtimeTranslator:   Channel: $channel');
+      debugPrint('RealtimeTranslator:   Sample rate: $sampleRate Hz');
 
       // Clean up original mono file
       try {
         await monoFile.delete();
-        debugPrint('MonoSTTTranslator: ✅ Cleaned up original mono file');
+        debugPrint('RealtimeTranslator: ✅ Cleaned up original mono file');
       } catch (e) {
-        debugPrint('MonoSTTTranslator: ⚠️ Could not delete mono file: $e');
+        debugPrint('RealtimeTranslator: ⚠️ Could not delete mono file: $e');
       }
 
       return stereoPath;
     } catch (e) {
-      debugPrint('MonoSTTTranslator: ❌ Error converting mono to stereo: $e');
-      debugPrint('MonoSTTTranslator:    Stack trace: ${StackTrace.current}');
+      debugPrint('RealtimeTranslator: ❌ Error converting mono to stereo: $e');
+      debugPrint('RealtimeTranslator:    Stack trace: ${StackTrace.current}');
       return null;
     }
   }
@@ -604,16 +604,16 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     required String gender,
   }) async {
     try {
-      debugPrint('MonoSTTTranslator: ═══ PHASE 1: TTS Pre-Generation + Stereo Conversion ═══');
-      debugPrint('MonoSTTTranslator: Speaker: $speakerIndex');
-      debugPrint('MonoSTTTranslator: Language: $languageCode');
-      debugPrint('MonoSTTTranslator: Text: "${text.substring(0, text.length > 50 ? 50 : text.length)}..."');
-      debugPrint('MonoSTTTranslator: Gender: $gender');
+      debugPrint('RealtimeTranslator: ═══ PHASE 1: TTS Pre-Generation + Stereo Conversion ═══');
+      debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
+      debugPrint('RealtimeTranslator: Language: $languageCode');
+      debugPrint('RealtimeTranslator: Text: "${text.substring(0, text.length > 50 ? 50 : text.length)}..."');
+      debugPrint('RealtimeTranslator: Gender: $gender');
       
       // Get speaker's earpiece preference (left or right channel)
       final earpiece = _speakerEarpieces[speakerIndex] ?? 'left';
-      debugPrint('MonoSTTTranslator: Target channel: $earpiece');
-      debugPrint('MonoSTTTranslator: Recording continues during TTS generation + stereo conversion (parallel processing)');
+      debugPrint('RealtimeTranslator: Target channel: $earpiece');
+      debugPrint('RealtimeTranslator: Recording continues during TTS generation + stereo conversion (parallel processing)');
 
       // STEP 1: Generate mono TTS file (Phase 1 pre-generation)
       final startTime = DateTime.now();
@@ -625,9 +625,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final generationTime = DateTime.now().difference(startTime).inMilliseconds;
 
       if (monoTtsPath != null && monoTtsPath.isNotEmpty) {
-        debugPrint('MonoSTTTranslator: ✅ Mono TTS file generated successfully');
-        debugPrint('MonoSTTTranslator:    Path: $monoTtsPath');
-        debugPrint('MonoSTTTranslator:    Generation time: ${generationTime}ms');
+        debugPrint('RealtimeTranslator: ✅ Mono TTS file generated successfully');
+        debugPrint('RealtimeTranslator:    Path: $monoTtsPath');
+        debugPrint('RealtimeTranslator:    Generation time: ${generationTime}ms');
 
         // STEP 2: Convert mono to stereo with channel routing
         final stereoStartTime = DateTime.now();
@@ -643,12 +643,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           if (await stereoFile.exists()) {
             final stereoFileSize = await stereoFile.length();
             
-            debugPrint('MonoSTTTranslator: ✅ Stereo TTS file ready for queueing');
-            debugPrint('MonoSTTTranslator:    Path: $stereoTtsPath');
-            debugPrint('MonoSTTTranslator:    Size: $stereoFileSize bytes');
-            debugPrint('MonoSTTTranslator:    Channel: $earpiece');
-            debugPrint('MonoSTTTranslator:    Total time: ${generationTime + stereoConversionTime}ms (${generationTime}ms gen + ${stereoConversionTime}ms stereo)');
-            debugPrint('MonoSTTTranslator:    File is pre-verified and ready for immediate stereo playback');
+            debugPrint('RealtimeTranslator: ✅ Stereo TTS file ready for queueing');
+            debugPrint('RealtimeTranslator:    Path: $stereoTtsPath');
+            debugPrint('RealtimeTranslator:    Size: $stereoFileSize bytes');
+            debugPrint('RealtimeTranslator:    Channel: $earpiece');
+            debugPrint('RealtimeTranslator:    Total time: ${generationTime + stereoConversionTime}ms (${generationTime}ms gen + ${stereoConversionTime}ms stereo)');
+            debugPrint('RealtimeTranslator:    File is pre-verified and ready for immediate stereo playback');
 
             // Add pre-generated STEREO file to queue (not mono!)
             final item = TtsQueueItem(
@@ -661,37 +661,37 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             );
             
             _ttsQueue.add(item);
-            debugPrint('MonoSTTTranslator: ✅ Added pre-generated STEREO TTS to queue');
-            debugPrint('MonoSTTTranslator:    Queue size: ${_ttsQueue.length}');
-            debugPrint('MonoSTTTranslator:    Ready for immediate stereo playback (no generation delay)');
-            debugPrint('MonoSTTTranslator:    Will play through $earpiece earpiece only');
-            debugPrint('MonoSTTTranslator:    Recording continues uninterrupted');
+            debugPrint('RealtimeTranslator: ✅ Added pre-generated STEREO TTS to queue');
+            debugPrint('RealtimeTranslator:    Queue size: ${_ttsQueue.length}');
+            debugPrint('RealtimeTranslator:    Ready for immediate stereo playback (no generation delay)');
+            debugPrint('RealtimeTranslator:    Will play through $earpiece earpiece only');
+            debugPrint('RealtimeTranslator:    Recording continues uninterrupted');
 
             // Start processing queue if not already processing
             if (!_isProcessingQueue) {
               _processTtsQueue();
             }
           } else {
-            debugPrint('MonoSTTTranslator: ❌ Stereo TTS file does not exist after conversion: $stereoTtsPath');
-            debugPrint('MonoSTTTranslator:    File will not be added to queue');
+            debugPrint('RealtimeTranslator: ❌ Stereo TTS file does not exist after conversion: $stereoTtsPath');
+            debugPrint('RealtimeTranslator:    File will not be added to queue');
             // Don't add to queue - skip this TTS
           }
         } else {
-          debugPrint('MonoSTTTranslator: ❌ Stereo conversion failed for mono file: $monoTtsPath');
-          debugPrint('MonoSTTTranslator:    Conversion time: ${stereoConversionTime}ms');
-          debugPrint('MonoSTTTranslator:    File will not be added to queue - translation will be skipped');
+          debugPrint('RealtimeTranslator: ❌ Stereo conversion failed for mono file: $monoTtsPath');
+          debugPrint('RealtimeTranslator:    Conversion time: ${stereoConversionTime}ms');
+          debugPrint('RealtimeTranslator:    File will not be added to queue - translation will be skipped');
           // Don't add to queue - skip this TTS
         }
       } else {
-        debugPrint('MonoSTTTranslator: ❌ Mono TTS generation failed for text: "$text"');
-        debugPrint('MonoSTTTranslator:    Generation time: ${generationTime}ms');
-        debugPrint('MonoSTTTranslator:    File will not be added to queue - translation will be skipped');
+        debugPrint('RealtimeTranslator: ❌ Mono TTS generation failed for text: "$text"');
+        debugPrint('RealtimeTranslator:    Generation time: ${generationTime}ms');
+        debugPrint('RealtimeTranslator:    File will not be added to queue - translation will be skipped');
         // Don't add to queue - skip this TTS
       }
     } catch (e) {
-      debugPrint('MonoSTTTranslator: ❌ Error in Phase 1 TTS generation + stereo conversion: $e');
-      debugPrint('MonoSTTTranslator:    Stack trace: ${StackTrace.current}');
-      debugPrint('MonoSTTTranslator:    This TTS will be skipped - queue continues');
+      debugPrint('RealtimeTranslator: ❌ Error in Phase 1 TTS generation + stereo conversion: $e');
+      debugPrint('RealtimeTranslator:    Stack trace: ${StackTrace.current}');
+      debugPrint('RealtimeTranslator:    This TTS will be skipped - queue continues');
       // Don't add to queue - error isolation ensures other TTS items continue
     }
   }
@@ -705,37 +705,37 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     }
 
     _isProcessingQueue = true;
-    debugPrint('MonoSTTTranslator: ═══ PHASE 2: STEREO TTS Queue Processing ═══');
-    debugPrint('MonoSTTTranslator: Queue size: ${_ttsQueue.length} pre-generated STEREO files ready');
-    debugPrint('MonoSTTTranslator: Files are already converted to stereo - immediate channel-specific playback starts');
+    debugPrint('RealtimeTranslator: ═══ PHASE 2: STEREO TTS Queue Processing ═══');
+    debugPrint('RealtimeTranslator: Queue size: ${_ttsQueue.length} pre-generated STEREO files ready');
+    debugPrint('RealtimeTranslator: Files are already converted to stereo - immediate channel-specific playback starts');
 
     while (_ttsQueue.isNotEmpty) {
       final item = _ttsQueue.removeFirst();
       final startTime = DateTime.now();
       
-      debugPrint('MonoSTTTranslator: ═══ Playing Pre-Generated STEREO TTS ═══');
-      debugPrint('MonoSTTTranslator: Speaker: ${item.speakerIndex}');
-      debugPrint('MonoSTTTranslator: File: ${item.filePath}');
-      debugPrint('MonoSTTTranslator: Channel: ${item.channel} earpiece');
-      debugPrint('MonoSTTTranslator: Text: "${item.originalText.substring(0, item.originalText.length > 50 ? 50 : item.originalText.length)}..."');
-      debugPrint('MonoSTTTranslator: File size: ${item.fileSize} bytes (stereo format)');
-      debugPrint('MonoSTTTranslator: Pre-generated at: ${item.timestamp}');
-      debugPrint('MonoSTTTranslator: NO generation delay - stereo file ready for immediate channel-specific playback');
+      debugPrint('RealtimeTranslator: ═══ Playing Pre-Generated STEREO TTS ═══');
+      debugPrint('RealtimeTranslator: Speaker: ${item.speakerIndex}');
+      debugPrint('RealtimeTranslator: File: ${item.filePath}');
+      debugPrint('RealtimeTranslator: Channel: ${item.channel} earpiece');
+      debugPrint('RealtimeTranslator: Text: "${item.originalText.substring(0, item.originalText.length > 50 ? 50 : item.originalText.length)}..."');
+      debugPrint('RealtimeTranslator: File size: ${item.fileSize} bytes (stereo format)');
+      debugPrint('RealtimeTranslator: Pre-generated at: ${item.timestamp}');
+      debugPrint('RealtimeTranslator: NO generation delay - stereo file ready for immediate channel-specific playback');
 
       try {
         // CRITICAL: Verify file still exists (safety check)
         final file = File(item.filePath);
         if (!await file.exists()) {
-          debugPrint('MonoSTTTranslator: ❌ Pre-generated file missing: ${item.filePath}');
-          debugPrint('MonoSTTTranslator:    Skipping this item and continuing to next');
+          debugPrint('RealtimeTranslator: ❌ Pre-generated file missing: ${item.filePath}');
+          debugPrint('RealtimeTranslator:    Skipping this item and continuing to next');
           continue; // Skip to next item
         }
 
         // Verify file size matches (ensures file wasn't corrupted)
         final currentSize = await file.length();
         if (currentSize != item.fileSize) {
-          debugPrint('MonoSTTTranslator: ⚠️ File size mismatch: Expected ${item.fileSize}, got $currentSize');
-          debugPrint('MonoSTTTranslator:    File may be corrupted - skipping');
+          debugPrint('RealtimeTranslator: ⚠️ File size mismatch: Expected ${item.fileSize}, got $currentSize');
+          debugPrint('RealtimeTranslator:    File may be corrupted - skipping');
           // Clean up corrupted file
           try {
             await file.delete();
@@ -743,8 +743,8 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           continue; // Skip to next item
         }
 
-        debugPrint('MonoSTTTranslator: ✅ Stereo file verified - starting channel-specific playback immediately');
-        debugPrint('MonoSTTTranslator: ✅ Audio will play through ${item.channel} earpiece only');
+        debugPrint('RealtimeTranslator: ✅ Stereo file verified - starting channel-specific playback immediately');
+        debugPrint('RealtimeTranslator: ✅ Audio will play through ${item.channel} earpiece only');
         
         _currentPlayingTtsPath = item.filePath;
         
@@ -763,23 +763,23 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         // MODE_NORMAL approach: Phone mic input + A2DP stereo output simultaneously
         // Native MediaPlayer plays stereo WAV with channel separation
         // AudioRecord with MIC source continues from phone mic (independent of mode)
-        debugPrint('MonoSTTTranslator: ═══ Playing STEREO TTS (MODE_NORMAL Full-Duplex) ═══');
-        debugPrint('MonoSTTTranslator: Mode: NORMAL (media mode - A2DP routing enabled)');
-        debugPrint('MonoSTTTranslator: Recording: Phone built-in mic (continues)');
-        debugPrint('MonoSTTTranslator: Playback: TWS speakers via A2DP (MEDIA stream - STEREO)');
-        debugPrint('MonoSTTTranslator: Channel routing: ${item.channel} earpiece (stereo file)');
-        debugPrint('MonoSTTTranslator: Simultaneous: Both active - NO mode switching');
+        debugPrint('RealtimeTranslator: ═══ Playing STEREO TTS (MODE_NORMAL Full-Duplex) ═══');
+        debugPrint('RealtimeTranslator: Mode: NORMAL (media mode - A2DP routing enabled)');
+        debugPrint('RealtimeTranslator: Recording: Phone built-in mic (continues)');
+        debugPrint('RealtimeTranslator: Playback: TWS speakers via A2DP (MEDIA stream - STEREO)');
+        debugPrint('RealtimeTranslator: Channel routing: ${item.channel} earpiece (stereo file)');
+        debugPrint('RealtimeTranslator: Simultaneous: Both active - NO mode switching');
         
         // Play pre-generated file (NO generation wait!)
         await _ttsService.playAudioFile(item.filePath);
         
         final playbackTime = DateTime.now().difference(startTime).inMilliseconds;
         
-        debugPrint('MonoSTTTranslator: ✅ STEREO TTS playback completed through TWS A2DP');
-        debugPrint('MonoSTTTranslator: ✅ Total time (queue → playback complete): ${playbackTime}ms');
-        debugPrint('MonoSTTTranslator: ✅ Audio played through ${item.channel} earpiece as expected');
-        debugPrint('MonoSTTTranslator: ✅ Recording continued throughout (phone mic still active)');
-        debugPrint('MonoSTTTranslator: ✅ Full-duplex stereo operation verified');
+        debugPrint('RealtimeTranslator: ✅ STEREO TTS playback completed through TWS A2DP');
+        debugPrint('RealtimeTranslator: ✅ Total time (queue → playback complete): ${playbackTime}ms');
+        debugPrint('RealtimeTranslator: ✅ Audio played through ${item.channel} earpiece as expected');
+        debugPrint('RealtimeTranslator: ✅ Recording continued throughout (phone mic still active)');
+        debugPrint('RealtimeTranslator: ✅ Full-duplex stereo operation verified');
 
         // Update UI state after playback
         if (mounted) {
@@ -797,19 +797,19 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         try {
           if (await file.exists()) {
             await file.delete();
-            debugPrint('MonoSTTTranslator: ✅ Cleaned up TTS file: ${item.filePath}');
+            debugPrint('RealtimeTranslator: ✅ Cleaned up TTS file: ${item.filePath}');
           }
         } catch (e) {
-          debugPrint('MonoSTTTranslator: ⚠️ Error deleting TTS file: $e');
+          debugPrint('RealtimeTranslator: ⚠️ Error deleting TTS file: $e');
           // Non-critical - file will be cleaned up later by system
         }
 
         _currentPlayingTtsPath = null;
         
       } catch (e) {
-        debugPrint('MonoSTTTranslator: ❌ Error playing queue item: $e');
-        debugPrint('MonoSTTTranslator:    Stack trace: ${StackTrace.current}');
-        debugPrint('MonoSTTTranslator:    Cleaning up file and continuing to next item');
+        debugPrint('RealtimeTranslator: ❌ Error playing queue item: $e');
+        debugPrint('RealtimeTranslator:    Stack trace: ${StackTrace.current}');
+        debugPrint('RealtimeTranslator:    Cleaning up file and continuing to next item');
         
         // Clean up file on error
         try {
@@ -838,7 +838,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     }
 
     _isProcessingQueue = false;
-    debugPrint('MonoSTTTranslator: ✅ TTS queue processing complete (Phase 2 finished)');
+    debugPrint('RealtimeTranslator: ✅ TTS queue processing complete (Phase 2 finished)');
   }
 
   /// Check if a WAV file contains meaningful audio (not just a tiny/silent file)
@@ -849,23 +849,23 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final file = File(path);
       if (!await file.exists()) {
         debugPrint(
-            'GoogleSTTTranslator: Speaker $speakerIndex audio missing: $path');
+            'RealtimeTranslator: Speaker $speakerIndex audio missing: $path');
         return false;
       }
       final size = await file.length();
       // 44 bytes = WAV header only; use a conservative threshold (~1KB) to avoid empty streams
       const int minBytes = 1024;
       debugPrint(
-          'GoogleSTTTranslator: Speaker $speakerIndex audio size: $size bytes');
+          'RealtimeTranslator: Speaker $speakerIndex audio size: $size bytes');
       if (size <= 44 || size < minBytes) {
         debugPrint(
-            'GoogleSTTTranslator: Skipping STT for Speaker $speakerIndex - audio too small');
+            'RealtimeTranslator: Skipping STT for Speaker $speakerIndex - audio too small');
         return false;
       }
       return true;
     } catch (e) {
       debugPrint(
-          'GoogleSTTTranslator: Audio check error for Speaker $speakerIndex: $e');
+          'RealtimeTranslator: Audio check error for Speaker $speakerIndex: $e');
       return false;
     }
   }
@@ -902,9 +902,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             ),
           ),
         );
-        debugPrint('GoogleSTTTranslator: ✅ Sound effect player configured for Bluetooth/TWS output');
+        debugPrint('RealtimeTranslator: ✅ Sound effect player configured for Bluetooth/TWS output');
       } catch (e) {
-        debugPrint('GoogleSTTTranslator: ⚠️ Failed to configure sound effect player: $e');
+        debugPrint('RealtimeTranslator: ⚠️ Failed to configure sound effect player: $e');
       }
 
       // Set up TTS service callbacks for UI state synchronization
@@ -915,7 +915,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             _isPlayingTts2 = false;
           });
           debugPrint(
-              'GoogleSTTTranslator: TTS playback completed - UI state updated');
+              'RealtimeTranslator: TTS playback completed - UI state updated');
         }
       });
 
@@ -926,14 +926,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             _isPlayingTts2 = false;
           });
           debugPrint(
-              'GoogleSTTTranslator: TTS playback error - UI state updated');
+              'RealtimeTranslator: TTS playback error - UI state updated');
         }
       });
 
       // Set up unified stereo TTS service callback for both UI state and automatic mode
       _stereoTtsService.setPlaybackCompletedCallback(() async {
         debugPrint(
-            'GoogleSTTTranslator: 🎵 Unified playback completion callback triggered!');
+            'RealtimeTranslator: 🎵 Unified playback completion callback triggered!');
         debugPrint(
             '  _isAutomaticMode: $_isAutomaticMode, _isRecording: $_isRecording, _isPlayingStereo: $_isPlayingStereo');
 
@@ -946,7 +946,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         // Perform deferred cleanup of TTS files after playback completes
         if (_pendingStereoPlaybackCleanup) {
           debugPrint(
-              'GoogleSTTTranslator: Performing deferred TTS cleanup after playback');
+              'RealtimeTranslator: Performing deferred TTS cleanup after playback');
           await _cleanupTtsFiles();
           _pendingStereoPlaybackCleanup = false;
         }
@@ -954,7 +954,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         // Handle automatic mode restart
         if (_isAutomaticMode && !_isRecording) {
           debugPrint(
-              'GoogleSTTTranslator: ✅ Automatic mode - stereo playback COMPLETED! Starting new cycle in 500ms...');
+              'RealtimeTranslator: ✅ Automatic mode - stereo playback COMPLETED! Starting new cycle in 500ms...');
 
           setState(() {
             _isProcessing = false;
@@ -966,18 +966,18 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             // Double-check conditions before starting new cycle
             if (_isAutomaticMode && !_isRecording && !_isPlayingStereo) {
               debugPrint(
-                  'GoogleSTTTranslator: 🔄 Conditions met, starting new recording cycle...');
+                  'RealtimeTranslator: 🔄 Conditions met, starting new recording cycle...');
               debugPrint(
-                  'GoogleSTTTranslator: ⏰ 1.5s delay ensures TTS audio has completely finished');
+                  'RealtimeTranslator: ⏰ 1.5s delay ensures TTS audio has completely finished');
               _startAutomaticRecording();
             } else {
               debugPrint(
-                  'GoogleSTTTranslator: ⚠️ Conditions not met for restart: mode=$_isAutomaticMode, recording=$_isRecording, playing=$_isPlayingStereo');
+                  'RealtimeTranslator: ⚠️ Conditions not met for restart: mode=$_isAutomaticMode, recording=$_isRecording, playing=$_isPlayingStereo');
             }
           });
         } else {
           debugPrint(
-              'GoogleSTTTranslator: Manual mode - stereo playback completed, UI state updated');
+              'RealtimeTranslator: Manual mode - stereo playback completed, UI state updated');
         }
       });
 
@@ -987,7 +987,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             _isPlayingStereo = false;
           });
           debugPrint(
-              'GoogleSTTTranslator: Stereo TTS playback error - UI state updated');
+              'RealtimeTranslator: Stereo TTS playback error - UI state updated');
         }
       });
       final languages = await _configService.getSupportedLanguages();
@@ -1022,9 +1022,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         _isInitialized = true;
       });
 
-      debugPrint('GoogleSTTTranslator: Services initialized successfully');
+      debugPrint('RealtimeTranslator: Services initialized successfully');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Initialization error: $e');
+      debugPrint('RealtimeTranslator: Initialization error: $e');
       _showErrorDialog('Failed to initialize translator: $e');
     }
   }
@@ -1083,7 +1083,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
     // No model downloads needed - translation uses Azure Translator API via backend
     debugPrint(
-        'GoogleSTTTranslator: ✅ Translation service ready (Azure Translator API)');
+        'RealtimeTranslator: ✅ Translation service ready (Azure Translator API)');
 
     // Transition to main recording screen
     setState(() {
@@ -1092,7 +1092,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     });
 
     debugPrint(
-        'GoogleSTTTranslator: Successfully transitioned to recording screen');
+        'RealtimeTranslator: Successfully transitioned to recording screen');
   }
 
   Future<void> _toggleRecording() async {
@@ -1115,7 +1115,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
   Future<void> _startRecording() async {
     try {
-      debugPrint('GoogleSTTTranslator: ═══ Starting Recording ═══');
+      debugPrint('RealtimeTranslator: ═══ Starting Recording ═══');
 
       final hasPermission =
           await _permissionService.requestMicrophonePermission();
@@ -1126,23 +1126,23 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
       // CRITICAL: Always force built-in mic for recording
       debugPrint(
-          'GoogleSTTTranslator: Step 1: Configuring audio route for recording...');
+          'RealtimeTranslator: Step 1: Configuring audio route for recording...');
       await _enterRecordingRoute();
-      debugPrint('GoogleSTTTranslator: ✅ Audio route configured for RECORDING');
+      debugPrint('RealtimeTranslator: ✅ Audio route configured for RECORDING');
 
       // Add delay to ensure audio system has switched modes
       await Future.delayed(const Duration(milliseconds: 200));
-      debugPrint('GoogleSTTTranslator: ✅ Audio system ready');
+      debugPrint('RealtimeTranslator: ✅ Audio system ready');
 
       final directory = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       _recordedAudioPath = '${directory.path}/recording_$timestamp.wav';
 
       debugPrint(
-          'GoogleSTTTranslator: Step 2: Starting NATIVE audio recorder...');
-      debugPrint('GoogleSTTTranslator: Recording path: $_recordedAudioPath');
+          'RealtimeTranslator: Step 2: Starting NATIVE audio recorder...');
+      debugPrint('RealtimeTranslator: Recording path: $_recordedAudioPath');
       debugPrint(
-          'GoogleSTTTranslator: Expected input: FORCED built-in microphone (MIC audio source)');
+          'RealtimeTranslator: Expected input: FORCED built-in microphone (MIC audio source)');
 
       // Play start recording sound effect
       await _playStartRecordingSound();
@@ -1153,7 +1153,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           await _nativeRecorder.startRecording(_recordedAudioPath!);
 
       if (!recordingStarted) {
-        debugPrint('GoogleSTTTranslator: ❌ Failed to start native recording');
+        debugPrint('RealtimeTranslator: ❌ Failed to start native recording');
         _showErrorDialog('Failed to start recording. Please try again.');
         return;
       }
@@ -1186,10 +1186,10 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       _pulseController.repeat(reverse: true);
       _waveController.repeat();
 
-      debugPrint('GoogleSTTTranslator: ✅ Recording started successfully');
-      debugPrint('GoogleSTTTranslator: Using built-in phone microphone');
+      debugPrint('RealtimeTranslator: ✅ Recording started successfully');
+      debugPrint('RealtimeTranslator: Using built-in phone microphone');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Recording error: $e');
+      debugPrint('RealtimeTranslator: ❌ Recording error: $e');
       _showErrorDialog('Failed to start recording: $e');
     }
   }
@@ -1203,16 +1203,16 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // This prevents mic from capturing during processing/playback phases
       _stopSoundLevelMonitoring();
       debugPrint(
-          'GoogleSTTTranslator: ✅ Sound level monitoring stopped (mic OFF for playback)');
+          'RealtimeTranslator: ✅ Sound level monitoring stopped (mic OFF for playback)');
 
       // Stop the NATIVE audio recorder
-      debugPrint('GoogleSTTTranslator: Stopping native audio recorder...');
+      debugPrint('RealtimeTranslator: Stopping native audio recorder...');
       final String? recordedPath = await _nativeRecorder.stopRecording();
 
       if (recordedPath == null) {
-        debugPrint('GoogleSTTTranslator: ❌ Failed to stop recording properly');
+        debugPrint('RealtimeTranslator: ❌ Failed to stop recording properly');
       } else {
-        debugPrint('GoogleSTTTranslator: ✅ Recording saved: $recordedPath');
+        debugPrint('RealtimeTranslator: ✅ Recording saved: $recordedPath');
       }
 
       setState(() {
@@ -1225,10 +1225,10 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       _waveController.stop();
 
       debugPrint(
-          'GoogleSTTTranslator: Recording stopped, starting processing...');
+          'RealtimeTranslator: Recording stopped, starting processing...');
       await _processAudio();
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Stop recording error: $e');
+      debugPrint('RealtimeTranslator: Stop recording error: $e');
       _showErrorDialog('Failed to stop recording: $e');
       setState(() {
         _isRecording = false;
@@ -1245,12 +1245,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Start real-time translation session using Soniox
   Future<void> _startRealtimeSession() async {
     try {
-      debugPrint('MonoSTTTranslator: ═══ Starting Real-time Session ═══');
+      debugPrint('RealtimeTranslator: ═══ Starting Real-time Session ═══');
 
-      // MONO TRANSLATION: Check Bluetooth connection before starting
+      // REALTIME TRANSLATION: Check Bluetooth connection before starting
       final hasBluetooth = await _checkBluetoothBeforeRecording();
       if (!hasBluetooth) {
-        debugPrint('MonoSTTTranslator: ❌ Cannot start - Bluetooth TWS not connected');
+        debugPrint('RealtimeTranslator: ❌ Cannot start - Bluetooth TWS not connected');
         return; // Dialog already shown by _checkBluetoothBeforeRecording
       }
 
@@ -1281,21 +1281,21 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         _isPlayingTts2 = false;
       });
 
-      debugPrint('GoogleSTTTranslator: Configuring audio route for recording...');
+      debugPrint('RealtimeTranslator: Configuring audio route for recording...');
       await _enterRecordingRoute();
       await Future.delayed(const Duration(milliseconds: 200));
 
       // Initialize Soniox service
-      debugPrint('GoogleSTTTranslator: Initializing Soniox service...');
+      debugPrint('RealtimeTranslator: Initializing Soniox service...');
       await _sonioxService.initialize();
 
       // Connect to Soniox WebSocket
       final speaker1Lang = _speakerLanguages[0]?.code ?? 'en';
       final speaker2Lang = _speakerLanguages[1]?.code ?? 'bn';
       
-      debugPrint('GoogleSTTTranslator: Connecting to Soniox...');
-      debugPrint('GoogleSTTTranslator: Speaker 1 language: $speaker1Lang');
-      debugPrint('GoogleSTTTranslator: Speaker 2 language: $speaker2Lang');
+      debugPrint('RealtimeTranslator: Connecting to Soniox...');
+      debugPrint('RealtimeTranslator: Speaker 1 language: $speaker1Lang');
+      debugPrint('RealtimeTranslator: Speaker 2 language: $speaker2Lang');
 
       await _sonioxService.connect(
         languageA: speaker1Lang,
@@ -1305,25 +1305,25 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
       // Set up callbacks
       _sonioxService.onConnected = () {
-        debugPrint('GoogleSTTTranslator: ✅ Soniox connected - starting audio stream');
+        debugPrint('RealtimeTranslator: ✅ Soniox connected - starting audio stream');
         _startAudioStreaming();
       };
 
       _sonioxService.onError = (error) {
-        debugPrint('GoogleSTTTranslator: ❌ Soniox error: $error');
+        debugPrint('RealtimeTranslator: ❌ Soniox error: $error');
         _showErrorDialog('Real-time translation error: $error');
         _stopRealtimeSession();
       };
 
       _sonioxService.onDisconnected = () {
-        debugPrint('GoogleSTTTranslator: ⚠️ Soniox disconnected');
+        debugPrint('RealtimeTranslator: ⚠️ Soniox disconnected');
       };
 
       // Listen to Soniox results
       _sonioxStreamSubscription = _sonioxService.resultStream?.listen(
         _handleSonioxResult,
         onError: (error) {
-          debugPrint('GoogleSTTTranslator: ❌ Soniox stream error: $error');
+          debugPrint('RealtimeTranslator: ❌ Soniox stream error: $error');
         },
       );
 
@@ -1335,33 +1335,33 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       _recordedAudioPath = '${directory.path}/realtime_recording_$timestamp.wav';
 
-      debugPrint('GoogleSTTTranslator: Starting native audio recorder...');
-      debugPrint('GoogleSTTTranslator: Recording path: $_recordedAudioPath');
+      debugPrint('RealtimeTranslator: Starting native audio recorder...');
+      debugPrint('RealtimeTranslator: Recording path: $_recordedAudioPath');
 
       // Use existing native recorder (works immediately)
       final bool recordingStarted =
           await _nativeRecorder.startRecording(_recordedAudioPath!);
 
       if (!recordingStarted) {
-        debugPrint('GoogleSTTTranslator: ❌ Failed to start native recording');
+        debugPrint('RealtimeTranslator: ❌ Failed to start native recording');
         _showErrorDialog('Failed to start recording. Please try again.');
         await _sonioxService.disconnect();
         return;
       }
 
-      debugPrint('GoogleSTTTranslator: ✅ Native recording started');
+      debugPrint('RealtimeTranslator: ✅ Native recording started');
       
       // Start polling audio file to send chunks to Soniox
-      debugPrint('GoogleSTTTranslator: Starting audio file polling for streaming...');
+      debugPrint('RealtimeTranslator: Starting audio file polling for streaming...');
       _startAudioFilePolling();
 
       _pulseController.repeat(reverse: true);
       _waveController.repeat();
 
-      debugPrint('GoogleSTTTranslator: ✅ Real-time session started successfully');
-      debugPrint('GoogleSTTTranslator: Audio chunks will be streamed to Soniox');
+      debugPrint('RealtimeTranslator: ✅ Real-time session started successfully');
+      debugPrint('RealtimeTranslator: Audio chunks will be streamed to Soniox');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Real-time session error: $e');
+      debugPrint('RealtimeTranslator: ❌ Real-time session error: $e');
       _showErrorDialog('Failed to start real-time session: $e');
       setState(() {
         _isRecording = false;
@@ -1372,7 +1372,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Stop real-time translation session
   Future<void> _stopRealtimeSession() async {
     try {
-      debugPrint('GoogleSTTTranslator: Stopping real-time session...');
+      debugPrint('RealtimeTranslator: Stopping real-time session...');
 
       // Stop audio polling timer
       _audioPollingTimer?.cancel();
@@ -1405,7 +1405,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       _pulseController.stop();
       _waveController.stop();
 
-      debugPrint('GoogleSTTTranslator: ✅ Real-time session stopped');
+      debugPrint('RealtimeTranslator: ✅ Real-time session stopped');
       
       // Transfer accumulated text to main transcriptions/translations
       _transcriptions[0] = _realtimeTranscriptions[0]?.toString() ?? '';
@@ -1413,14 +1413,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       _translations[0] = _realtimeTranslations[0]?.toString() ?? '';
       _translations[1] = _realtimeTranslations[1]?.toString() ?? '';
 
-      debugPrint('GoogleSTTTranslator: Final transcriptions:');
+      debugPrint('RealtimeTranslator: Final transcriptions:');
       debugPrint('  Speaker 0: ${_transcriptions[0]}');
       debugPrint('  Speaker 1: ${_transcriptions[1]}');
-      debugPrint('GoogleSTTTranslator: Final translations:');
+      debugPrint('RealtimeTranslator: Final translations:');
       debugPrint('  Speaker 0: ${_translations[0]}');
       debugPrint('  Speaker 1: ${_translations[1]}');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Stop real-time session error: $e');
+      debugPrint('RealtimeTranslator: ❌ Stop real-time session error: $e');
       setState(() {
         _isRecording = false;
         _isProcessing = false;
@@ -1432,13 +1432,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// NOTE: This method is no longer needed as streaming is handled by
   /// the audio chunk subscription in _startRealtimeSession
   void _startAudioStreaming() {
-    debugPrint('GoogleSTTTranslator: ✅ Audio streaming already configured via subscription');
+    debugPrint('RealtimeTranslator: ✅ Audio streaming already configured via subscription');
   }
 
   /// Start polling audio file to simulate streaming
   /// This is a fallback approach until native streaming is implemented
   void _startAudioFilePolling() {
-    debugPrint('GoogleSTTTranslator: Starting audio file polling (100ms intervals)...');
+    debugPrint('RealtimeTranslator: Starting audio file polling (100ms intervals)...');
     
     _lastReadPosition = 44; // Skip WAV header (44 bytes)
     
@@ -1446,7 +1446,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     _audioPollingTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
       try {
         if (!_isRecording || _recordedAudioPath == null) {
-          debugPrint('GoogleSTTTranslator: ⚠️ Stopping audio polling - recording stopped');
+          debugPrint('RealtimeTranslator: ⚠️ Stopping audio polling - recording stopped');
           timer.cancel();
           return;
         }
@@ -1455,7 +1455,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         
         // Check if file exists
         if (!await audioFile.exists()) {
-          debugPrint('GoogleSTTTranslator: ⚠️ Audio file does not exist yet');
+          debugPrint('RealtimeTranslator: ⚠️ Audio file does not exist yet');
           return;
         }
 
@@ -1481,30 +1481,30 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             await _sonioxService.sendAudio(chunk);
             _lastReadPosition += chunk.length;
             
-            debugPrint('GoogleSTTTranslator: 📤 Sent ${chunk.length} bytes to Soniox (position: $_lastReadPosition)');
+            debugPrint('RealtimeTranslator: 📤 Sent ${chunk.length} bytes to Soniox (position: $_lastReadPosition)');
           }
         }
       } catch (e) {
-        debugPrint('GoogleSTTTranslator: ❌ Audio polling error: $e');
+        debugPrint('RealtimeTranslator: ❌ Audio polling error: $e');
       }
     });
     
-    debugPrint('GoogleSTTTranslator: ✅ Audio file polling started');
+    debugPrint('RealtimeTranslator: ✅ Audio file polling started');
   }
 
-  /// MONO TRANSLATION: Pause method disabled - full-duplex mode (no pausing)
+  /// REALTIME TRANSLATION: Pause method disabled - full-duplex mode (no pausing)
   /// This method is kept for compatibility but does nothing in mono mode
   Future<bool> _pauseRealtimeListeningForPlayback() async {
-    // MONO TRANSLATION: No pausing - recording continues during playback
-    debugPrint('MonoSTTTranslator: Pause disabled (full-duplex mode)');
+    // REALTIME TRANSLATION: No pausing - recording continues during playback
+    debugPrint('RealtimeTranslator: Pause disabled (full-duplex mode)');
     return false;
   }
 
-  /// MONO TRANSLATION: Resume method disabled - full-duplex mode (no resuming needed)
+  /// REALTIME TRANSLATION: Resume method disabled - full-duplex mode (no resuming needed)
   /// This method is kept for compatibility but does nothing in mono mode
   Future<void> _resumeRealtimeListeningAfterPlayback() async {
-    // MONO TRANSLATION: No resuming needed - recording never stopped
-    debugPrint('MonoSTTTranslator: Resume disabled (full-duplex mode - recording never stopped)');
+    // REALTIME TRANSLATION: No resuming needed - recording never stopped
+    debugPrint('RealtimeTranslator: Resume disabled (full-duplex mode - recording never stopped)');
     return;
   }
 
@@ -1512,13 +1512,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Translation will be done separately via Azure API
   Future<void> _handleSonioxResult(SonioxResult result) async {
     try {
-      debugPrint('GoogleSTTTranslator: ═══ Soniox Transcription Result ═══');
-      debugPrint('GoogleSTTTranslator: Tokens count: ${result.tokens.length}');
-      debugPrint('GoogleSTTTranslator: Speaker 1 language: ${_speakerLanguages[0]?.code}');
-      debugPrint('GoogleSTTTranslator: Speaker 2 language: ${_speakerLanguages[1]?.code}');
+      debugPrint('RealtimeTranslator: ═══ Soniox Transcription Result ═══');
+      debugPrint('RealtimeTranslator: Tokens count: ${result.tokens.length}');
+      debugPrint('RealtimeTranslator: Speaker 1 language: ${_speakerLanguages[0]?.code}');
+      debugPrint('RealtimeTranslator: Speaker 2 language: ${_speakerLanguages[1]?.code}');
 
       if (result.tokens.isEmpty) {
-        debugPrint('GoogleSTTTranslator: ⚠️ No tokens in result');
+        debugPrint('RealtimeTranslator: ⚠️ No tokens in result');
         return;
       }
 
@@ -1529,12 +1529,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       
       // Process all tokens (transcription only, no translation from Soniox)
       for (var token in result.tokens) {
-        debugPrint('GoogleSTTTranslator: Token: "${token.text}" | Lang: ${token.language} | Speaker: ${token.speaker} | Final: ${token.isFinal}');
+        debugPrint('RealtimeTranslator: Token: "${token.text}" | Lang: ${token.language} | Speaker: ${token.speaker} | Final: ${token.isFinal}');
         
         // Filter out special tokens like <end>, <unk>, etc.
         final tokenText = token.text.trim();
         if (tokenText.startsWith('<') && tokenText.endsWith('>')) {
-          debugPrint('GoogleSTTTranslator: ⚠️ Skipping special token: $tokenText');
+          debugPrint('RealtimeTranslator: ⚠️ Skipping special token: $tokenText');
           continue; // Skip special tokens
         }
         
@@ -1563,7 +1563,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         final detectedLanguage = transcriptionLanguages[sonioxSpeakerId] ?? '';
         final isFinal = hasFinalized[sonioxSpeakerId] ?? false;
         
-        debugPrint('GoogleSTTTranslator: ═══ Processing Soniox Speaker $sonioxSpeakerId ═══');
+        debugPrint('RealtimeTranslator: ═══ Processing Soniox Speaker $sonioxSpeakerId ═══');
         debugPrint('  Detected language: $detectedLanguage');
         debugPrint('  Transcription: "$transcriptionText"');
         debugPrint('  Is Final: $isFinal');
@@ -1572,8 +1572,8 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         // This helps detect phonetic transcriptions (e.g., English spoken but written in Bengali script)
         int uiSpeakerIndex = _mapSonioxSpeakerToUiSpeaker(sonioxSpeakerId, detectedLanguage, transcriptionText);
         
-        debugPrint('GoogleSTTTranslator: Mapped Soniox Speaker $sonioxSpeakerId → UI Speaker $uiSpeakerIndex');
-        debugPrint('GoogleSTTTranslator: UI Speaker $uiSpeakerIndex configured language: ${_speakerLanguages[uiSpeakerIndex]?.code}');
+        debugPrint('RealtimeTranslator: Mapped Soniox Speaker $sonioxSpeakerId → UI Speaker $uiSpeakerIndex');
+        debugPrint('RealtimeTranslator: UI Speaker $uiSpeakerIndex configured language: ${_speakerLanguages[uiSpeakerIndex]?.code}');
 
         // Initialize buffers if needed
         if (_realtimeTranscriptions[uiSpeakerIndex] == null) {
@@ -1591,7 +1591,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
               _realtimeTranscriptions[uiSpeakerIndex]!.write(' ');
             }
             _realtimeTranscriptions[uiSpeakerIndex]!.write(transcriptionText);
-            debugPrint('GoogleSTTTranslator: ✅ Appended FINAL transcription to UI Speaker $uiSpeakerIndex');
+            debugPrint('RealtimeTranslator: ✅ Appended FINAL transcription to UI Speaker $uiSpeakerIndex');
           }
 
           // Update UI with transcription immediately
@@ -1599,7 +1599,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             setState(() {
               _transcriptions[uiSpeakerIndex] = _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ?? '';
             });
-            debugPrint('GoogleSTTTranslator: ✅ UI updated with transcription for UI Speaker $uiSpeakerIndex');
+            debugPrint('RealtimeTranslator: ✅ UI updated with transcription for UI Speaker $uiSpeakerIndex');
             // Auto-scroll to latest content (transcription)
             _autoScrollToBottom(uiSpeakerIndex, isTranslation: false);
           }
@@ -1607,7 +1607,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           // Translate using Azure API and generate TTS (ONLY FOR FINAL)
           // CRITICAL: AWAIT this to ensure playback finishes before resuming recording
           if (transcriptionText.isNotEmpty) {
-            debugPrint('GoogleSTTTranslator: 🌐 Translating via Azure API...');
+            debugPrint('RealtimeTranslator: 🌐 Translating via Azure API...');
             await _translateAndPlayRealtimeTts(
               speakerIndex: uiSpeakerIndex,
               transcribedText: transcriptionText.trim(),
@@ -1627,15 +1627,15 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             setState(() {
               _transcriptions[uiSpeakerIndex] = displayText.trim();
             });
-            debugPrint('GoogleSTTTranslator: ✅ UI updated with INTERIM transcription for UI Speaker $uiSpeakerIndex (not saved to buffer)');
+            debugPrint('RealtimeTranslator: ✅ UI updated with INTERIM transcription for UI Speaker $uiSpeakerIndex (not saved to buffer)');
             // Auto-scroll to latest content (transcription)
             _autoScrollToBottom(uiSpeakerIndex, isTranslation: false);
           }
         }
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Error handling Soniox result: $e');
-      debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
+      debugPrint('RealtimeTranslator: ❌ Error handling Soniox result: $e');
+      debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
     }
   }
 
@@ -1648,7 +1648,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     final speaker2Lang = _speakerLanguages[1]?.code.toLowerCase() ?? '';
     final detectedLangLower = detectedLanguage.toLowerCase();
     
-    debugPrint('GoogleSTTTranslator: Language Mapping:');
+    debugPrint('RealtimeTranslator: Language Mapping:');
     debugPrint('  UI Speaker 0 configured: $speaker1Lang');
     debugPrint('  UI Speaker 1 configured: $speaker2Lang');
     debugPrint('  Detected language: $detectedLangLower');
@@ -1659,15 +1659,15 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     // If it looks like phonetic transcription, it might be the wrong language detection
     final isPhoneticBengali = _isPhoneticTranscription(transcribedText, detectedLangLower);
     if (isPhoneticBengali) {
-      debugPrint('GoogleSTTTranslator: ⚠️ Detected phonetic transcription!');
-      debugPrint('GoogleSTTTranslator: Likely English spoken but transcribed as $detectedLangLower');
+      debugPrint('RealtimeTranslator: ⚠️ Detected phonetic transcription!');
+      debugPrint('RealtimeTranslator: Likely English spoken but transcribed as $detectedLangLower');
       
       // If phonetic, assume it's actually the OTHER language
       if (detectedLangLower == speaker2Lang) {
-        debugPrint('GoogleSTTTranslator: Mapping to UI Speaker 0 (likely English)');
+        debugPrint('RealtimeTranslator: Mapping to UI Speaker 0 (likely English)');
         return 0;
       } else if (detectedLangLower == speaker1Lang) {
-        debugPrint('GoogleSTTTranslator: Mapping to UI Speaker 1 (likely Bengali)');
+        debugPrint('RealtimeTranslator: Mapping to UI Speaker 1 (likely Bengali)');
         return 1;
       }
     }
@@ -1676,15 +1676,15 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     // If detected language matches Speaker 1's language, map to Speaker 1 (index 0)
     // If detected language matches Speaker 2's language, map to Speaker 2 (index 1)
     if (detectedLangLower == speaker1Lang || detectedLangLower.startsWith(speaker1Lang)) {
-      debugPrint('GoogleSTTTranslator: Language matches UI Speaker 0');
+      debugPrint('RealtimeTranslator: Language matches UI Speaker 0');
       return 0;
     } else if (detectedLangLower == speaker2Lang || detectedLangLower.startsWith(speaker2Lang)) {
-      debugPrint('GoogleSTTTranslator: Language matches UI Speaker 1');
+      debugPrint('RealtimeTranslator: Language matches UI Speaker 1');
       return 1;
     }
     
     // Fallback: use Soniox's speaker ID directly
-    debugPrint('GoogleSTTTranslator: ⚠️ No language match, using Soniox speaker ID: $sonioxSpeakerId');
+    debugPrint('RealtimeTranslator: ⚠️ No language match, using Soniox speaker ID: $sonioxSpeakerId');
     return sonioxSpeakerId;
   }
 
@@ -1722,17 +1722,17 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   }) async {
     // CRITICAL: Prevent concurrent translation+playback
     if (_isTranslationInProgress) {
-      debugPrint('GoogleSTTTranslator: ⚠️ Translation already in progress, skipping this request');
+      debugPrint('RealtimeTranslator: ⚠️ Translation already in progress, skipping this request');
       return;
     }
 
     _isTranslationInProgress = true;
     
     try {
-      debugPrint('GoogleSTTTranslator: ═══ Azure Translation + TTS ═══');
-      debugPrint('GoogleSTTTranslator: Initial speaker: $speakerIndex');
-      debugPrint('GoogleSTTTranslator: Soniox detected language: $sourceLanguage');
-      debugPrint('GoogleSTTTranslator: Transcribed text: "$transcribedText"');
+      debugPrint('RealtimeTranslator: ═══ Azure Translation + TTS ═══');
+      debugPrint('RealtimeTranslator: Initial speaker: $speakerIndex');
+      debugPrint('RealtimeTranslator: Soniox detected language: $sourceLanguage');
+      debugPrint('RealtimeTranslator: Transcribed text: "$transcribedText"');
 
       // CHECK FOR PHONETIC TRANSCRIPTION FIRST
       final isPhonetic = _isPhoneticTranscription(transcribedText, sourceLanguage);
@@ -1742,7 +1742,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       String actualTranscribedText = transcribedText;
       
       if (isPhonetic) {
-        debugPrint('GoogleSTTTranslator: ⚠️ PHONETIC DETECTED! Text is likely English written in Bengali script');
+        debugPrint('RealtimeTranslator: ⚠️ PHONETIC DETECTED! Text is likely English written in Bengali script');
         
         // Phonetic transcription means:
         // - Soniox thought it was Bengali (sourceLanguage = 'bn')
@@ -1755,8 +1755,8 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         actualSpeakerIndex = speakerIndex == 0 ? 1 : 0;
         actualSourceLanguage = _speakerLanguages[actualSpeakerIndex]?.code ?? 'en';
         
-        debugPrint('GoogleSTTTranslator: 🔄 CORRECTION: Speaker $speakerIndex → Speaker $actualSpeakerIndex');
-        debugPrint('GoogleSTTTranslator: 🔄 CORRECTION: Language $sourceLanguage → $actualSourceLanguage');
+        debugPrint('RealtimeTranslator: 🔄 CORRECTION: Speaker $speakerIndex → Speaker $actualSpeakerIndex');
+        debugPrint('RealtimeTranslator: 🔄 CORRECTION: Language $sourceLanguage → $actualSourceLanguage');
         
         // Clear the incorrect speaker's text
         _realtimeTranscriptions[speakerIndex]?.clear();
@@ -1771,7 +1771,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         // Try to transliterate/translate phonetic Bengali back to English
         // This is a workaround - we're asking Azure to translate from Bengali to English
         // hoping it will recognize the phonetic pattern
-        debugPrint('GoogleSTTTranslator: 🌐 Attempting to recover English from phonetic Bengali...');
+        debugPrint('RealtimeTranslator: 🌐 Attempting to recover English from phonetic Bengali...');
         final recoveryResult = await TranslationService.translateText(
           sourceLanguage: sourceLanguage, // 'bn' (what Soniox thought)
           targetLanguage: actualSourceLanguage, // 'en' (what it actually is)
@@ -1780,9 +1780,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         
         if (recoveryResult != null && recoveryResult.translatedText.isNotEmpty) {
           actualTranscribedText = recoveryResult.translatedText;
-          debugPrint('GoogleSTTTranslator: ✅ Recovered English: "$actualTranscribedText"');
+          debugPrint('RealtimeTranslator: ✅ Recovered English: "$actualTranscribedText"');
         } else {
-          debugPrint('GoogleSTTTranslator: ⚠️ Could not recover English, using phonetic text as-is');
+          debugPrint('RealtimeTranslator: ⚠️ Could not recover English, using phonetic text as-is');
         }
         
         // Initialize corrected speaker buffers if needed
@@ -1795,10 +1795,10 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       }
 
       // Now we have the ACTUAL speaker and ACTUAL source language
-      debugPrint('GoogleSTTTranslator: ═══ Final Processing ═══');
-      debugPrint('GoogleSTTTranslator: Actual speaker: $actualSpeakerIndex');
-      debugPrint('GoogleSTTTranslator: Actual source language: $actualSourceLanguage');
-      debugPrint('GoogleSTTTranslator: Actual transcribed text: "$actualTranscribedText"');
+      debugPrint('RealtimeTranslator: ═══ Final Processing ═══');
+      debugPrint('RealtimeTranslator: Actual speaker: $actualSpeakerIndex');
+      debugPrint('RealtimeTranslator: Actual source language: $actualSourceLanguage');
+      debugPrint('RealtimeTranslator: Actual transcribed text: "$actualTranscribedText"');
 
       // CRITICAL FIX: Don't write transcription here - it's already written in _handleSonioxResult
       // Only write if this is a corrected speaker (phonetic case)
@@ -1808,7 +1808,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           _realtimeTranscriptions[actualSpeakerIndex]!.write(' ');
         }
         _realtimeTranscriptions[actualSpeakerIndex]!.write(actualTranscribedText);
-        debugPrint('GoogleSTTTranslator: ✅ Transcription written to corrected speaker buffer');
+        debugPrint('RealtimeTranslator: ✅ Transcription written to corrected speaker buffer');
       }
 
       // Determine target speaker and language for translation
@@ -1816,12 +1816,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final targetLanguage = _speakerLanguages[targetSpeakerIndex];
 
       if (targetLanguage == null) {
-        debugPrint('GoogleSTTTranslator: ⚠️ Target language not configured');
+        debugPrint('RealtimeTranslator: ⚠️ Target language not configured');
         return;
       }
 
-      debugPrint('GoogleSTTTranslator: Target speaker: $targetSpeakerIndex');
-      debugPrint('GoogleSTTTranslator: Target language: ${targetLanguage.code}');
+      debugPrint('RealtimeTranslator: Target speaker: $targetSpeakerIndex');
+      debugPrint('RealtimeTranslator: Target language: ${targetLanguage.code}');
 
       // Translate from ACTUAL source to target
       final translationResult = await TranslationService.translateText(
@@ -1831,12 +1831,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       );
 
       if (translationResult == null || translationResult.translatedText.isEmpty) {
-        debugPrint('GoogleSTTTranslator: ❌ Azure translation failed');
+        debugPrint('RealtimeTranslator: ❌ Azure translation failed');
         return;
       }
 
       final translatedText = translationResult.translatedText;
-      debugPrint('GoogleSTTTranslator: ✅ Azure translation: "$translatedText"');
+      debugPrint('RealtimeTranslator: ✅ Azure translation: "$translatedText"');
 
       // Update translation buffer for the ACTUAL speaker
       if (_realtimeTranslations[actualSpeakerIndex]!.isNotEmpty) {
@@ -1854,9 +1854,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             _transcriptions[actualSpeakerIndex] = _realtimeTranscriptions[actualSpeakerIndex]?.toString().trim() ?? '';
           }
         });
-        debugPrint('GoogleSTTTranslator: ✅ UI updated for Speaker $actualSpeakerIndex');
-        debugPrint('GoogleSTTTranslator: Speaker $actualSpeakerIndex transcription: "${_transcriptions[actualSpeakerIndex]}"');
-        debugPrint('GoogleSTTTranslator: Speaker $actualSpeakerIndex translation: "${_translations[actualSpeakerIndex]}"');
+        debugPrint('RealtimeTranslator: ✅ UI updated for Speaker $actualSpeakerIndex');
+        debugPrint('RealtimeTranslator: Speaker $actualSpeakerIndex transcription: "${_transcriptions[actualSpeakerIndex]}"');
+        debugPrint('RealtimeTranslator: Speaker $actualSpeakerIndex translation: "${_translations[actualSpeakerIndex]}"');
         // Auto-scroll to latest content (translation)
         _autoScrollToBottom(actualSpeakerIndex, isTranslation: true);
       }
@@ -1865,14 +1865,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final targetGender = _speakerGenders[targetSpeakerIndex] ?? 'male';
       final earpiece = _speakerEarpieces[targetSpeakerIndex] ?? 'left';
 
-      debugPrint('GoogleSTTTranslator: ═══ TTS Generation ═══');
-      debugPrint('GoogleSTTTranslator: TTS for target speaker: $targetSpeakerIndex');
-      debugPrint('GoogleSTTTranslator: TTS language: ${targetLanguage.code}');
-      debugPrint('GoogleSTTTranslator: TTS text: "$translatedText"');
-      debugPrint('GoogleSTTTranslator: TTS gender: $targetGender');
-      debugPrint('GoogleSTTTranslator: TTS earpiece: $earpiece');
+      debugPrint('RealtimeTranslator: ═══ TTS Generation ═══');
+      debugPrint('RealtimeTranslator: TTS for target speaker: $targetSpeakerIndex');
+      debugPrint('RealtimeTranslator: TTS language: ${targetLanguage.code}');
+      debugPrint('RealtimeTranslator: TTS text: "$translatedText"');
+      debugPrint('RealtimeTranslator: TTS gender: $targetGender');
+      debugPrint('RealtimeTranslator: TTS earpiece: $earpiece');
 
-      // MONO TRANSLATION: Add to queue (TTS will be generated during queue processing)
+      // REALTIME TRANSLATION: Add to queue (TTS will be generated during queue processing)
       // No need to generate TTS here - queue processor will handle it
       // This allows recording to continue without interruption
       _addToTtsQueue(
@@ -1882,15 +1882,15 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         gender: targetGender,
       );
       
-      debugPrint('MonoSTTTranslator: ✅ Added TTS to queue (recording continues, TTS will be generated and played from queue)');
+      debugPrint('RealtimeTranslator: ✅ Added TTS to queue (recording continues, TTS will be generated and played from queue)');
 
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Translation + TTS error: $e');
-      debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
+      debugPrint('RealtimeTranslator: ❌ Translation + TTS error: $e');
+      debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
     } finally {
       // CRITICAL: Always release the lock
       _isTranslationInProgress = false;
-      debugPrint('GoogleSTTTranslator: ✅ Translation lock released');
+      debugPrint('RealtimeTranslator: ✅ Translation lock released');
     }
   }
 
@@ -1903,12 +1903,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     required String earpiece,
   }) async {
     try {
-      debugPrint('GoogleSTTTranslator: ═══ Playing TTS with Stereo Routing (REAL-TIME MODE) ═══');
-      debugPrint('GoogleSTTTranslator: Speaker: $speakerIndex');
-      debugPrint('GoogleSTTTranslator: Target speaker: $targetSpeakerIndex');
-      debugPrint('GoogleSTTTranslator: Earpiece: $earpiece');
-      debugPrint('GoogleSTTTranslator: TTS path: $ttsPath');
-      debugPrint('GoogleSTTTranslator: ⚠️ Mic will pause during playback to avoid interference');
+      debugPrint('RealtimeTranslator: ═══ Playing TTS with Stereo Routing (REAL-TIME MODE) ═══');
+      debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
+      debugPrint('RealtimeTranslator: Target speaker: $targetSpeakerIndex');
+      debugPrint('RealtimeTranslator: Earpiece: $earpiece');
+      debugPrint('RealtimeTranslator: TTS path: $ttsPath');
+      debugPrint('RealtimeTranslator: ⚠️ Mic will pause during playback to avoid interference');
 
       // Set playback in progress flag BEFORE pausing
       _isPlaybackInProgress = true;
@@ -1925,21 +1925,21 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // Generate stereo audio file with TTS routed to correct earpiece
       final timestamp = DateTime.now().millisecondsSinceEpoch;
 
-      debugPrint('GoogleSTTTranslator: Creating stereo audio with routing...');
+      debugPrint('RealtimeTranslator: Creating stereo audio with routing...');
 
       // Create a silent audio file for the opposite channel
       final silentAudioPath = await _createMatchingSilentAudioFile(ttsPath);
       
       if (silentAudioPath == null) {
-        debugPrint('GoogleSTTTranslator: ⚠️ Failed to create silent audio, using TTS for both channels');
+        debugPrint('RealtimeTranslator: ⚠️ Failed to create silent audio, using TTS for both channels');
       }
 
       // Route TTS to correct earpiece, silence to the other
       final leftChannelPath = earpiece == 'left' ? ttsPath : (silentAudioPath ?? ttsPath);
       final rightChannelPath = earpiece == 'right' ? ttsPath : (silentAudioPath ?? ttsPath);
       
-      debugPrint('GoogleSTTTranslator: Left channel: ${earpiece == 'left' ? "TTS" : "Silent"}');
-      debugPrint('GoogleSTTTranslator: Right channel: ${earpiece == 'right' ? "TTS" : "Silent"}');
+      debugPrint('RealtimeTranslator: Left channel: ${earpiece == 'left' ? "TTS" : "Silent"}');
+      debugPrint('RealtimeTranslator: Right channel: ${earpiece == 'right' ? "TTS" : "Silent"}');
       
       final stereoPath = await _stereoTtsService.createTrueStereoAudioFile(
         leftChannelPath,
@@ -1948,11 +1948,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       );
 
       if (stereoPath == null || stereoPath.isEmpty) {
-        debugPrint('GoogleSTTTranslator: ❌ Failed to create stereo audio');
+        debugPrint('RealtimeTranslator: ❌ Failed to create stereo audio');
         return;
       }
 
-      debugPrint('GoogleSTTTranslator: ✅ Stereo audio created: $stereoPath');
+      debugPrint('RealtimeTranslator: ✅ Stereo audio created: $stereoPath');
 
       // Play stereo audio
       if (targetSpeakerIndex == 0) {
@@ -1961,12 +1961,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         setState(() => _isPlayingTts2 = true);
       }
 
-      debugPrint('GoogleSTTTranslator: 🔊 Starting playback (mic paused)...');
+      debugPrint('RealtimeTranslator: 🔊 Starting playback (mic paused)...');
       
       // CRITICAL: Wait for playback to COMPLETE before proceeding
       await _stereoTtsService.playStereoAudio(stereoPath);
       
-      debugPrint('GoogleSTTTranslator: ✅ TTS playback completed');
+      debugPrint('RealtimeTranslator: ✅ TTS playback completed');
       
       // OPTIMIZATION: Reduced delay - audio hardware finishes faster
       await Future.delayed(const Duration(milliseconds: 150)); // Reduced from 300ms
@@ -1987,14 +1987,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         final stereoFile = File(stereoPath);
         if (await stereoFile.exists()) {
           await stereoFile.delete();
-          debugPrint('GoogleSTTTranslator: ✅ Cleaned up temporary stereo file');
+          debugPrint('RealtimeTranslator: ✅ Cleaned up temporary stereo file');
         }
         
         if (silentAudioPath != null) {
           final silentFile = File(silentAudioPath);
           if (await silentFile.exists()) {
             await silentFile.delete();
-            debugPrint('GoogleSTTTranslator: ✅ Cleaned up temporary silent file');
+            debugPrint('RealtimeTranslator: ✅ Cleaned up temporary silent file');
           }
         }
         
@@ -2002,14 +2002,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         final ttsFile = File(ttsPath);
         if (await ttsFile.exists()) {
           await ttsFile.delete();
-          debugPrint('GoogleSTTTranslator: ✅ Cleaned up original TTS file');
+          debugPrint('RealtimeTranslator: ✅ Cleaned up original TTS file');
         }
       } catch (e) {
-        debugPrint('GoogleSTTTranslator: ⚠️ Failed to delete temporary files: $e');
+        debugPrint('RealtimeTranslator: ⚠️ Failed to delete temporary files: $e');
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ TTS playback error: $e');
-      debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
+      debugPrint('RealtimeTranslator: ❌ TTS playback error: $e');
+      debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
       if (mounted) {
         setState(() {
           _isPlayingTts1 = false;
@@ -2032,13 +2032,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Create a silent audio file with the same duration as the reference audio
   Future<String?> _createMatchingSilentAudioFile(String referenceAudioPath) async {
     try {
-      debugPrint('GoogleSTTTranslator: Creating silent audio file...');
-      debugPrint('GoogleSTTTranslator: Reference file: $referenceAudioPath');
+      debugPrint('RealtimeTranslator: Creating silent audio file...');
+      debugPrint('RealtimeTranslator: Reference file: $referenceAudioPath');
       
       // Read reference audio file to get duration
       final refFile = File(referenceAudioPath);
       if (!await refFile.exists()) {
-        debugPrint('GoogleSTTTranslator: ❌ Reference audio file does not exist');
+        debugPrint('RealtimeTranslator: ❌ Reference audio file does not exist');
         return null;
       }
       
@@ -2052,17 +2052,17 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final stableSize = await refFile.length();
       
       if (initialSize != stableSize) {
-        debugPrint('GoogleSTTTranslator: ⚠️ File size changed ($initialSize → $stableSize), waiting...');
+        debugPrint('RealtimeTranslator: ⚠️ File size changed ($initialSize → $stableSize), waiting...');
         await Future.delayed(const Duration(milliseconds: 200));
       }
       
       final refBytes = await refFile.readAsBytes();
-      debugPrint('GoogleSTTTranslator: Read ${refBytes.length} bytes from reference file');
+      debugPrint('RealtimeTranslator: Read ${refBytes.length} bytes from reference file');
       
       // WAV file header is 44 bytes
       // Data size is in bytes 40-43 (little-endian)
       if (refBytes.length < 44) {
-        debugPrint('GoogleSTTTranslator: ❌ Reference audio file is too small (${refBytes.length} bytes)');
+        debugPrint('RealtimeTranslator: ❌ Reference audio file is too small (${refBytes.length} bytes)');
         return null;
       }
       
@@ -2073,16 +2073,16 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           : '';
       
       if (riffHeader != 'RIFF') {
-        debugPrint('GoogleSTTTranslator: ❌ Invalid WAV file - missing RIFF header (found: $riffHeader)');
+        debugPrint('RealtimeTranslator: ❌ Invalid WAV file - missing RIFF header (found: $riffHeader)');
         return null;
       }
       
       if (waveHeader != 'WAVE') {
-        debugPrint('GoogleSTTTranslator: ❌ Invalid WAV file - missing WAVE header (found: $waveHeader)');
+        debugPrint('RealtimeTranslator: ❌ Invalid WAV file - missing WAVE header (found: $waveHeader)');
         return null;
       }
       
-      debugPrint('GoogleSTTTranslator: ✅ Valid WAV file header confirmed (RIFF/WAVE)');
+      debugPrint('RealtimeTranslator: ✅ Valid WAV file header confirmed (RIFF/WAVE)');
       
       // Find "data" chunk in WAV file
       // Some WAV files have additional chunks before the data chunk
@@ -2101,8 +2101,8 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
                          (refBytes[dataChunkOffset + 1] << 8) | 
                          (refBytes[dataChunkOffset + 2] << 16) | 
                          (refBytes[dataChunkOffset + 3] << 24);
-              debugPrint('GoogleSTTTranslator: Found data chunk at offset $dataChunkOffset');
-              debugPrint('GoogleSTTTranslator: Data chunk size: $dataSize bytes');
+              debugPrint('RealtimeTranslator: Found data chunk at offset $dataChunkOffset');
+              debugPrint('RealtimeTranslator: Data chunk size: $dataSize bytes');
               break;
             }
           }
@@ -2111,24 +2111,24 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       
       // Fallback: Use bytes 40-43 if data chunk not found (standard WAV format)
       if (dataSize == 0 || dataChunkOffset == -1) {
-        debugPrint('GoogleSTTTranslator: ⚠️ Data chunk not found, using standard header location');
+        debugPrint('RealtimeTranslator: ⚠️ Data chunk not found, using standard header location');
         dataSize = refBytes[40] | 
                    (refBytes[41] << 8) | 
                    (refBytes[42] << 16) | 
                    (refBytes[43] << 24);
       }
       
-      debugPrint('GoogleSTTTranslator: Reference audio data size: $dataSize bytes');
+      debugPrint('RealtimeTranslator: Reference audio data size: $dataSize bytes');
       
       if (dataSize <= 0) {
-        debugPrint('GoogleSTTTranslator: ❌ Invalid data size ($dataSize bytes)');
+        debugPrint('RealtimeTranslator: ❌ Invalid data size ($dataSize bytes)');
         // Calculate data size from file size if header is wrong
         dataSize = refBytes.length - 44;
-        debugPrint('GoogleSTTTranslator: ⚠️ Using calculated data size: $dataSize bytes (file size - header)');
+        debugPrint('RealtimeTranslator: ⚠️ Using calculated data size: $dataSize bytes (file size - header)');
       }
       
       if (dataSize <= 0) {
-        debugPrint('GoogleSTTTranslator: ❌ Cannot create silent file - invalid data size');
+        debugPrint('RealtimeTranslator: ❌ Cannot create silent file - invalid data size');
         return null;
       }
       
@@ -2142,7 +2142,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       if (refBytes.length >= 44) {
         silentBytes.setAll(0, refBytes.sublist(0, 44));
       } else {
-        debugPrint('GoogleSTTTranslator: ❌ Cannot copy header - file too small');
+        debugPrint('RealtimeTranslator: ❌ Cannot copy header - file too small');
         return null;
       }
       
@@ -2170,17 +2170,17 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       
       // Verify the file was written correctly
       final writtenSize = await silentFile.length();
-      debugPrint('GoogleSTTTranslator: ✅ Silent audio file created: $silentPath');
-      debugPrint('GoogleSTTTranslator: Silent file size: $writtenSize bytes (expected: ${silentBytes.length})');
+      debugPrint('RealtimeTranslator: ✅ Silent audio file created: $silentPath');
+      debugPrint('RealtimeTranslator: Silent file size: $writtenSize bytes (expected: ${silentBytes.length})');
       
       if (writtenSize != silentBytes.length) {
-        debugPrint('GoogleSTTTranslator: ⚠️ Silent file size mismatch!');
+        debugPrint('RealtimeTranslator: ⚠️ Silent file size mismatch!');
       }
       
       return silentPath;
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Error creating silent audio: $e');
-      debugPrint('GoogleSTTTranslator: Stack trace: ${StackTrace.current}');
+      debugPrint('RealtimeTranslator: ❌ Error creating silent audio: $e');
+      debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
       return null;
     }
   }
@@ -2229,9 +2229,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         _isProcessing = false;
       });
 
-      debugPrint('GoogleSTTTranslator: Processing completed successfully');
+      debugPrint('RealtimeTranslator: Processing completed successfully');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Processing error: $e');
+      debugPrint('RealtimeTranslator: Processing error: $e');
       _showErrorDialog('Audio processing failed: $e');
       setState(() {
         _isProcessing = false;
@@ -2243,7 +2243,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   Future<void> _performEnhancedSpeakerDiarization(Uint8List audioBytes) async {
     try {
       debugPrint(
-          'GoogleSTTTranslator: Performing enhanced speaker diarization...');
+          'RealtimeTranslator: Performing enhanced speaker diarization...');
 
       // Convert audio bytes to Float32List for analysis
       final Float32List audioData = _convertBytesToFloat32List(audioBytes);
@@ -2256,7 +2256,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
       final List<VoiceSegment> voiceSegments = _detectVoiceActivity(audioData);
       debugPrint(
-          'GoogleSTTTranslator: Found ${voiceSegments.length} voice segments');
+          'RealtimeTranslator: Found ${voiceSegments.length} voice segments');
 
       if (voiceSegments.isEmpty) {
         throw Exception('No voice activity detected in recording');
@@ -2278,7 +2278,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       }
 
       debugPrint(
-          'GoogleSTTTranslator: Extracted features from ${allFeatures.length} segments');
+          'RealtimeTranslator: Extracted features from ${allFeatures.length} segments');
 
       // Step 3: Cluster features into 2 speakers using k-means
       setState(() {
@@ -2314,7 +2314,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       });
 
       debugPrint(
-          'GoogleSTTTranslator: Created ${mergedSegments.length} final segments');
+          'RealtimeTranslator: Created ${mergedSegments.length} final segments');
 
       // Print segment details for debugging
       for (int i = 0; i < math.min(5, mergedSegments.length); i++) {
@@ -2323,7 +2323,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             '  Segment $i: Speaker ${seg.speakerId}, ${seg.startTime.toStringAsFixed(2)}s - ${seg.endTime.toStringAsFixed(2)}s, confidence: ${seg.confidence.toStringAsFixed(2)}');
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Error in speaker diarization: $e');
+      debugPrint('RealtimeTranslator: Error in speaker diarization: $e');
       rethrow;
     }
   }
@@ -2343,11 +2343,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       Uint8List originalBytes;
       if (_cachedOriginalAudioBytes != null) {
         debugPrint(
-            'GoogleSTTTranslator: ✅ Using cached original audio bytes (avoiding redundant file read)');
+            'RealtimeTranslator: ✅ Using cached original audio bytes (avoiding redundant file read)');
         originalBytes = _cachedOriginalAudioBytes!;
       } else {
         debugPrint(
-            'GoogleSTTTranslator: Reading original audio file (cache miss)');
+            'RealtimeTranslator: Reading original audio file (cache miss)');
         final originalFile = File(_recordedAudioPath!);
         originalBytes = await originalFile.readAsBytes();
         _cachedOriginalAudioBytes = originalBytes; // Cache for future use
@@ -2375,7 +2375,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       ];
 
       debugPrint(
-          'GoogleSTTTranslator: Configured languages - Speaker 1: $speaker1ConfiguredLanguage, Speaker 2: $speaker2ConfiguredLanguage');
+          'RealtimeTranslator: Configured languages - Speaker 1: $speaker1ConfiguredLanguage, Speaker 2: $speaker2ConfiguredLanguage');
 
       // Assign speakers based on language detection
       final Map<String, String> speakerAssignment =
@@ -2395,11 +2395,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       await File(tempSpeaker2Path).delete();
 
       debugPrint(
-          'GoogleSTTTranslator: Audio separation completed with language-based assignment');
+          'RealtimeTranslator: Audio separation completed with language-based assignment');
       debugPrint(
-          'GoogleSTTTranslator: Final assignment - Speaker 1: ${speakerAssignment['speaker1']}, Speaker 2: ${speakerAssignment['speaker2']}');
+          'RealtimeTranslator: Final assignment - Speaker 1: ${speakerAssignment['speaker1']}, Speaker 2: ${speakerAssignment['speaker2']}');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Audio separation error: $e');
+      debugPrint('RealtimeTranslator: Audio separation error: $e');
       rethrow;
     }
   }
@@ -2444,9 +2444,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   Future<void> _transcribeSeparatedAudio() async {
     try {
       debugPrint(
-          'GoogleSTTTranslator: Starting transcription of separated audio...');
+          'RealtimeTranslator: Starting transcription of separated audio...');
       debugPrint(
-          'GoogleSTTTranslator: 🚀 OPTIMIZATION: Using cached Voice 1 transcription');
+          'RealtimeTranslator: 🚀 OPTIMIZATION: Using cached Voice 1 transcription');
 
       // Determine which speaker is Voice 1 (already transcribed during language detection)
       // Voice 1's transcription is cached in _voice1CachedTranscription
@@ -2471,17 +2471,17 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         if (voice1IsSpeaker1 && _voice1CachedTranscription != null) {
           // OPTIMIZATION: Reuse Voice 1's cached transcription (0 API calls)
           debugPrint(
-              'GoogleSTTTranslator: ✅ Speaker 1 is Voice 1 - using cached transcription (0 API calls)');
+              'RealtimeTranslator: ✅ Speaker 1 is Voice 1 - using cached transcription (0 API calls)');
           final cachedText = _voice1CachedTranscription!['text'] as String?;
           if (cachedText != null && cachedText.isNotEmpty) {
             _transcriptions[0] = cachedText;
             debugPrint(
-                'GoogleSTTTranslator: Stored Speaker 1 transcript: "${_transcriptions[0]}"');
+                'RealtimeTranslator: Stored Speaker 1 transcript: "${_transcriptions[0]}"');
           }
         } else {
           // This is Voice 2 - need to transcribe (1 API call)
           debugPrint(
-              'GoogleSTTTranslator: Speaker 1 is Voice 2 - transcribing with language: $speaker1LanguageCode (1 API call)');
+              'RealtimeTranslator: Speaker 1 is Voice 2 - transcribing with language: $speaker1LanguageCode (1 API call)');
 
           final audioBytes = await File(_speaker1AudioPath!).readAsBytes();
           final List<String> allConfiguredLanguages = [
@@ -2518,15 +2518,15 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           }
 
           if (result1 != null) {
-            debugPrint('GoogleSTTTranslator: Speaker 1 transcription result:');
+            debugPrint('RealtimeTranslator: Speaker 1 transcription result:');
             debugPrint('  Language: $speaker1LanguageCode');
             debugPrint('  Text: "${result1['text']}"');
             _transcriptions[0] = (result1['text'] as String?) ?? '';
             debugPrint(
-                'GoogleSTTTranslator: Stored Speaker 1 transcript: "${_transcriptions[0]}"');
+                'RealtimeTranslator: Stored Speaker 1 transcript: "${_transcriptions[0]}"');
           } else {
             debugPrint(
-                'GoogleSTTTranslator: Speaker 1 transcription failed - no result');
+                'RealtimeTranslator: Speaker 1 transcription failed - no result');
           }
         }
       }
@@ -2543,17 +2543,17 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         if (!voice1IsSpeaker1 && _voice1CachedTranscription != null) {
           // OPTIMIZATION: Reuse Voice 1's cached transcription (0 API calls)
           debugPrint(
-              'GoogleSTTTranslator: ✅ Speaker 2 is Voice 1 - using cached transcription (0 API calls)');
+              'RealtimeTranslator: ✅ Speaker 2 is Voice 1 - using cached transcription (0 API calls)');
           final cachedText = _voice1CachedTranscription!['text'] as String?;
           if (cachedText != null && cachedText.isNotEmpty) {
             _transcriptions[1] = cachedText;
             debugPrint(
-                'GoogleSTTTranslator: Stored Speaker 2 transcript: "${_transcriptions[1]}"');
+                'RealtimeTranslator: Stored Speaker 2 transcript: "${_transcriptions[1]}"');
           }
         } else {
           // This is Voice 2 - need to transcribe (1 API call)
           debugPrint(
-              'GoogleSTTTranslator: Speaker 2 is Voice 2 - transcribing with language: $speaker2LanguageCode (1 API call)');
+              'RealtimeTranslator: Speaker 2 is Voice 2 - transcribing with language: $speaker2LanguageCode (1 API call)');
 
           final audioBytes = await File(_speaker2AudioPath!).readAsBytes();
           final List<String> allConfiguredLanguages = [
@@ -2590,41 +2590,41 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           }
 
           if (result2 != null) {
-            debugPrint('GoogleSTTTranslator: Speaker 2 transcription result:');
+            debugPrint('RealtimeTranslator: Speaker 2 transcription result:');
             debugPrint('  Language: $speaker2LanguageCode');
             debugPrint('  Text: "${result2['text']}"');
             _transcriptions[1] = (result2['text'] as String?) ?? '';
             debugPrint(
-                'GoogleSTTTranslator: Stored Speaker 2 transcript: "${_transcriptions[1]}"');
+                'RealtimeTranslator: Stored Speaker 2 transcript: "${_transcriptions[1]}"');
           } else {
             debugPrint(
-                'GoogleSTTTranslator: Speaker 2 transcription failed - no result');
+                'RealtimeTranslator: Speaker 2 transcription failed - no result');
           }
         }
       }
 
-      debugPrint('GoogleSTTTranslator: ===== TRANSCRIPTION COMPLETED =====');
+      debugPrint('RealtimeTranslator: ===== TRANSCRIPTION COMPLETED =====');
       debugPrint('  Speaker 0: ${_transcriptions[0] ?? "No transcription"}');
       debugPrint('  Speaker 1: ${_transcriptions[1] ?? "No transcription"}');
       debugPrint(
-          'GoogleSTTTranslator: Total transcriptions: ${_transcriptions.length}');
+          'RealtimeTranslator: Total transcriptions: ${_transcriptions.length}');
       debugPrint(
-          'GoogleSTTTranslator: Transcription keys: ${_transcriptions.keys.toList()}');
+          'RealtimeTranslator: Transcription keys: ${_transcriptions.keys.toList()}');
       debugPrint(
-          'GoogleSTTTranslator: 🎉 API OPTIMIZATION: Total STT API calls = 3');
+          'RealtimeTranslator: 🎉 API OPTIMIZATION: Total STT API calls = 3');
       debugPrint(
-          'GoogleSTTTranslator:   - Voice 1 detection: 2 calls (both languages)');
+          'RealtimeTranslator:   - Voice 1 detection: 2 calls (both languages)');
       debugPrint(
-          'GoogleSTTTranslator:   - Voice 2 transcription: 1 call (inferred language)');
+          'RealtimeTranslator:   - Voice 2 transcription: 1 call (inferred language)');
       debugPrint(
-          'GoogleSTTTranslator:   - Saved: 3 API calls (50% reduction from 6 to 3)');
+          'RealtimeTranslator:   - Saved: 3 API calls (50% reduction from 6 to 3)');
       debugPrint(
-          'GoogleSTTTranslator: ==========================================');
+          'RealtimeTranslator: ==========================================');
 
       // Start translation after transcription is complete
       await _translateTranscriptions();
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Transcription error: $e');
+      debugPrint('RealtimeTranslator: Transcription error: $e');
       throw Exception('Failed to transcribe audio: $e');
     }
   }
@@ -2632,7 +2632,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Translate transcriptions between speakers
   Future<void> _translateTranscriptions() async {
     try {
-      debugPrint('GoogleSTTTranslator: Starting translation process...');
+      debugPrint('RealtimeTranslator: Starting translation process...');
 
       setState(() {
         _processingStatus = 'Translating text...';
@@ -2644,26 +2644,26 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final speaker2Language = _speakerLanguages[1];
 
       if (speaker1Language == null || speaker2Language == null) {
-        debugPrint('GoogleSTTTranslator: Speaker languages not configured');
+        debugPrint('RealtimeTranslator: Speaker languages not configured');
         return;
       }
 
       final speaker1LangCode = speaker1Language.code;
       final speaker2LangCode = speaker2Language.code;
 
-      debugPrint('GoogleSTTTranslator: Speaker 1 language: $speaker1LangCode');
-      debugPrint('GoogleSTTTranslator: Speaker 2 language: $speaker2LangCode');
+      debugPrint('RealtimeTranslator: Speaker 1 language: $speaker1LangCode');
+      debugPrint('RealtimeTranslator: Speaker 2 language: $speaker2LangCode');
 
       // Check if translation is needed
       if (speaker1LangCode == speaker2LangCode) {
         debugPrint(
-            'GoogleSTTTranslator: No translation needed - same language');
+            'RealtimeTranslator: No translation needed - same language');
         return;
       }
 
       // OPTIMIZATION: Translate both speakers in parallel
       debugPrint(
-          'GoogleSTTTranslator: 🚀 Starting parallel translation API calls...');
+          'RealtimeTranslator: 🚀 Starting parallel translation API calls...');
 
       final List<Future<void>> translationTasks = [];
 
@@ -2678,16 +2678,16 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             if (result != null && result.translatedText.isNotEmpty) {
               _translations[0] = result.translatedText;
               debugPrint(
-                  'GoogleSTTTranslator: Speaker 1 translation: "${result.translatedText}"');
+                  'RealtimeTranslator: Speaker 1 translation: "${result.translatedText}"');
             } else {
-              debugPrint('GoogleSTTTranslator: Speaker 1 translation failed');
+              debugPrint('RealtimeTranslator: Speaker 1 translation failed');
             }
           }).catchError((e) {
-            debugPrint('GoogleSTTTranslator: Speaker 1 translation error: $e');
+            debugPrint('RealtimeTranslator: Speaker 1 translation error: $e');
           }),
         );
         debugPrint(
-            'GoogleSTTTranslator: Queued translation for Speaker 1 text to $speaker2LangCode...');
+            'RealtimeTranslator: Queued translation for Speaker 1 text to $speaker2LangCode...');
       }
 
       // Translate Speaker 2's text to Speaker 1's language using Azure Translator API
@@ -2701,26 +2701,26 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
             if (result != null && result.translatedText.isNotEmpty) {
               _translations[1] = result.translatedText;
               debugPrint(
-                  'GoogleSTTTranslator: Speaker 2 translation: "${result.translatedText}"');
+                  'RealtimeTranslator: Speaker 2 translation: "${result.translatedText}"');
             } else {
-              debugPrint('GoogleSTTTranslator: Speaker 2 translation failed');
+              debugPrint('RealtimeTranslator: Speaker 2 translation failed');
             }
           }).catchError((e) {
-            debugPrint('GoogleSTTTranslator: Speaker 2 translation error: $e');
+            debugPrint('RealtimeTranslator: Speaker 2 translation error: $e');
           }),
         );
         debugPrint(
-            'GoogleSTTTranslator: Queued translation for Speaker 2 text to $speaker1LangCode...');
+            'RealtimeTranslator: Queued translation for Speaker 2 text to $speaker1LangCode...');
       }
 
       // Execute all translations in parallel
       if (translationTasks.isNotEmpty) {
         await Future.wait(translationTasks);
         debugPrint(
-            'GoogleSTTTranslator: ✅ Parallel translation API calls completed');
+            'RealtimeTranslator: ✅ Parallel translation API calls completed');
       }
 
-      debugPrint('GoogleSTTTranslator: Translation process completed');
+      debugPrint('RealtimeTranslator: Translation process completed');
       debugPrint(
           '  Speaker 1 translation: ${_translations[0] ?? "No translation"}');
       debugPrint(
@@ -2736,7 +2736,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         });
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Translation error: $e');
+      debugPrint('RealtimeTranslator: Translation error: $e');
       // Don't throw - translation failure shouldn't break the app
     }
   }
@@ -2756,14 +2756,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     while (!ttsSuccess && retryCount < maxRetries) {
       try {
         debugPrint(
-            'GoogleSTTTranslator: Generating Speaker $speakerIndex TTS with gender: $gender (attempt ${retryCount + 1})');
+            'RealtimeTranslator: Generating Speaker $speakerIndex TTS with gender: $gender (attempt ${retryCount + 1})');
         ttsAudioPath = await _ttsService.generateAudioFile(
           text,
           languageCode,
           gender: gender,
         );
         debugPrint(
-            'GoogleSTTTranslator: Speaker $speakerIndex TTS audio path (attempt ${retryCount + 1}): $ttsAudioPath');
+            'RealtimeTranslator: Speaker $speakerIndex TTS audio path (attempt ${retryCount + 1}): $ttsAudioPath');
 
         // Verify the file was actually created and has content
         if (ttsAudioPath != null) {
@@ -2771,42 +2771,42 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           final exists = await file.exists();
           final size = exists ? await file.length() : 0;
           debugPrint(
-              'GoogleSTTTranslator: Speaker $speakerIndex TTS file verification (attempt ${retryCount + 1}):');
+              'RealtimeTranslator: Speaker $speakerIndex TTS file verification (attempt ${retryCount + 1}):');
           debugPrint('  File exists: $exists');
           debugPrint('  File size: $size bytes');
 
           if (exists && size > 0) {
             ttsSuccess = true;
             debugPrint(
-                'GoogleSTTTranslator: Speaker $speakerIndex TTS file generation successful');
+                'RealtimeTranslator: Speaker $speakerIndex TTS file generation successful');
           } else {
             debugPrint(
-                'GoogleSTTTranslator: Speaker $speakerIndex TTS file generation failed - file is empty or missing (attempt ${retryCount + 1})');
+                'RealtimeTranslator: Speaker $speakerIndex TTS file generation failed - file is empty or missing (attempt ${retryCount + 1})');
             ttsAudioPath = null;
             retryCount++;
             if (retryCount < maxRetries) {
               debugPrint(
-                  'GoogleSTTTranslator: Retrying Speaker $speakerIndex TTS generation...');
+                  'RealtimeTranslator: Retrying Speaker $speakerIndex TTS generation...');
               await Future.delayed(const Duration(milliseconds: 1000));
             }
           }
         } else {
           debugPrint(
-              'GoogleSTTTranslator: Speaker $speakerIndex TTS generation returned null (attempt ${retryCount + 1})');
+              'RealtimeTranslator: Speaker $speakerIndex TTS generation returned null (attempt ${retryCount + 1})');
           retryCount++;
           if (retryCount < maxRetries) {
             debugPrint(
-                'GoogleSTTTranslator: Retrying Speaker $speakerIndex TTS generation...');
+                'RealtimeTranslator: Retrying Speaker $speakerIndex TTS generation...');
             await Future.delayed(const Duration(milliseconds: 1000));
           }
         }
       } catch (e) {
         debugPrint(
-            'GoogleSTTTranslator: Speaker $speakerIndex TTS generation error (attempt ${retryCount + 1}): $e');
+            'RealtimeTranslator: Speaker $speakerIndex TTS generation error (attempt ${retryCount + 1}): $e');
         retryCount++;
         if (retryCount < maxRetries) {
           debugPrint(
-              'GoogleSTTTranslator: Retrying Speaker $speakerIndex TTS generation...');
+              'RealtimeTranslator: Retrying Speaker $speakerIndex TTS generation...');
           await Future.delayed(const Duration(milliseconds: 1000));
         }
       }
@@ -2814,10 +2814,10 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
     if (!ttsSuccess) {
       debugPrint(
-          'GoogleSTTTranslator: Speaker $speakerIndex TTS generation failed after $maxRetries attempts');
+          'RealtimeTranslator: Speaker $speakerIndex TTS generation failed after $maxRetries attempts');
       // Create silent audio as fallback
       debugPrint(
-          'GoogleSTTTranslator: Creating silent audio fallback for Speaker $speakerIndex');
+          'RealtimeTranslator: Creating silent audio fallback for Speaker $speakerIndex');
       ttsAudioPath =
           await _createSilentAudioFile('speaker${speakerIndex}_fallback');
     }
@@ -2828,7 +2828,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Generate TTS audio files for translated text
   Future<void> _generateTtsAudio() async {
     try {
-      debugPrint('GoogleSTTTranslator: Starting TTS audio generation...');
+      debugPrint('RealtimeTranslator: Starting TTS audio generation...');
 
       setState(() {
         _processingStatus = 'Generating speech audio...';
@@ -2841,12 +2841,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       bool hasSpeaker2Translation =
           _translations[1] != null && _translations[1]!.isNotEmpty;
 
-      debugPrint('GoogleSTTTranslator: Translation status:');
+      debugPrint('RealtimeTranslator: Translation status:');
       debugPrint('  Speaker 1 has translation: $hasSpeaker1Translation');
       debugPrint('  Speaker 2 has translation: $hasSpeaker2Translation');
 
       // OPTIMIZATION: Generate TTS for both speakers in parallel
-      debugPrint('GoogleSTTTranslator: 🚀 Starting parallel TTS generation...');
+      debugPrint('RealtimeTranslator: 🚀 Starting parallel TTS generation...');
 
       final List<Future<void>> ttsTasks = [];
 
@@ -2855,7 +2855,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         final speaker2Language = _speakerLanguages[1];
         if (speaker2Language != null) {
           debugPrint(
-              'GoogleSTTTranslator: Queuing TTS generation for Speaker 1 translation in ${speaker2Language.code}...');
+              'RealtimeTranslator: Queuing TTS generation for Speaker 1 translation in ${speaker2Language.code}...');
           debugPrint('  Text to convert: "${_translations[0]}"');
 
           ttsTasks.add(
@@ -2868,21 +2868,21 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
               _speaker1TtsAudioPath = path;
               if (path != null) {
                 debugPrint(
-                    'GoogleSTTTranslator: ✅ Speaker 1 TTS generated: $path');
+                    'RealtimeTranslator: ✅ Speaker 1 TTS generated: $path');
               }
             }).catchError((e) {
               debugPrint(
-                  'GoogleSTTTranslator: Speaker 1 TTS generation error: $e');
+                  'RealtimeTranslator: Speaker 1 TTS generation error: $e');
               _speaker1TtsAudioPath = null;
             }),
           );
         } else {
           debugPrint(
-              'GoogleSTTTranslator: Speaker 2 language is null, cannot generate TTS for Speaker 1');
+              'RealtimeTranslator: Speaker 2 language is null, cannot generate TTS for Speaker 1');
         }
       } else {
         debugPrint(
-            'GoogleSTTTranslator: Speaker 1 translation is null or empty, skipping TTS generation');
+            'RealtimeTranslator: Speaker 1 translation is null or empty, skipping TTS generation');
       }
 
       // Generate TTS audio for Speaker 2's translated text (for Speaker 1 to hear)
@@ -2890,7 +2890,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         final speaker1Language = _speakerLanguages[0];
         if (speaker1Language != null) {
           debugPrint(
-              'GoogleSTTTranslator: Queuing TTS generation for Speaker 2 translation in ${speaker1Language.code}...');
+              'RealtimeTranslator: Queuing TTS generation for Speaker 2 translation in ${speaker1Language.code}...');
           debugPrint('  Text to convert: "${_translations[1]}"');
 
           ttsTasks.add(
@@ -2903,39 +2903,39 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
               _speaker2TtsAudioPath = path;
               if (path != null) {
                 debugPrint(
-                    'GoogleSTTTranslator: ✅ Speaker 2 TTS generated: $path');
+                    'RealtimeTranslator: ✅ Speaker 2 TTS generated: $path');
               }
             }).catchError((e) {
               debugPrint(
-                  'GoogleSTTTranslator: Speaker 2 TTS generation error: $e');
+                  'RealtimeTranslator: Speaker 2 TTS generation error: $e');
               _speaker2TtsAudioPath = null;
             }),
           );
         } else {
           debugPrint(
-              'GoogleSTTTranslator: Speaker 1 language is null, cannot generate TTS for Speaker 2');
+              'RealtimeTranslator: Speaker 1 language is null, cannot generate TTS for Speaker 2');
         }
       } else {
         debugPrint(
-            'GoogleSTTTranslator: Speaker 2 translation is null or empty, skipping TTS generation');
+            'RealtimeTranslator: Speaker 2 translation is null or empty, skipping TTS generation');
       }
 
       // Execute all TTS generations in parallel
       if (ttsTasks.isNotEmpty) {
         await Future.wait(ttsTasks);
-        debugPrint('GoogleSTTTranslator: ✅ Parallel TTS generation completed');
+        debugPrint('RealtimeTranslator: ✅ Parallel TTS generation completed');
       }
 
       // Ensure we have TTS files for both speakers (create silent audio for missing ones)
       if (!hasSpeaker1Translation && _speaker1TtsAudioPath == null) {
         debugPrint(
-            'GoogleSTTTranslator: Creating silent audio for Speaker 1 (no translation)');
+            'RealtimeTranslator: Creating silent audio for Speaker 1 (no translation)');
         _speaker1TtsAudioPath = await _createSilentAudioFile('speaker1_silent');
       }
 
       if (!hasSpeaker2Translation && _speaker2TtsAudioPath == null) {
         debugPrint(
-            'GoogleSTTTranslator: Creating silent audio for Speaker 2 (no translation)');
+            'RealtimeTranslator: Creating silent audio for Speaker 2 (no translation)');
         _speaker2TtsAudioPath = await _createSilentAudioFile('speaker2_silent');
       }
 
@@ -2952,7 +2952,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         });
       }
 
-      debugPrint('GoogleSTTTranslator: TTS audio generation completed');
+      debugPrint('RealtimeTranslator: TTS audio generation completed');
       debugPrint('  Speaker 1 TTS path: $_speaker1TtsAudioPath');
       debugPrint('  Speaker 2 TTS path: $_speaker2TtsAudioPath');
 
@@ -2971,7 +2971,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         debugPrint('  Speaker 2 TTS file exists: $exists2, size: $size2 bytes');
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: TTS audio generation error: $e');
+      debugPrint('RealtimeTranslator: TTS audio generation error: $e');
       // Don't throw - TTS failure shouldn't break the app
     }
   }
@@ -2984,20 +2984,20 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final file = File(audioPath);
       if (!await file.exists()) {
         debugPrint(
-            'GoogleSTTTranslator: Audio file does not exist: $audioPath');
+            'RealtimeTranslator: Audio file does not exist: $audioPath');
         return {'language': null, 'confidence': 0.0, 'text': null};
       }
 
       final audioBytes = await file.readAsBytes();
       if (audioBytes.isEmpty) {
-        debugPrint('GoogleSTTTranslator: Audio file is empty: $audioPath');
+        debugPrint('RealtimeTranslator: Audio file is empty: $audioPath');
         return {'language': null, 'confidence': 0.0, 'text': null};
       }
 
       debugPrint(
-          'GoogleSTTTranslator: Using Google STT multi-language detection for: $audioPath');
+          'RealtimeTranslator: Using Google STT multi-language detection for: $audioPath');
       debugPrint(
-          'GoogleSTTTranslator: Preferred languages: $preferredLanguages');
+          'RealtimeTranslator: Preferred languages: $preferredLanguages');
 
       // Balanced: call once with en, once with bn (or configured pair)
       final primaryA = _mapLanguageToGoogleCode(preferredLanguages[0]);
@@ -3048,11 +3048,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       }
 
       if (best == null) {
-        debugPrint('GoogleSTTTranslator: No transcription result from STT');
+        debugPrint('RealtimeTranslator: No transcription result from STT');
         return {'language': null, 'confidence': 0.0, 'text': null};
       }
 
-      debugPrint('GoogleSTTTranslator: Balanced detection result:');
+      debugPrint('RealtimeTranslator: Balanced detection result:');
       debugPrint('  Text: "${best['text']}"');
       debugPrint('  Detected Language: ${best['language']}');
       debugPrint('  Confidence: ${best['confidence']}');
@@ -3062,7 +3062,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       return best;
     } catch (e) {
       debugPrint(
-          'GoogleSTTTranslator: Multi-language detection error for $audioPath: $e');
+          'RealtimeTranslator: Multi-language detection error for $audioPath: $e');
       return {'language': null, 'confidence': 0.0, 'text': null};
     }
   }
@@ -3143,7 +3143,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     final arabicRatio = arabicCount / totalChars;
     final chineseRatio = chineseCount / totalChars;
 
-    debugPrint('GoogleSTTTranslator: Script analysis:');
+    debugPrint('RealtimeTranslator: Script analysis:');
     debugPrint('  Bengali: $bengaliCount ($bengaliRatio)');
     debugPrint('  Hindi: $hindiCount ($hindiRatio)');
     debugPrint('  Sinhala: $sinhalaCount ($sinhalaRatio)');
@@ -3160,14 +3160,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     } else if (hindiRatio > 0.5) {
       // Hindi script dominant - treat as Bengali for our purposes
       debugPrint(
-          'GoogleSTTTranslator: Detected Hindi script, treating as Bengali');
+          'RealtimeTranslator: Detected Hindi script, treating as Bengali');
       for (final lang in preferredLanguages) {
         if (lang.toLowerCase().startsWith('bn')) return lang;
       }
     } else if (sinhalaRatio > 0.5) {
       // Sinhala script dominant - treat as Bengali for our purposes
       debugPrint(
-          'GoogleSTTTranslator: Detected Sinhala script, treating as Bengali');
+          'RealtimeTranslator: Detected Sinhala script, treating as Bengali');
       for (final lang in preferredLanguages) {
         if (lang.toLowerCase().startsWith('bn')) return lang;
       }
@@ -3225,7 +3225,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     }
 
     debugPrint(
-        'GoogleSTTTranslator: Script-based language detection: $bestLanguage (score: $bestScore)');
+        'RealtimeTranslator: Script-based language detection: $bestLanguage (score: $bestScore)');
     return bestLanguage ?? preferredLanguages[0];
   }
 
@@ -3234,11 +3234,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       String voice2Path, List<String> preferredLanguages) async {
     try {
       debugPrint(
-          'GoogleSTTTranslator: ===== OPTIMIZED LANGUAGE-BASED ASSIGNMENT (3 API calls) =====');
-      debugPrint('GoogleSTTTranslator: Voice 1: $voice1Path');
-      debugPrint('GoogleSTTTranslator: Voice 2: $voice2Path');
+          'RealtimeTranslator: ===== OPTIMIZED LANGUAGE-BASED ASSIGNMENT (3 API calls) =====');
+      debugPrint('RealtimeTranslator: Voice 1: $voice1Path');
+      debugPrint('RealtimeTranslator: Voice 2: $voice2Path');
       debugPrint(
-          'GoogleSTTTranslator: Preferred languages: $preferredLanguages');
+          'RealtimeTranslator: Preferred languages: $preferredLanguages');
 
       final speaker1Lang = _speakerLanguages[0]?.code ?? 'en';
       final speaker2Lang = _speakerLanguages[1]?.code ?? 'en';
@@ -3246,13 +3246,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // OPTIMIZATION: Only test Voice 1 with both languages (2 API calls)
       // Voice 2's language can be inferred (it's the OTHER language)
       debugPrint(
-          'GoogleSTTTranslator: 🚀 OPTIMIZATION: Testing Voice 1 with both languages...');
-      debugPrint('GoogleSTTTranslator: This will use 2 API calls for Voice 1');
+          'RealtimeTranslator: 🚀 OPTIMIZATION: Testing Voice 1 with both languages...');
+      debugPrint('RealtimeTranslator: This will use 2 API calls for Voice 1');
 
       final voice1Result =
           await _detectVoiceLanguageOptimized(voice1Path, preferredLanguages);
 
-      debugPrint('GoogleSTTTranslator: Voice 1 language detection result:');
+      debugPrint('RealtimeTranslator: Voice 1 language detection result:');
       debugPrint('  Detected Language: ${voice1Result['language']}');
       debugPrint('  Confidence: ${voice1Result['confidence']}');
       debugPrint('  Text: "${voice1Result['text']}"');
@@ -3275,24 +3275,24 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           assignment['speaker2'] = voice2Path;
           voice2AssignedLanguage = speaker2Lang;
           debugPrint(
-              'GoogleSTTTranslator: ✅ Voice 1 → Speaker 1 ($voice1Language)');
+              'RealtimeTranslator: ✅ Voice 1 → Speaker 1 ($voice1Language)');
           debugPrint(
-              'GoogleSTTTranslator: ✅ Voice 2 → Speaker 2 ($voice2AssignedLanguage) [INFERRED - no API call needed]');
+              'RealtimeTranslator: ✅ Voice 2 → Speaker 2 ($voice2AssignedLanguage) [INFERRED - no API call needed]');
         } else if (voice1Language == speaker2Lang) {
           // Voice 1 speaks Speaker 2's language
           assignment['speaker1'] = voice2Path;
           assignment['speaker2'] = voice1Path;
           voice2AssignedLanguage = speaker1Lang;
           debugPrint(
-              'GoogleSTTTranslator: ✅ Voice 1 → Speaker 2 ($voice1Language)');
+              'RealtimeTranslator: ✅ Voice 1 → Speaker 2 ($voice1Language)');
           debugPrint(
-              'GoogleSTTTranslator: ✅ Voice 2 → Speaker 1 ($voice2AssignedLanguage) [INFERRED - no API call needed]');
+              'RealtimeTranslator: ✅ Voice 2 → Speaker 1 ($voice2AssignedLanguage) [INFERRED - no API call needed]');
         } else {
           // Fallback: language doesn't match, use original order
           debugPrint(
-              'GoogleSTTTranslator: ⚠️ Voice 1 language ($voice1Language) doesn\'t match configured languages');
+              'RealtimeTranslator: ⚠️ Voice 1 language ($voice1Language) doesn\'t match configured languages');
           debugPrint(
-              'GoogleSTTTranslator: Using default assignment (Voice 1 → Speaker 1, Voice 2 → Speaker 2)');
+              'RealtimeTranslator: Using default assignment (Voice 1 → Speaker 1, Voice 2 → Speaker 2)');
           assignment['speaker1'] = voice1Path;
           assignment['speaker2'] = voice2Path;
           voice2AssignedLanguage = speaker2Lang;
@@ -3300,9 +3300,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       } else {
         // No clear detection, use default assignment
         debugPrint(
-            'GoogleSTTTranslator: ⚠️ Could not detect Voice 1 language clearly');
+            'RealtimeTranslator: ⚠️ Could not detect Voice 1 language clearly');
         debugPrint(
-            'GoogleSTTTranslator: Using default assignment (Voice 1 → Speaker 1, Voice 2 → Speaker 2)');
+            'RealtimeTranslator: Using default assignment (Voice 1 → Speaker 1, Voice 2 → Speaker 2)');
         assignment['speaker1'] = voice1Path;
         assignment['speaker2'] = voice2Path;
         voice2AssignedLanguage = speaker2Lang;
@@ -3311,24 +3311,24 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // Now transcribe Voice 2 with the inferred language (1 API call)
       // This will be used later in _transcribeSeparatedAudio
       debugPrint(
-          'GoogleSTTTranslator: 🚀 OPTIMIZATION: Will transcribe Voice 2 with inferred language ($voice2AssignedLanguage)');
-      debugPrint('GoogleSTTTranslator: This will use 1 API call for Voice 2');
+          'RealtimeTranslator: 🚀 OPTIMIZATION: Will transcribe Voice 2 with inferred language ($voice2AssignedLanguage)');
+      debugPrint('RealtimeTranslator: This will use 1 API call for Voice 2');
 
-      debugPrint('GoogleSTTTranslator: ===== OPTIMIZATION COMPLETE =====');
-      debugPrint('GoogleSTTTranslator: Total API calls used: 2 (Voice 1 only)');
+      debugPrint('RealtimeTranslator: ===== OPTIMIZATION COMPLETE =====');
+      debugPrint('RealtimeTranslator: Total API calls used: 2 (Voice 1 only)');
       debugPrint(
-          'GoogleSTTTranslator: Voice 2 will use: 1 API call (inferred language)');
+          'RealtimeTranslator: Voice 2 will use: 1 API call (inferred language)');
       debugPrint(
-          'GoogleSTTTranslator: Grand total: 3 API calls (vs 6 in old approach)');
-      debugPrint('GoogleSTTTranslator: API call reduction: 50% 🎉');
-      debugPrint('GoogleSTTTranslator: Speaker 1: ${assignment['speaker1']}');
-      debugPrint('GoogleSTTTranslator: Speaker 2: ${assignment['speaker2']}');
+          'RealtimeTranslator: Grand total: 3 API calls (vs 6 in old approach)');
+      debugPrint('RealtimeTranslator: API call reduction: 50% 🎉');
+      debugPrint('RealtimeTranslator: Speaker 1: ${assignment['speaker1']}');
+      debugPrint('RealtimeTranslator: Speaker 2: ${assignment['speaker2']}');
       debugPrint(
-          'GoogleSTTTranslator: ==========================================');
+          'RealtimeTranslator: ==========================================');
 
       return assignment;
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Language-based assignment error: $e');
+      debugPrint('RealtimeTranslator: Language-based assignment error: $e');
       // Fallback to original order
       return {
         'speaker1': voice1Path,
@@ -3398,13 +3398,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       await File(silentFilePath).writeAsBytes(silentFile);
 
       debugPrint(
-          'GoogleSTTTranslator: Created silent audio file: $silentFilePath');
+          'RealtimeTranslator: Created silent audio file: $silentFilePath');
       debugPrint(
           '  Duration: ${duration}s, Sample rate: ${sampleRate}Hz, Size: ${silentFile.length} bytes');
 
       return silentFilePath;
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Failed to create silent audio file: $e');
+      debugPrint('RealtimeTranslator: Failed to create silent audio file: $e');
       return null;
     }
   }
@@ -3414,7 +3414,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   Future<void> _generateStereoAudioFile() async {
     try {
       debugPrint(
-          'GoogleSTTTranslator: Starting stereo audio file generation...');
+          'RealtimeTranslator: Starting stereo audio file generation...');
 
       setState(() {
         _processingStatus = 'Creating stereo audio...';
@@ -3429,21 +3429,21 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
       if (_speaker1TtsAudioPath == null) {
         debugPrint(
-            'GoogleSTTTranslator: Speaker 1 TTS missing, will create silent audio');
+            'RealtimeTranslator: Speaker 1 TTS missing, will create silent audio');
         _speaker1TtsAudioPath = await _createSilentAudioFile('speaker1_silent');
         needsSilentAudio = true;
       }
 
       if (_speaker2TtsAudioPath == null) {
         debugPrint(
-            'GoogleSTTTranslator: Speaker 2 TTS missing, will create silent audio');
+            'RealtimeTranslator: Speaker 2 TTS missing, will create silent audio');
         _speaker2TtsAudioPath = await _createSilentAudioFile('speaker2_silent');
         needsSilentAudio = true;
       }
 
       if (needsSilentAudio) {
         debugPrint(
-            'GoogleSTTTranslator: Created silent audio files for missing speakers');
+            'RealtimeTranslator: Created silent audio files for missing speakers');
       }
 
       // Check if both files exist
@@ -3453,13 +3453,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final leftExists = await leftFile.exists();
       final rightExists = await rightFile.exists();
 
-      debugPrint('GoogleSTTTranslator: TTS file existence check:');
+      debugPrint('RealtimeTranslator: TTS file existence check:');
       debugPrint('  Left file exists: $leftExists');
       debugPrint('  Right file exists: $rightExists');
 
       if (!leftExists || !rightExists) {
         debugPrint(
-            'GoogleSTTTranslator: Cannot generate stereo audio - TTS files do not exist');
+            'RealtimeTranslator: Cannot generate stereo audio - TTS files do not exist');
         if (!leftExists) {
           debugPrint('  Left TTS file missing: $_speaker1TtsAudioPath');
         }
@@ -3472,11 +3472,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // Check file sizes
       final leftSize = await leftFile.length();
       final rightSize = await rightFile.length();
-      debugPrint('GoogleSTTTranslator: TTS file sizes:');
+      debugPrint('RealtimeTranslator: TTS file sizes:');
       debugPrint('  Left file size: $leftSize bytes');
       debugPrint('  Right file size: $rightSize bytes');
 
-      debugPrint('GoogleSTTTranslator: Generating stereo audio file...');
+      debugPrint('RealtimeTranslator: Generating stereo audio file...');
       debugPrint('  Speaker 1 TTS file: $_speaker1TtsAudioPath');
       debugPrint('  Speaker 2 TTS file: $_speaker2TtsAudioPath');
       debugPrint('  Speaker 1 earpiece: ${_speakerEarpieces[0]}');
@@ -3495,7 +3495,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         rightChannelFile =
             _speaker1TtsAudioPath!; // Speaker 1's translated TTS for Speaker 2's right earpiece
         debugPrint(
-            'GoogleSTTTranslator: Audio routing - Left channel: Speaker 2 TTS (for Speaker 1), Right channel: Speaker 1 TTS (for Speaker 2)');
+            'RealtimeTranslator: Audio routing - Left channel: Speaker 2 TTS (for Speaker 1), Right channel: Speaker 1 TTS (for Speaker 2)');
       } else {
         // Speaker 1 has right earpiece, so Speaker 2's translated TTS goes to right channel (for Speaker 1 to hear)
         // Speaker 2 has left earpiece, so Speaker 1's translated TTS goes to left channel (for Speaker 2 to hear)
@@ -3504,7 +3504,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         rightChannelFile =
             _speaker2TtsAudioPath!; // Speaker 2's translated TTS for Speaker 1's right earpiece
         debugPrint(
-            'GoogleSTTTranslator: Audio routing - Left channel: Speaker 1 TTS (for Speaker 2), Right channel: Speaker 2 TTS (for Speaker 1)');
+            'RealtimeTranslator: Audio routing - Left channel: Speaker 1 TTS (for Speaker 2), Right channel: Speaker 2 TTS (for Speaker 1)');
       }
 
       // Generate stereo audio file using the robust service
@@ -3518,13 +3518,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
       if (_cachedStereoAudioPath != null) {
         debugPrint(
-            'GoogleSTTTranslator: Stereo audio file generated and cached: $_cachedStereoAudioPath');
+            'RealtimeTranslator: Stereo audio file generated and cached: $_cachedStereoAudioPath');
 
         // Verify the cached file exists
         final cachedFile = File(_cachedStereoAudioPath!);
         final cachedExists = await cachedFile.exists();
         final cachedSize = cachedExists ? await cachedFile.length() : 0;
-        debugPrint('GoogleSTTTranslator: Cached stereo file verification:');
+        debugPrint('RealtimeTranslator: Cached stereo file verification:');
         debugPrint('  File exists: $cachedExists');
         debugPrint('  File size: $cachedSize bytes');
 
@@ -3535,7 +3535,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
         // Auto-play the stereo audio if file was successfully generated
         if (cachedExists && cachedSize > 0) {
-          debugPrint('GoogleSTTTranslator: Auto-playing stereo audio...');
+          debugPrint('RealtimeTranslator: Auto-playing stereo audio...');
           // Add a small delay to ensure UI updates and user sees the stereo audio is ready
           await Future.delayed(const Duration(milliseconds: 500));
           await _autoPlayStereoAudio();
@@ -3546,21 +3546,21 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           });
         } else {
           debugPrint(
-              'GoogleSTTTranslator: Stereo audio file is empty or missing, skipping auto-play');
+              'RealtimeTranslator: Stereo audio file is empty or missing, skipping auto-play');
           setState(() {
             _isProcessing = false;
           });
         }
       } else {
         debugPrint(
-            'GoogleSTTTranslator: Failed to generate stereo audio file - returned null');
+            'RealtimeTranslator: Failed to generate stereo audio file - returned null');
         setState(() {
           _isProcessing = false;
         });
       }
     } catch (e, stackTrace) {
-      debugPrint('GoogleSTTTranslator: Error generating stereo audio file: $e');
-      debugPrint('GoogleSTTTranslator: Stack trace: $stackTrace');
+      debugPrint('RealtimeTranslator: Error generating stereo audio file: $e');
+      debugPrint('RealtimeTranslator: Stack trace: $stackTrace');
 
       setState(() {
         _isProcessing = false;
@@ -3570,7 +3570,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // Defer cleanup; we'll clean after playback completes so UI buttons keep working
       _pendingStereoPlaybackCleanup = true;
       debugPrint(
-          'GoogleSTTTranslator: Deferring TTS cleanup until playback completion');
+          'RealtimeTranslator: Deferring TTS cleanup until playback completion');
     }
   }
 
@@ -3588,7 +3588,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         await _speaker1Player.play(DeviceFileSource(_speaker1AudioPath!));
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Speaker 1 playback error: $e');
+      debugPrint('RealtimeTranslator: Speaker 1 playback error: $e');
       _showErrorDialog('Failed to play Speaker 1 audio: $e');
     }
   }
@@ -3607,7 +3607,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         await _speaker2Player.play(DeviceFileSource(_speaker2AudioPath!));
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Speaker 2 playback error: $e');
+      debugPrint('RealtimeTranslator: Speaker 2 playback error: $e');
       _showErrorDialog('Failed to play Speaker 2 audio: $e');
     }
   }
@@ -3619,7 +3619,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       if ((_speaker1TtsAudioPath == null || _speaker1TtsAudioPath!.isEmpty) &&
           (_translations[0]?.isNotEmpty ?? false)) {
         debugPrint(
-            'GoogleSTTTranslator: Speaker 1 TTS missing, generating on-demand...');
+            'RealtimeTranslator: Speaker 1 TTS missing, generating on-demand...');
         final speaker2Language = _speakerLanguages[1];
         if (speaker2Language != null) {
           _speaker1TtsAudioPath = await _ttsService.generateAudioFile(
@@ -3630,7 +3630,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         }
       }
       if (_speaker1TtsAudioPath == null || _speaker1TtsAudioPath!.isEmpty) {
-        debugPrint('GoogleSTTTranslator: No TTS audio available for Speaker 1');
+        debugPrint('RealtimeTranslator: No TTS audio available for Speaker 1');
         return;
       }
 
@@ -3649,14 +3649,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         }
 
         // Play TTS in continuous A2DP mode (no switching)
-        debugPrint('MonoSTTTranslator: Playing Speaker 1 TTS (continuous A2DP)');
+        debugPrint('RealtimeTranslator: Playing Speaker 1 TTS (continuous A2DP)');
         await _ttsService.playAudioFile(_speaker1TtsAudioPath!);
         setState(() {
           _isPlayingTts1 = true;
         });
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Speaker 1 TTS playback error: $e');
+      debugPrint('RealtimeTranslator: Speaker 1 TTS playback error: $e');
       setState(() {
         _isPlayingTts1 = false;
       });
@@ -3670,7 +3670,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       if ((_speaker2TtsAudioPath == null || _speaker2TtsAudioPath!.isEmpty) &&
           (_translations[1]?.isNotEmpty ?? false)) {
         debugPrint(
-            'GoogleSTTTranslator: Speaker 2 TTS missing, generating on-demand...');
+            'RealtimeTranslator: Speaker 2 TTS missing, generating on-demand...');
         final speaker1Language = _speakerLanguages[0];
         if (speaker1Language != null) {
           _speaker2TtsAudioPath = await _ttsService.generateAudioFile(
@@ -3681,7 +3681,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         }
       }
       if (_speaker2TtsAudioPath == null || _speaker2TtsAudioPath!.isEmpty) {
-        debugPrint('GoogleSTTTranslator: No TTS audio available for Speaker 2');
+        debugPrint('RealtimeTranslator: No TTS audio available for Speaker 2');
         return;
       }
 
@@ -3700,14 +3700,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         }
 
         // Play TTS in continuous A2DP mode (no switching)
-        debugPrint('MonoSTTTranslator: Playing Speaker 2 TTS (continuous A2DP)');
+        debugPrint('RealtimeTranslator: Playing Speaker 2 TTS (continuous A2DP)');
         await _ttsService.playAudioFile(_speaker2TtsAudioPath!);
         setState(() {
           _isPlayingTts2 = true;
         });
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Speaker 2 TTS playback error: $e');
+      debugPrint('RealtimeTranslator: Speaker 2 TTS playback error: $e');
       setState(() {
         _isPlayingTts2 = false;
       });
@@ -3727,7 +3727,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         setState(() {
           _isPlayingStereo = false;
         });
-        debugPrint('GoogleSTTTranslator: Stereo audio stopped');
+        debugPrint('RealtimeTranslator: Stereo audio stopped');
       } else {
         // Stop any individual TTS playback
         await _ttsService.stop();
@@ -3739,7 +3739,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         // Check if we have a cached stereo audio file
         if (_cachedStereoAudioPath == null) {
           debugPrint(
-              'GoogleSTTTranslator: No cached stereo audio file available');
+              'RealtimeTranslator: No cached stereo audio file available');
           _showErrorDialog(
               'Stereo audio file not available. Please try again.');
           return;
@@ -3749,16 +3749,16 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         final stereoFile = File(_cachedStereoAudioPath!);
         if (!await stereoFile.exists()) {
           debugPrint(
-              'GoogleSTTTranslator: Cached stereo audio file does not exist: $_cachedStereoAudioPath');
+              'RealtimeTranslator: Cached stereo audio file does not exist: $_cachedStereoAudioPath');
           _showErrorDialog('Stereo audio file not found. Please try again.');
           return;
         }
 
-        debugPrint('GoogleSTTTranslator: Playing cached stereo audio...');
+        debugPrint('RealtimeTranslator: Playing cached stereo audio...');
         debugPrint('  Cached stereo file: $_cachedStereoAudioPath');
 
         // CRITICAL: Switch to playback route for proper TWS stereo routing
-        debugPrint('GoogleSTTTranslator: Switching to playback route...');
+        debugPrint('RealtimeTranslator: Switching to playback route...');
         await _enterPlaybackRoute();
 
         // IMPORTANT: Add delay to allow audio system to switch modes
@@ -3766,7 +3766,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         // Android 11 may need longer delay for proper mode switching
         await Future.delayed(const Duration(milliseconds: 500));
         debugPrint(
-            'GoogleSTTTranslator: ✅ Audio route switched (waited 500ms), ready for stereo playback');
+            'RealtimeTranslator: ✅ Audio route switched (waited 500ms), ready for stereo playback');
 
         // Play the cached stereo audio file
         await _stereoTtsService.playStereoAudio(_cachedStereoAudioPath!);
@@ -3774,10 +3774,10 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         setState(() {
           _isPlayingStereo = true;
         });
-        debugPrint('GoogleSTTTranslator: Stereo audio playing successfully');
+        debugPrint('RealtimeTranslator: Stereo audio playing successfully');
       }
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Stereo audio playback error: $e');
+      debugPrint('RealtimeTranslator: Stereo audio playback error: $e');
       setState(() {
         _isPlayingStereo = false;
       });
@@ -3792,17 +3792,17 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // GUARD: Prevent multiple simultaneous playbacks
       if (_isPlayingStereo) {
         debugPrint(
-            'GoogleSTTTranslator: ⚠️ Stereo audio already playing, skipping auto-play');
+            'RealtimeTranslator: ⚠️ Stereo audio already playing, skipping auto-play');
         return;
       }
 
-      debugPrint('GoogleSTTTranslator: Starting auto-play of stereo audio...');
+      debugPrint('RealtimeTranslator: Starting auto-play of stereo audio...');
 
       // Do not require translations for auto-play; rely on generated stereo file
 
       // CRITICAL: Switch to playback route for proper TWS stereo routing
       debugPrint(
-          'GoogleSTTTranslator: Auto-play: Switching to playback route...');
+          'RealtimeTranslator: Auto-play: Switching to playback route...');
       await _enterPlaybackRoute();
 
       // IMPORTANT: Add delay to allow audio system to switch modes
@@ -3810,21 +3810,21 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // Android 11 may need longer delay for proper mode switching
       await Future.delayed(const Duration(milliseconds: 500));
       debugPrint(
-          'GoogleSTTTranslator: ✅ Audio route switched for auto-play (waited 500ms)');
+          'RealtimeTranslator: ✅ Audio route switched for auto-play (waited 500ms)');
 
       // Check if we have language information
       final speaker1Language = _speakerLanguages[0];
       final speaker2Language = _speakerLanguages[1];
       if (speaker1Language == null || speaker2Language == null) {
         debugPrint(
-            'GoogleSTTTranslator: No language information available for auto-play stereo audio');
+            'RealtimeTranslator: No language information available for auto-play stereo audio');
         return;
       }
 
       // Check if we have a cached stereo audio file
       if (_cachedStereoAudioPath == null) {
         debugPrint(
-            'GoogleSTTTranslator: No cached stereo audio file available for auto-play');
+            'RealtimeTranslator: No cached stereo audio file available for auto-play');
         return;
       }
 
@@ -3832,11 +3832,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       final stereoFile = File(_cachedStereoAudioPath!);
       if (!await stereoFile.exists()) {
         debugPrint(
-            'GoogleSTTTranslator: Cached stereo audio file does not exist for auto-play: $_cachedStereoAudioPath');
+            'RealtimeTranslator: Cached stereo audio file does not exist for auto-play: $_cachedStereoAudioPath');
         return;
       }
 
-      debugPrint('GoogleSTTTranslator: Auto-playing cached stereo audio...');
+      debugPrint('RealtimeTranslator: Auto-playing cached stereo audio...');
       debugPrint('  Cached stereo file: $_cachedStereoAudioPath');
       debugPrint(
           '  Left channel (Speaker 1): "${_translations[0]}" in ${speaker2Language.code}');
@@ -3856,17 +3856,17 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       await _stereoTtsService.playStereoAudio(_cachedStereoAudioPath!);
 
       debugPrint(
-          'GoogleSTTTranslator: ✅ Auto-play stereo audio started successfully');
+          'RealtimeTranslator: ✅ Auto-play stereo audio started successfully');
       debugPrint(
-          'GoogleSTTTranslator: Waiting for playback completion callback...');
+          'RealtimeTranslator: Waiting for playback completion callback...');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Auto-play stereo audio error: $e');
+      debugPrint('RealtimeTranslator: ❌ Auto-play stereo audio error: $e');
       setState(() {
         _isPlayingStereo = false;
       });
       // Don't show error dialog for auto-play failures - just log them
       debugPrint(
-          'GoogleSTTTranslator: Auto-play failed silently, user can still play manually');
+          'RealtimeTranslator: Auto-play failed silently, user can still play manually');
     }
   }
 
@@ -3875,7 +3875,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       _showTranslation[speakerId] = !(_showTranslation[speakerId] ?? false);
     });
     debugPrint(
-        'GoogleSTTTranslator: Toggled translation for Speaker $speakerId: ${_showTranslation[speakerId]}');
+        'RealtimeTranslator: Toggled translation for Speaker $speakerId: ${_showTranslation[speakerId]}');
   }
 
   // On-device diarization methods (copied from Native STT Translation)
@@ -3909,8 +3909,8 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     const int minVoiceDuration = 4800; // 0.3 seconds minimum voice
 
     debugPrint(
-        'GoogleSTTTranslator: Voice activity detection - Audio data length: ${audioData.length} samples');
-    debugPrint('GoogleSTTTranslator: Energy threshold: $energyThreshold');
+        'RealtimeTranslator: Voice activity detection - Audio data length: ${audioData.length} samples');
+    debugPrint('RealtimeTranslator: Energy threshold: $energyThreshold');
 
     final List<VoiceSegment> segments = [];
     bool inVoice = false;
@@ -3932,7 +3932,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       if (i % (windowSize * 10) == 0) {
         // Log every 10th window to avoid spam
         debugPrint(
-            'GoogleSTTTranslator: Energy at sample $i: ${energy.toStringAsFixed(6)}, threshold: $energyThreshold');
+            'RealtimeTranslator: Energy at sample $i: ${energy.toStringAsFixed(6)}, threshold: $energyThreshold');
       }
 
       if (energy > energyThreshold) {
@@ -4201,7 +4201,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     }
 
     debugPrint(
-        'GoogleSTTTranslator: K-means converged after $iteration iterations');
+        'RealtimeTranslator: K-means converged after $iteration iterations');
     return labels;
   }
 
@@ -4441,7 +4441,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
     final mappedCode = languageMap[languageCode.toLowerCase()] ?? 'en-US';
     debugPrint(
-        'GoogleSTTTranslator: Mapped language code: $languageCode -> $mappedCode');
+        'RealtimeTranslator: Mapped language code: $languageCode -> $mappedCode');
     return mappedCode;
   }
 
@@ -4493,12 +4493,12 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     // Stop noise meter monitoring
     _stopSoundLevelMonitoring();
 
-    debugPrint('GoogleSTTTranslator: Stopped automatic translation mode');
+    debugPrint('RealtimeTranslator: Stopped automatic translation mode');
   }
 
   /// Stop sound level monitoring
   void _stopSoundLevelMonitoring() {
-    debugPrint('GoogleSTTTranslator: Stopping sound level monitoring');
+    debugPrint('RealtimeTranslator: Stopping sound level monitoring');
 
     // Cancel noise meter subscription
     _noiseSubscription?.cancel();
@@ -4519,7 +4519,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     if (!_isAutomaticMode || _isRecording) return;
 
     try {
-      debugPrint('GoogleSTTTranslator: ═══ Starting new recording cycle ═══');
+      debugPrint('RealtimeTranslator: ═══ Starting new recording cycle ═══');
 
       // NOTE: We do NOT stop playback here!
       // Playback should have already finished before this is called.
@@ -4540,13 +4540,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       });
 
       debugPrint(
-          'GoogleSTTTranslator: Starting automatic recording (waiting for first speech...)');
+          'RealtimeTranslator: Starting automatic recording (waiting for first speech...)');
 
       // CRITICAL: Ensure no audio is playing before starting mic
       // This prevents capturing TTS audio from previous cycle
       if (_isPlayingStereo) {
         debugPrint(
-            'GoogleSTTTranslator: ⚠️ Stereo audio still playing, waiting...');
+            'RealtimeTranslator: ⚠️ Stereo audio still playing, waiting...');
         await Future.delayed(const Duration(milliseconds: 1000));
       }
 
@@ -4562,20 +4562,20 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           '${directory.path}/auto_recording_${DateTime.now().millisecondsSinceEpoch}.wav';
 
       // Start NATIVE recording with FORCED phone mic
-      debugPrint('GoogleSTTTranslator: [AUTO] Starting NATIVE recorder...');
+      debugPrint('RealtimeTranslator: [AUTO] Starting NATIVE recorder...');
       debugPrint(
-          'GoogleSTTTranslator: [AUTO] Forced MIC audio source (phone mic only)');
+          'RealtimeTranslator: [AUTO] Forced MIC audio source (phone mic only)');
       final bool started = await _nativeRecorder.startRecording(recordingPath);
 
       if (!started) {
         debugPrint(
-            'GoogleSTTTranslator: ❌ [AUTO] Failed to start native recording');
+            'RealtimeTranslator: ❌ [AUTO] Failed to start native recording');
         return;
       }
 
       _recordedAudioPath = recordingPath;
 
-      debugPrint('GoogleSTTTranslator: Audio recorder started successfully');
+      debugPrint('RealtimeTranslator: Audio recorder started successfully');
 
       // Add a small delay to ensure recorder has exclusive microphone access
       await Future.delayed(const Duration(milliseconds: 200));
@@ -4586,9 +4586,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       // DON'T start silent detection timer yet!
       // It will start automatically when first speech is detected
       debugPrint(
-          'GoogleSTTTranslator: Waiting for first speech to activate silent detection...');
+          'RealtimeTranslator: Waiting for first speech to activate silent detection...');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Error starting automatic recording: $e');
+      debugPrint('RealtimeTranslator: Error starting automatic recording: $e');
       setState(() {
         _isRecording = false;
       });
@@ -4598,7 +4598,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Start sound level monitoring using real microphone input
   void _startSoundLevelMonitoring() {
     debugPrint(
-      'GoogleSTTTranslator: Starting real-time microphone amplitude monitoring',
+      'RealtimeTranslator: Starting real-time microphone amplitude monitoring',
     );
 
     try {
@@ -4629,7 +4629,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           if (normalizedAmplitude > 0.05 ||
               (normalizedAmplitude - _currentSoundLevel).abs() > 0.1) {
             debugPrint(
-              'GoogleSTTTranslator: Real microphone amplitude: ${noiseReading.meanDecibel.toStringAsFixed(1)} dB, normalized: ${(normalizedAmplitude * 100).toStringAsFixed(1)}%',
+              'RealtimeTranslator: Real microphone amplitude: ${noiseReading.meanDecibel.toStringAsFixed(1)} dB, normalized: ${(normalizedAmplitude * 100).toStringAsFixed(1)}%',
             );
           }
 
@@ -4639,15 +4639,15 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           }
         },
         onError: (error) {
-          debugPrint('GoogleSTTTranslator: Noise meter error: $error');
+          debugPrint('RealtimeTranslator: Noise meter error: $error');
         },
       );
 
       debugPrint(
-        'GoogleSTTTranslator: Real-time microphone monitoring started successfully',
+        'RealtimeTranslator: Real-time microphone monitoring started successfully',
       );
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Error starting noise meter: $e');
+      debugPrint('RealtimeTranslator: Error starting noise meter: $e');
     }
   }
 
@@ -4678,7 +4678,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     if (soundLevel > 0.05) {
       // Only log if there's some sound
       debugPrint(
-          'GoogleSTTTranslator: Sound level: ${(soundLevel * 100).toStringAsFixed(1)}%, '
+          'RealtimeTranslator: Sound level: ${(soundLevel * 100).toStringAsFixed(1)}%, '
           'Above threshold: $isAboveThreshold, Consecutive: $_consecutiveSpeechDetections, '
           'Speech confirmed: $isSpeech, Threshold: ${(_minSpeechLevel * 100).toStringAsFixed(0)}%');
     }
@@ -4692,7 +4692,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     if (!_hasDetectedSpeechInSession) {
       _hasDetectedSpeechInSession = true;
       debugPrint(
-          'GoogleSTTTranslator: First speech detected! Starting silent detection timer');
+          'RealtimeTranslator: First speech detected! Starting silent detection timer');
 
       // Start silent detection timer for the first time
       _startSilentDetectionTimer();
@@ -4703,7 +4703,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     if (!_isSilentDetectionActive) return;
 
     debugPrint(
-        'GoogleSTTTranslator: Speech detected, resetting silent detection timer');
+        'RealtimeTranslator: Speech detected, resetting silent detection timer');
 
     // Reset silent detection timer
     _silentDetectionTimer?.cancel();
@@ -4720,13 +4720,13 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     });
 
     debugPrint(
-        'GoogleSTTTranslator: Starting silent detection timer (${_silentDetectionDuration}s)');
+        'RealtimeTranslator: Starting silent detection timer (${_silentDetectionDuration}s)');
 
     _silentDetectionTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (!_isAutomaticMode || !_isRecording) {
         timer.cancel();
         debugPrint(
-            'GoogleSTTTranslator: Silent detection timer cancelled - mode changed');
+            'RealtimeTranslator: Silent detection timer cancelled - mode changed');
         return;
       }
 
@@ -4735,11 +4735,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       });
 
       debugPrint(
-          'GoogleSTTTranslator: Silent detection countdown: ${_silentDetectionCountdown}s');
+          'RealtimeTranslator: Silent detection countdown: ${_silentDetectionCountdown}s');
 
       if (_silentDetectionCountdown <= 0) {
         timer.cancel();
-        debugPrint('GoogleSTTTranslator: Silent detection timeout reached');
+        debugPrint('RealtimeTranslator: Silent detection timeout reached');
         _onSilentDetectionTimeout();
       }
     });
@@ -4750,7 +4750,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     if (!_isAutomaticMode || !_isRecording) return;
 
     debugPrint(
-        'GoogleSTTTranslator: Silent detection timeout, stopping recording');
+        'RealtimeTranslator: Silent detection timeout, stopping recording');
 
     // Play stop recording sound effect
     await _playStopRecordingSound();
@@ -4772,7 +4772,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       });
 
       debugPrint(
-          'GoogleSTTTranslator: Processing recorded audio in automatic mode');
+          'RealtimeTranslator: Processing recorded audio in automatic mode');
 
       // Set up playback completion callback BEFORE processing starts
       // This ensures the callback is ready when auto-play happens
@@ -4783,10 +4783,10 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
 
       // Note: The callback will handle restarting after playback completes
       debugPrint(
-          'GoogleSTTTranslator: Processing complete, waiting for TTS playback to finish...');
+          'RealtimeTranslator: Processing complete, waiting for TTS playback to finish...');
     } catch (e) {
       debugPrint(
-          'GoogleSTTTranslator: Error processing audio in automatic mode: $e');
+          'RealtimeTranslator: Error processing audio in automatic mode: $e');
       setState(() {
         _isProcessing = false;
       });
@@ -4800,7 +4800,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Set up playback completion callback for automatic restart
   void _setupPlaybackCompletionCallback() {
     debugPrint(
-        'GoogleSTTTranslator: Playback completion callback already set up in initState() - no action needed');
+        'RealtimeTranslator: Playback completion callback already set up in initState() - no action needed');
 
     // NOTE: The callback is already set up in initState() as a unified callback
     // that handles both UI state updates and automatic mode restart.
@@ -5039,7 +5039,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Clean up only TTS files (called after stereo generation)
   Future<void> _cleanupTtsFiles() async {
     try {
-      debugPrint('GoogleSTTTranslator: Cleaning up TTS files...');
+      debugPrint('RealtimeTranslator: Cleaning up TTS files...');
 
       int deletedCount = 0;
 
@@ -5050,7 +5050,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           await file1.delete();
           deletedCount++;
           debugPrint(
-              'GoogleSTTTranslator: Deleted Speaker 1 TTS: $_speaker1TtsAudioPath');
+              'RealtimeTranslator: Deleted Speaker 1 TTS: $_speaker1TtsAudioPath');
         }
         _speaker1TtsAudioPath = null;
       }
@@ -5061,14 +5061,14 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           await file2.delete();
           deletedCount++;
           debugPrint(
-              'GoogleSTTTranslator: Deleted Speaker 2 TTS: $_speaker2TtsAudioPath');
+              'RealtimeTranslator: Deleted Speaker 2 TTS: $_speaker2TtsAudioPath');
         }
         _speaker2TtsAudioPath = null;
       }
 
-      debugPrint('GoogleSTTTranslator: ✅ Cleaned up $deletedCount TTS files');
+      debugPrint('RealtimeTranslator: ✅ Cleaned up $deletedCount TTS files');
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: Error cleaning up TTS files: $e');
+      debugPrint('RealtimeTranslator: Error cleaning up TTS files: $e');
     }
   }
 
@@ -5077,7 +5077,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Ensures sound plays through TWS/Bluetooth headset
   Future<void> _playStartRecordingSound() async {
     try {
-      debugPrint('GoogleSTTTranslator: 🔊 Playing START recording beep...');
+      debugPrint('RealtimeTranslator: 🔊 Playing START recording beep...');
       
       // Ensure we're in playback mode for the beep
       if (_isRealtimeMode) {
@@ -5100,24 +5100,24 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         await completer.future.timeout(
           const Duration(seconds: 2),
           onTimeout: () {
-            debugPrint('GoogleSTTTranslator: ⚠️ Start beep playback timeout');
+            debugPrint('RealtimeTranslator: ⚠️ Start beep playback timeout');
           },
         );
         
         await subscription.cancel();
-        debugPrint('GoogleSTTTranslator: ✅ Played START recording beep (custom) in TWS');
+        debugPrint('RealtimeTranslator: ✅ Played START recording beep (custom) in TWS');
       } catch (e) {
         // Fallback to system sound if custom file not available
-        debugPrint('GoogleSTTTranslator: Custom sound not found, using system beep');
+        debugPrint('RealtimeTranslator: Custom sound not found, using system beep');
         SystemSound.play(SystemSoundType.click);
         await Future.delayed(const Duration(milliseconds: 100)); // Give system sound time to play
-        debugPrint('GoogleSTTTranslator: ✅ Played START recording beep (system)');
+        debugPrint('RealtimeTranslator: ✅ Played START recording beep (system)');
       }
       
       // Add small delay before switching to recording mode
       await Future.delayed(const Duration(milliseconds: 150));
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Error playing start recording sound: $e');
+      debugPrint('RealtimeTranslator: ❌ Error playing start recording sound: $e');
       // Don't block recording if sound effect fails
     }
   }
@@ -5127,7 +5127,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
   /// Ensures sound plays through TWS/Bluetooth headset
   Future<void> _playStopRecordingSound() async {
     try {
-      debugPrint('GoogleSTTTranslator: 🔊 Playing STOP recording beep...');
+      debugPrint('RealtimeTranslator: 🔊 Playing STOP recording beep...');
       
       // Ensure we're in playback mode for the beep
       if (_isRealtimeMode) {
@@ -5150,24 +5150,24 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         await completer.future.timeout(
           const Duration(seconds: 2),
           onTimeout: () {
-            debugPrint('GoogleSTTTranslator: ⚠️ Stop beep playback timeout');
+            debugPrint('RealtimeTranslator: ⚠️ Stop beep playback timeout');
           },
         );
         
         await subscription.cancel();
-        debugPrint('GoogleSTTTranslator: ✅ Played STOP recording beep (custom) in TWS');
+        debugPrint('RealtimeTranslator: ✅ Played STOP recording beep (custom) in TWS');
       } catch (e) {
         // Fallback to system sound if custom file not available
-        debugPrint('GoogleSTTTranslator: Custom sound not found, using system beep');
+        debugPrint('RealtimeTranslator: Custom sound not found, using system beep');
         SystemSound.play(SystemSoundType.alert);
         await Future.delayed(const Duration(milliseconds: 100)); // Give system sound time to play
-        debugPrint('GoogleSTTTranslator: ✅ Played STOP recording beep (system)');
+        debugPrint('RealtimeTranslator: ✅ Played STOP recording beep (system)');
       }
       
       // Add small delay after beep before continuing
       await Future.delayed(const Duration(milliseconds: 150));
     } catch (e) {
-      debugPrint('GoogleSTTTranslator: ❌ Error playing stop recording sound: $e');
+      debugPrint('RealtimeTranslator: ❌ Error playing stop recording sound: $e');
       // Don't block processing if sound effect fails
     }
   }
@@ -5255,7 +5255,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
       backgroundColor: const Color(0xFF1D1E33),
       elevation: 0,
       title: const Text(
-        'Mono Translation',
+        'Realtime Translation',
         style: TextStyle(
           color: Colors.white,
           fontSize: 20,
@@ -5471,7 +5471,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
                   _speakerLanguages[speakerIndex] = newLanguage;
                 });
                 debugPrint(
-                    'GoogleSTTTranslator: Speaker $speakerIndex language changed to: ${newLanguage.name}');
+                    'RealtimeTranslator: Speaker $speakerIndex language changed to: ${newLanguage.name}');
               }
             },
           ),
@@ -5574,7 +5574,7 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           _speakerGenders[speakerIndex] = gender;
         });
         debugPrint(
-            'GoogleSTTTranslator: Speaker $speakerIndex gender changed to: $gender');
+            'RealtimeTranslator: Speaker $speakerIndex gender changed to: $gender');
       },
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
@@ -5627,9 +5627,9 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           _speakerEarpieces[otherSpeakerIndex] = oppositeEarpiece;
         });
         debugPrint(
-            'GoogleSTTTranslator: Speaker $speakerIndex earpiece changed to: $earpiece');
+            'RealtimeTranslator: Speaker $speakerIndex earpiece changed to: $earpiece');
         debugPrint(
-            'GoogleSTTTranslator: Speaker ${speakerIndex == 0 ? 1 : 0} earpiece automatically set to: ${earpiece == 'left' ? 'right' : 'left'}');
+            'RealtimeTranslator: Speaker ${speakerIndex == 0 ? 1 : 0} earpiece automatically set to: ${earpiece == 'left' ? 'right' : 'left'}');
       },
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
