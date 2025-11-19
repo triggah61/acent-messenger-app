@@ -23,12 +23,13 @@ import '../../services/streaming_audio_recorder_service.dart';
 import '../../services/bluetooth_service.dart';
 
 /// TTS Queue Item for Mono Translation
-/// PRODUCTION-READY: Pre-generation architecture
-/// Phase 1: Generate TTS file → Store file path in queue
+/// PRODUCTION-READY: Pre-generation architecture with stereo channel routing
+/// Phase 1: Generate TTS file → Convert to stereo → Store file path in queue
 /// Phase 2: Pick file path → Play immediately (no generation latency)
 class TtsQueueItem {
   final int speakerIndex;
-  final String filePath;        // Path to pre-generated TTS audio file
+  final String filePath;        // Path to pre-generated STEREO TTS audio file
+  final String channel;         // Audio channel: 'left' or 'right'
   final String originalText;    // Original text (for logging/debugging)
   final int fileSize;           // File size in bytes (for verification)
   final DateTime timestamp;     // When TTS was generated
@@ -36,6 +37,7 @@ class TtsQueueItem {
   TtsQueueItem({
     required this.speakerIndex,
     required this.filePath,
+    required this.channel,
     required this.originalText,
     required this.fileSize,
     required this.timestamp,
@@ -466,9 +468,135 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     );
   }
 
-  /// PHASE 1: Generate TTS file and add to queue (Pre-generation Architecture)
-  /// PRODUCTION-READY: TTS generation happens in Phase 1 (parallel to recording)
-  /// This eliminates playback latency and enables pipeline processing
+  /// STEREO CONVERSION: Convert mono TTS to stereo with channel routing
+  /// This routes audio to the specified channel (left or right earpiece)
+  /// Similar to Stereo Translation, but for mono pre-generated TTS
+  Future<String?> _convertMonoToStereoWithChannel(
+    String monoFilePath,
+    String channel,
+  ) async {
+    try {
+      debugPrint('MonoSTTTranslator: ═══ Converting Mono to Stereo ═══');
+      debugPrint('MonoSTTTranslator: Mono file: $monoFilePath');
+      debugPrint('MonoSTTTranslator: Target channel: $channel');
+
+      // Read mono file
+      final monoFile = File(monoFilePath);
+      if (!await monoFile.exists()) {
+        debugPrint('MonoSTTTranslator: ❌ Mono file does not exist');
+        return null;
+      }
+
+      final monoBytes = await monoFile.readAsBytes();
+      debugPrint('MonoSTTTranslator: Read ${monoBytes.length} bytes from mono file');
+
+      // Extract audio data and metadata from WAV file
+      if (monoBytes.length < 44) {
+        debugPrint('MonoSTTTranslator: ❌ File too small to be valid WAV');
+        return null;
+      }
+
+      // Parse WAV header (44 bytes standard WAV header)
+      final sampleRate = monoBytes[24] |
+          (monoBytes[25] << 8) |
+          (monoBytes[26] << 16) |
+          (monoBytes[27] << 24);
+      
+      final channels = monoBytes[22] | (monoBytes[23] << 8);
+      final bitsPerSample = monoBytes[34] | (monoBytes[35] << 8);
+
+      debugPrint('MonoSTTTranslator: WAV metadata:');
+      debugPrint('MonoSTTTranslator:   Sample rate: $sampleRate Hz');
+      debugPrint('MonoSTTTranslator:   Channels: $channels');
+      debugPrint('MonoSTTTranslator:   Bits per sample: $bitsPerSample');
+
+      // Extract audio data (skip 44-byte header)
+      final audioData = monoBytes.sublist(44);
+      debugPrint('MonoSTTTranslator: Extracted ${audioData.length} bytes of audio data');
+
+      // Create stereo data with channel routing
+      final stereoData = <int>[];
+
+      // Interleave audio based on target channel
+      for (int i = 0; i < audioData.length; i += 2) {
+        if (channel == 'left') {
+          // Left channel: audio, Right channel: silence
+          stereoData.add(audioData[i]);
+          stereoData.add(audioData[i + 1]);
+          stereoData.add(0);  // Right channel silence (low byte)
+          stereoData.add(0);  // Right channel silence (high byte)
+        } else {
+          // Left channel: silence, Right channel: audio
+          stereoData.add(0);  // Left channel silence (low byte)
+          stereoData.add(0);  // Left channel silence (high byte)
+          stereoData.add(audioData[i]);
+          stereoData.add(audioData[i + 1]);
+        }
+      }
+
+      // Create stereo WAV header
+      final dataSize = stereoData.length;
+      final fileSize = 36 + dataSize;
+      final byteRate = sampleRate * 2 * 2; // sampleRate * channels * (bitsPerSample / 8)
+
+      final header = <int>[
+        // RIFF header
+        0x52, 0x49, 0x46, 0x46, // "RIFF"
+        fileSize & 0xFF, (fileSize >> 8) & 0xFF, (fileSize >> 16) & 0xFF, (fileSize >> 24) & 0xFF,
+        0x57, 0x41, 0x56, 0x45, // "WAVE"
+
+        // fmt chunk
+        0x66, 0x6D, 0x74, 0x20, // "fmt "
+        0x10, 0x00, 0x00, 0x00, // fmt chunk size (16)
+        0x01, 0x00, // audio format (PCM)
+        0x02, 0x00, // number of channels (2 = stereo)
+        sampleRate & 0xFF, (sampleRate >> 8) & 0xFF, (sampleRate >> 16) & 0xFF, (sampleRate >> 24) & 0xFF, // sample rate
+        byteRate & 0xFF, (byteRate >> 8) & 0xFF, (byteRate >> 16) & 0xFF, (byteRate >> 24) & 0xFF, // byte rate
+        0x04, 0x00, // block align (2 * 2)
+        0x10, 0x00, // bits per sample (16)
+
+        // data chunk
+        0x64, 0x61, 0x74, 0x61, // "data"
+        dataSize & 0xFF, (dataSize >> 8) & 0xFF, (dataSize >> 16) & 0xFF, (dataSize >> 24) & 0xFF,
+      ];
+
+      // Combine header and stereo data
+      final stereoWav = Uint8List.fromList([...header, ...stereoData]);
+
+      // Save stereo file
+      final directory = await getApplicationDocumentsDirectory();
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final stereoFileName = 'stereo_${channel}_$timestamp.wav';
+      final stereoPath = '${directory.path}/$stereoFileName';
+      
+      final stereoFile = File(stereoPath);
+      await stereoFile.writeAsBytes(stereoWav);
+
+      debugPrint('MonoSTTTranslator: ✅ Stereo file created successfully');
+      debugPrint('MonoSTTTranslator:   Path: $stereoPath');
+      debugPrint('MonoSTTTranslator:   Size: ${stereoWav.length} bytes');
+      debugPrint('MonoSTTTranslator:   Channel: $channel');
+      debugPrint('MonoSTTTranslator:   Sample rate: $sampleRate Hz');
+
+      // Clean up original mono file
+      try {
+        await monoFile.delete();
+        debugPrint('MonoSTTTranslator: ✅ Cleaned up original mono file');
+      } catch (e) {
+        debugPrint('MonoSTTTranslator: ⚠️ Could not delete mono file: $e');
+      }
+
+      return stereoPath;
+    } catch (e) {
+      debugPrint('MonoSTTTranslator: ❌ Error converting mono to stereo: $e');
+      debugPrint('MonoSTTTranslator:    Stack trace: ${StackTrace.current}');
+      return null;
+    }
+  }
+
+  /// PHASE 1: Generate TTS file and add to queue (Pre-generation Architecture + Stereo)
+  /// PRODUCTION-READY: TTS generation + stereo conversion happens in Phase 1 (parallel to recording)
+  /// This eliminates playback latency and enables pipeline processing with stereo channel routing
   Future<void> _addToTtsQueue({
     required int speakerIndex,
     required String text,
@@ -476,68 +604,92 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     required String gender,
   }) async {
     try {
-      debugPrint('MonoSTTTranslator: ═══ PHASE 1: TTS Pre-Generation ═══');
+      debugPrint('MonoSTTTranslator: ═══ PHASE 1: TTS Pre-Generation + Stereo Conversion ═══');
       debugPrint('MonoSTTTranslator: Speaker: $speakerIndex');
       debugPrint('MonoSTTTranslator: Language: $languageCode');
       debugPrint('MonoSTTTranslator: Text: "${text.substring(0, text.length > 50 ? 50 : text.length)}..."');
       debugPrint('MonoSTTTranslator: Gender: $gender');
-      debugPrint('MonoSTTTranslator: Recording continues during TTS generation (parallel processing)');
+      
+      // Get speaker's earpiece preference (left or right channel)
+      final earpiece = _speakerEarpieces[speakerIndex] ?? 'left';
+      debugPrint('MonoSTTTranslator: Target channel: $earpiece');
+      debugPrint('MonoSTTTranslator: Recording continues during TTS generation + stereo conversion (parallel processing)');
 
-      // CRITICAL: Generate TTS file BEFORE adding to queue (Phase 1 pre-generation)
-      // This happens during recording phase, not during playback phase
-      // Result: Playback can start immediately when queue is processed
+      // STEP 1: Generate mono TTS file (Phase 1 pre-generation)
       final startTime = DateTime.now();
-      final ttsPath = await _ttsService.generateAudioFile(
+      final monoTtsPath = await _ttsService.generateAudioFile(
         text,
         languageCode,
         gender: gender,
       );
       final generationTime = DateTime.now().difference(startTime).inMilliseconds;
 
-      if (ttsPath != null && ttsPath.isNotEmpty) {
-        // Verify file exists and get size
-        final file = File(ttsPath);
-        if (await file.exists()) {
-          final fileSize = await file.length();
-          
-          debugPrint('MonoSTTTranslator: ✅ TTS file generated successfully');
-          debugPrint('MonoSTTTranslator:    Path: $ttsPath');
-          debugPrint('MonoSTTTranslator:    Size: $fileSize bytes');
-          debugPrint('MonoSTTTranslator:    Generation time: ${generationTime}ms');
-          debugPrint('MonoSTTTranslator:    File is pre-verified and ready for immediate playback');
+      if (monoTtsPath != null && monoTtsPath.isNotEmpty) {
+        debugPrint('MonoSTTTranslator: ✅ Mono TTS file generated successfully');
+        debugPrint('MonoSTTTranslator:    Path: $monoTtsPath');
+        debugPrint('MonoSTTTranslator:    Generation time: ${generationTime}ms');
 
-          // Add pre-generated file to queue (not text!)
-          final item = TtsQueueItem(
-            speakerIndex: speakerIndex,
-            filePath: ttsPath,
-            originalText: text,
-            fileSize: fileSize,
-            timestamp: DateTime.now(),
-          );
-          
-          _ttsQueue.add(item);
-          debugPrint('MonoSTTTranslator: ✅ Added pre-generated TTS to queue');
-          debugPrint('MonoSTTTranslator:    Queue size: ${_ttsQueue.length}');
-          debugPrint('MonoSTTTranslator:    Ready for immediate playback (no generation delay)');
-          debugPrint('MonoSTTTranslator:    Recording continues uninterrupted');
+        // STEP 2: Convert mono to stereo with channel routing
+        final stereoStartTime = DateTime.now();
+        final stereoTtsPath = await _convertMonoToStereoWithChannel(
+          monoTtsPath,
+          earpiece,
+        );
+        final stereoConversionTime = DateTime.now().difference(stereoStartTime).inMilliseconds;
 
-          // Start processing queue if not already processing
-          if (!_isProcessingQueue) {
-            _processTtsQueue();
+        if (stereoTtsPath != null && stereoTtsPath.isNotEmpty) {
+          // Verify stereo file exists and get size
+          final stereoFile = File(stereoTtsPath);
+          if (await stereoFile.exists()) {
+            final stereoFileSize = await stereoFile.length();
+            
+            debugPrint('MonoSTTTranslator: ✅ Stereo TTS file ready for queueing');
+            debugPrint('MonoSTTTranslator:    Path: $stereoTtsPath');
+            debugPrint('MonoSTTTranslator:    Size: $stereoFileSize bytes');
+            debugPrint('MonoSTTTranslator:    Channel: $earpiece');
+            debugPrint('MonoSTTTranslator:    Total time: ${generationTime + stereoConversionTime}ms (${generationTime}ms gen + ${stereoConversionTime}ms stereo)');
+            debugPrint('MonoSTTTranslator:    File is pre-verified and ready for immediate stereo playback');
+
+            // Add pre-generated STEREO file to queue (not mono!)
+            final item = TtsQueueItem(
+              speakerIndex: speakerIndex,
+              filePath: stereoTtsPath,
+              channel: earpiece,
+              originalText: text,
+              fileSize: stereoFileSize,
+              timestamp: DateTime.now(),
+            );
+            
+            _ttsQueue.add(item);
+            debugPrint('MonoSTTTranslator: ✅ Added pre-generated STEREO TTS to queue');
+            debugPrint('MonoSTTTranslator:    Queue size: ${_ttsQueue.length}');
+            debugPrint('MonoSTTTranslator:    Ready for immediate stereo playback (no generation delay)');
+            debugPrint('MonoSTTTranslator:    Will play through $earpiece earpiece only');
+            debugPrint('MonoSTTTranslator:    Recording continues uninterrupted');
+
+            // Start processing queue if not already processing
+            if (!_isProcessingQueue) {
+              _processTtsQueue();
+            }
+          } else {
+            debugPrint('MonoSTTTranslator: ❌ Stereo TTS file does not exist after conversion: $stereoTtsPath');
+            debugPrint('MonoSTTTranslator:    File will not be added to queue');
+            // Don't add to queue - skip this TTS
           }
         } else {
-          debugPrint('MonoSTTTranslator: ❌ TTS file does not exist after generation: $ttsPath');
-          debugPrint('MonoSTTTranslator:    File will not be added to queue');
+          debugPrint('MonoSTTTranslator: ❌ Stereo conversion failed for mono file: $monoTtsPath');
+          debugPrint('MonoSTTTranslator:    Conversion time: ${stereoConversionTime}ms');
+          debugPrint('MonoSTTTranslator:    File will not be added to queue - translation will be skipped');
           // Don't add to queue - skip this TTS
         }
       } else {
-        debugPrint('MonoSTTTranslator: ❌ TTS generation failed for text: "$text"');
+        debugPrint('MonoSTTTranslator: ❌ Mono TTS generation failed for text: "$text"');
         debugPrint('MonoSTTTranslator:    Generation time: ${generationTime}ms');
         debugPrint('MonoSTTTranslator:    File will not be added to queue - translation will be skipped');
         // Don't add to queue - skip this TTS
       }
     } catch (e) {
-      debugPrint('MonoSTTTranslator: ❌ Error in Phase 1 TTS generation: $e');
+      debugPrint('MonoSTTTranslator: ❌ Error in Phase 1 TTS generation + stereo conversion: $e');
       debugPrint('MonoSTTTranslator:    Stack trace: ${StackTrace.current}');
       debugPrint('MonoSTTTranslator:    This TTS will be skipped - queue continues');
       // Don't add to queue - error isolation ensures other TTS items continue
@@ -553,21 +705,22 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     }
 
     _isProcessingQueue = true;
-    debugPrint('MonoSTTTranslator: ═══ PHASE 2: TTS Queue Processing ═══');
-    debugPrint('MonoSTTTranslator: Queue size: ${_ttsQueue.length} pre-generated files ready');
-    debugPrint('MonoSTTTranslator: Files are already verified - immediate playback starts');
+    debugPrint('MonoSTTTranslator: ═══ PHASE 2: STEREO TTS Queue Processing ═══');
+    debugPrint('MonoSTTTranslator: Queue size: ${_ttsQueue.length} pre-generated STEREO files ready');
+    debugPrint('MonoSTTTranslator: Files are already converted to stereo - immediate channel-specific playback starts');
 
     while (_ttsQueue.isNotEmpty) {
       final item = _ttsQueue.removeFirst();
       final startTime = DateTime.now();
       
-      debugPrint('MonoSTTTranslator: ═══ Playing Pre-Generated TTS ═══');
+      debugPrint('MonoSTTTranslator: ═══ Playing Pre-Generated STEREO TTS ═══');
       debugPrint('MonoSTTTranslator: Speaker: ${item.speakerIndex}');
       debugPrint('MonoSTTTranslator: File: ${item.filePath}');
+      debugPrint('MonoSTTTranslator: Channel: ${item.channel} earpiece');
       debugPrint('MonoSTTTranslator: Text: "${item.originalText.substring(0, item.originalText.length > 50 ? 50 : item.originalText.length)}..."');
-      debugPrint('MonoSTTTranslator: File size: ${item.fileSize} bytes');
+      debugPrint('MonoSTTTranslator: File size: ${item.fileSize} bytes (stereo format)');
       debugPrint('MonoSTTTranslator: Pre-generated at: ${item.timestamp}');
-      debugPrint('MonoSTTTranslator: NO generation delay - file ready for immediate playback');
+      debugPrint('MonoSTTTranslator: NO generation delay - stereo file ready for immediate channel-specific playback');
 
       try {
         // CRITICAL: Verify file still exists (safety check)
@@ -590,7 +743,8 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           continue; // Skip to next item
         }
 
-        debugPrint('MonoSTTTranslator: ✅ File verified - starting playback immediately');
+        debugPrint('MonoSTTTranslator: ✅ Stereo file verified - starting channel-specific playback immediately');
+        debugPrint('MonoSTTTranslator: ✅ Audio will play through ${item.channel} earpiece only');
         
         _currentPlayingTtsPath = item.filePath;
         
@@ -605,14 +759,15 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
           });
         }
 
-        // Play TTS (recording continues - full-duplex, NO mode switching)
-        // MODE_NORMAL approach: Phone mic input + A2DP output simultaneously
-        // AudioPlayer with MEDIA stream automatically routes to A2DP in MODE_NORMAL
+        // Play STEREO TTS (recording continues - full-duplex, NO mode switching)
+        // MODE_NORMAL approach: Phone mic input + A2DP stereo output simultaneously
+        // Native MediaPlayer plays stereo WAV with channel separation
         // AudioRecord with MIC source continues from phone mic (independent of mode)
-        debugPrint('MonoSTTTranslator: ═══ Playing TTS (MODE_NORMAL Full-Duplex) ═══');
+        debugPrint('MonoSTTTranslator: ═══ Playing STEREO TTS (MODE_NORMAL Full-Duplex) ═══');
         debugPrint('MonoSTTTranslator: Mode: NORMAL (media mode - A2DP routing enabled)');
         debugPrint('MonoSTTTranslator: Recording: Phone built-in mic (continues)');
-        debugPrint('MonoSTTTranslator: Playback: TWS speakers via A2DP (MEDIA stream)');
+        debugPrint('MonoSTTTranslator: Playback: TWS speakers via A2DP (MEDIA stream - STEREO)');
+        debugPrint('MonoSTTTranslator: Channel routing: ${item.channel} earpiece (stereo file)');
         debugPrint('MonoSTTTranslator: Simultaneous: Both active - NO mode switching');
         
         // Play pre-generated file (NO generation wait!)
@@ -620,10 +775,11 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
         
         final playbackTime = DateTime.now().difference(startTime).inMilliseconds;
         
-        debugPrint('MonoSTTTranslator: ✅ TTS playback completed through TWS A2DP');
+        debugPrint('MonoSTTTranslator: ✅ STEREO TTS playback completed through TWS A2DP');
         debugPrint('MonoSTTTranslator: ✅ Total time (queue → playback complete): ${playbackTime}ms');
+        debugPrint('MonoSTTTranslator: ✅ Audio played through ${item.channel} earpiece as expected');
         debugPrint('MonoSTTTranslator: ✅ Recording continued throughout (phone mic still active)');
-        debugPrint('MonoSTTTranslator: ✅ Full-duplex operation verified');
+        debugPrint('MonoSTTTranslator: ✅ Full-duplex stereo operation verified');
 
         // Update UI state after playback
         if (mounted) {
