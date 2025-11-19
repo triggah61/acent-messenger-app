@@ -23,18 +23,21 @@ import '../../services/streaming_audio_recorder_service.dart';
 import '../../services/bluetooth_service.dart';
 
 /// TTS Queue Item for Mono Translation
+/// PRODUCTION-READY: Pre-generation architecture
+/// Phase 1: Generate TTS file → Store file path in queue
+/// Phase 2: Pick file path → Play immediately (no generation latency)
 class TtsQueueItem {
   final int speakerIndex;
-  final String text;
-  final String languageCode;
-  final String gender;
-  final DateTime timestamp;
+  final String filePath;        // Path to pre-generated TTS audio file
+  final String originalText;    // Original text (for logging/debugging)
+  final int fileSize;           // File size in bytes (for verification)
+  final DateTime timestamp;     // When TTS was generated
 
   TtsQueueItem({
     required this.speakerIndex,
-    required this.text,
-    required this.languageCode,
-    required this.gender,
+    required this.filePath,
+    required this.originalText,
+    required this.fileSize,
     required this.timestamp,
   });
 }
@@ -463,117 +466,223 @@ class _MonoSTTTranslatorState extends State<MonoSTTTranslator>
     );
   }
 
-  /// MONO TRANSLATION: Add TTS item to queue
-  void _addToTtsQueue({
+  /// PHASE 1: Generate TTS file and add to queue (Pre-generation Architecture)
+  /// PRODUCTION-READY: TTS generation happens in Phase 1 (parallel to recording)
+  /// This eliminates playback latency and enables pipeline processing
+  Future<void> _addToTtsQueue({
     required int speakerIndex,
     required String text,
     required String languageCode,
     required String gender,
-  }) {
-    final item = TtsQueueItem(
-      speakerIndex: speakerIndex,
-      text: text,
-      languageCode: languageCode,
-      gender: gender,
-      timestamp: DateTime.now(),
-    );
-    
-    _ttsQueue.add(item);
-    debugPrint('MonoSTTTranslator: Added TTS item to queue (Speaker $speakerIndex, Queue size: ${_ttsQueue.length})');
-    
-    // Start processing queue if not already processing
-    if (!_isProcessingQueue) {
-      _processTtsQueue();
+  }) async {
+    try {
+      debugPrint('MonoSTTTranslator: ═══ PHASE 1: TTS Pre-Generation ═══');
+      debugPrint('MonoSTTTranslator: Speaker: $speakerIndex');
+      debugPrint('MonoSTTTranslator: Language: $languageCode');
+      debugPrint('MonoSTTTranslator: Text: "${text.substring(0, text.length > 50 ? 50 : text.length)}..."');
+      debugPrint('MonoSTTTranslator: Gender: $gender');
+      debugPrint('MonoSTTTranslator: Recording continues during TTS generation (parallel processing)');
+
+      // CRITICAL: Generate TTS file BEFORE adding to queue (Phase 1 pre-generation)
+      // This happens during recording phase, not during playback phase
+      // Result: Playback can start immediately when queue is processed
+      final startTime = DateTime.now();
+      final ttsPath = await _ttsService.generateAudioFile(
+        text,
+        languageCode,
+        gender: gender,
+      );
+      final generationTime = DateTime.now().difference(startTime).inMilliseconds;
+
+      if (ttsPath != null && ttsPath.isNotEmpty) {
+        // Verify file exists and get size
+        final file = File(ttsPath);
+        if (await file.exists()) {
+          final fileSize = await file.length();
+          
+          debugPrint('MonoSTTTranslator: ✅ TTS file generated successfully');
+          debugPrint('MonoSTTTranslator:    Path: $ttsPath');
+          debugPrint('MonoSTTTranslator:    Size: $fileSize bytes');
+          debugPrint('MonoSTTTranslator:    Generation time: ${generationTime}ms');
+          debugPrint('MonoSTTTranslator:    File is pre-verified and ready for immediate playback');
+
+          // Add pre-generated file to queue (not text!)
+          final item = TtsQueueItem(
+            speakerIndex: speakerIndex,
+            filePath: ttsPath,
+            originalText: text,
+            fileSize: fileSize,
+            timestamp: DateTime.now(),
+          );
+          
+          _ttsQueue.add(item);
+          debugPrint('MonoSTTTranslator: ✅ Added pre-generated TTS to queue');
+          debugPrint('MonoSTTTranslator:    Queue size: ${_ttsQueue.length}');
+          debugPrint('MonoSTTTranslator:    Ready for immediate playback (no generation delay)');
+          debugPrint('MonoSTTTranslator:    Recording continues uninterrupted');
+
+          // Start processing queue if not already processing
+          if (!_isProcessingQueue) {
+            _processTtsQueue();
+          }
+        } else {
+          debugPrint('MonoSTTTranslator: ❌ TTS file does not exist after generation: $ttsPath');
+          debugPrint('MonoSTTTranslator:    File will not be added to queue');
+          // Don't add to queue - skip this TTS
+        }
+      } else {
+        debugPrint('MonoSTTTranslator: ❌ TTS generation failed for text: "$text"');
+        debugPrint('MonoSTTTranslator:    Generation time: ${generationTime}ms');
+        debugPrint('MonoSTTTranslator:    File will not be added to queue - translation will be skipped');
+        // Don't add to queue - skip this TTS
+      }
+    } catch (e) {
+      debugPrint('MonoSTTTranslator: ❌ Error in Phase 1 TTS generation: $e');
+      debugPrint('MonoSTTTranslator:    Stack trace: ${StackTrace.current}');
+      debugPrint('MonoSTTTranslator:    This TTS will be skipped - queue continues');
+      // Don't add to queue - error isolation ensures other TTS items continue
     }
   }
 
-  /// MONO TRANSLATION: Process TTS queue (plays one by one)
+  /// PHASE 2: Process TTS queue - Simplified playback only (Pre-generation Architecture)
+  /// PRODUCTION-READY: Files are pre-generated in Phase 1, so just pick and play
+  /// This eliminates generation latency and enables immediate playback
   Future<void> _processTtsQueue() async {
     if (_isProcessingQueue || _ttsQueue.isEmpty) {
       return;
     }
 
     _isProcessingQueue = true;
-    debugPrint('MonoSTTTranslator: Processing TTS queue (${_ttsQueue.length} items)');
+    debugPrint('MonoSTTTranslator: ═══ PHASE 2: TTS Queue Processing ═══');
+    debugPrint('MonoSTTTranslator: Queue size: ${_ttsQueue.length} pre-generated files ready');
+    debugPrint('MonoSTTTranslator: Files are already verified - immediate playback starts');
 
     while (_ttsQueue.isNotEmpty) {
       final item = _ttsQueue.removeFirst();
-      debugPrint('MonoSTTTranslator: Processing queue item - Speaker ${item.speakerIndex}, Text: "${item.text.substring(0, item.text.length > 50 ? 50 : item.text.length)}..."');
+      final startTime = DateTime.now();
+      
+      debugPrint('MonoSTTTranslator: ═══ Playing Pre-Generated TTS ═══');
+      debugPrint('MonoSTTTranslator: Speaker: ${item.speakerIndex}');
+      debugPrint('MonoSTTTranslator: File: ${item.filePath}');
+      debugPrint('MonoSTTTranslator: Text: "${item.originalText.substring(0, item.originalText.length > 50 ? 50 : item.originalText.length)}..."');
+      debugPrint('MonoSTTTranslator: File size: ${item.fileSize} bytes');
+      debugPrint('MonoSTTTranslator: Pre-generated at: ${item.timestamp}');
+      debugPrint('MonoSTTTranslator: NO generation delay - file ready for immediate playback');
 
       try {
-        // Generate TTS audio file (mono)
-        final ttsPath = await _ttsService.generateAudioFile(
-          item.text,
-          item.languageCode,
-          gender: item.gender,
-        );
-
-        if (ttsPath != null && ttsPath.isNotEmpty) {
-          _currentPlayingTtsPath = ttsPath;
-          
-          // Update UI state
-          if (mounted) {
-            setState(() {
-              if (item.speakerIndex == 0) {
-                _isPlayingTts1 = true;
-              } else {
-                _isPlayingTts2 = true;
-              }
-            });
-          }
-
-          // Play TTS (recording continues - full-duplex, NO mode switching)
-          // MODE_NORMAL approach: Phone mic input + A2DP output simultaneously
-          // AudioPlayer with MEDIA stream automatically routes to A2DP in MODE_NORMAL
-          // AudioRecord with MIC source continues from phone mic (independent of mode)
-          debugPrint('MonoSTTTranslator: ═══ Playing TTS (MODE_NORMAL Full-Duplex) ═══');
-          debugPrint('MonoSTTTranslator: Mode: NORMAL (media mode - A2DP routing enabled)');
-          debugPrint('MonoSTTTranslator: Recording: Phone built-in mic (continues)');
-          debugPrint('MonoSTTTranslator: Playback: TWS speakers via A2DP (MEDIA stream)');
-          debugPrint('MonoSTTTranslator: Simultaneous: Both active - NO mode switching');
-          
-          // This now waits for playback to complete (fixed timing issue)
-          await _ttsService.playAudioFile(ttsPath);
-          
-          debugPrint('MonoSTTTranslator: ✅ TTS playback completed through TWS A2DP');
-          debugPrint('MonoSTTTranslator: ✅ Recording continued throughout (phone mic still active)');
-          debugPrint('MonoSTTTranslator: ✅ Full-duplex operation verified');
-
-          // Update UI state after playback
-          if (mounted) {
-            setState(() {
-              if (item.speakerIndex == 0) {
-                _isPlayingTts1 = false;
-              } else {
-                _isPlayingTts2 = false;
-              }
-            });
-          }
-
-          // Clean up TTS file
-          try {
-            final file = File(ttsPath);
-            if (await file.exists()) {
-              await file.delete();
-            }
-          } catch (e) {
-            debugPrint('MonoSTTTranslator: Error deleting TTS file: $e');
-          }
-
-          _currentPlayingTtsPath = null;
-        } else {
-          debugPrint('MonoSTTTranslator: Failed to generate TTS for queue item');
+        // CRITICAL: Verify file still exists (safety check)
+        final file = File(item.filePath);
+        if (!await file.exists()) {
+          debugPrint('MonoSTTTranslator: ❌ Pre-generated file missing: ${item.filePath}');
+          debugPrint('MonoSTTTranslator:    Skipping this item and continuing to next');
+          continue; // Skip to next item
         }
+
+        // Verify file size matches (ensures file wasn't corrupted)
+        final currentSize = await file.length();
+        if (currentSize != item.fileSize) {
+          debugPrint('MonoSTTTranslator: ⚠️ File size mismatch: Expected ${item.fileSize}, got $currentSize');
+          debugPrint('MonoSTTTranslator:    File may be corrupted - skipping');
+          // Clean up corrupted file
+          try {
+            await file.delete();
+          } catch (_) {}
+          continue; // Skip to next item
+        }
+
+        debugPrint('MonoSTTTranslator: ✅ File verified - starting playback immediately');
+        
+        _currentPlayingTtsPath = item.filePath;
+        
+        // Update UI state
+        if (mounted) {
+          setState(() {
+            if (item.speakerIndex == 0) {
+              _isPlayingTts1 = true;
+            } else {
+              _isPlayingTts2 = true;
+            }
+          });
+        }
+
+        // Play TTS (recording continues - full-duplex, NO mode switching)
+        // MODE_NORMAL approach: Phone mic input + A2DP output simultaneously
+        // AudioPlayer with MEDIA stream automatically routes to A2DP in MODE_NORMAL
+        // AudioRecord with MIC source continues from phone mic (independent of mode)
+        debugPrint('MonoSTTTranslator: ═══ Playing TTS (MODE_NORMAL Full-Duplex) ═══');
+        debugPrint('MonoSTTTranslator: Mode: NORMAL (media mode - A2DP routing enabled)');
+        debugPrint('MonoSTTTranslator: Recording: Phone built-in mic (continues)');
+        debugPrint('MonoSTTTranslator: Playback: TWS speakers via A2DP (MEDIA stream)');
+        debugPrint('MonoSTTTranslator: Simultaneous: Both active - NO mode switching');
+        
+        // Play pre-generated file (NO generation wait!)
+        await _ttsService.playAudioFile(item.filePath);
+        
+        final playbackTime = DateTime.now().difference(startTime).inMilliseconds;
+        
+        debugPrint('MonoSTTTranslator: ✅ TTS playback completed through TWS A2DP');
+        debugPrint('MonoSTTTranslator: ✅ Total time (queue → playback complete): ${playbackTime}ms');
+        debugPrint('MonoSTTTranslator: ✅ Recording continued throughout (phone mic still active)');
+        debugPrint('MonoSTTTranslator: ✅ Full-duplex operation verified');
+
+        // Update UI state after playback
+        if (mounted) {
+          setState(() {
+            if (item.speakerIndex == 0) {
+              _isPlayingTts1 = false;
+            } else {
+              _isPlayingTts2 = false;
+            }
+          });
+        }
+
+        // CRITICAL: Clean up TTS file immediately after successful playback
+        // This prevents storage accumulation and ensures files are removed
+        try {
+          if (await file.exists()) {
+            await file.delete();
+            debugPrint('MonoSTTTranslator: ✅ Cleaned up TTS file: ${item.filePath}');
+          }
+        } catch (e) {
+          debugPrint('MonoSTTTranslator: ⚠️ Error deleting TTS file: $e');
+          // Non-critical - file will be cleaned up later by system
+        }
+
+        _currentPlayingTtsPath = null;
+        
       } catch (e) {
-        debugPrint('MonoSTTTranslator: Error processing queue item: $e');
+        debugPrint('MonoSTTTranslator: ❌ Error playing queue item: $e');
+        debugPrint('MonoSTTTranslator:    Stack trace: ${StackTrace.current}');
+        debugPrint('MonoSTTTranslator:    Cleaning up file and continuing to next item');
+        
+        // Clean up file on error
+        try {
+          final file = File(item.filePath);
+          if (await file.exists()) {
+            await file.delete();
+          }
+        } catch (_) {
+          // Ignore cleanup errors
+        }
+        
+        // Reset UI state on error
+        if (mounted) {
+          setState(() {
+            _isPlayingTts1 = false;
+            _isPlayingTts2 = false;
+          });
+        }
+        
+        _currentPlayingTtsPath = null;
+        // Continue to next item - error isolation
       }
 
-      // Small delay between queue items
+      // Small delay between queue items for smooth transitions
       await Future.delayed(const Duration(milliseconds: 100));
     }
 
     _isProcessingQueue = false;
-    debugPrint('MonoSTTTranslator: TTS queue processing complete');
+    debugPrint('MonoSTTTranslator: ✅ TTS queue processing complete (Phase 2 finished)');
   }
 
   /// Check if a WAV file contains meaningful audio (not just a tiny/silent file)
