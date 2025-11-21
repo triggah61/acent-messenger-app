@@ -21,6 +21,7 @@ import '../../services/google_stt_provider.dart';
 import '../../services/soniox_realtime_service.dart';
 import '../../services/streaming_audio_recorder_service.dart';
 import '../../services/bluetooth_service.dart';
+import '../../models/translation_session_summary.dart';
 
 /// TTS Queue Item for Realtime Translation
 /// PRODUCTION-READY: Pre-generation architecture with stereo channel routing
@@ -100,6 +101,32 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   bool _isRealtimeListeningPaused = false; // Mic paused while playback is running
   bool _isPlaybackInProgress = false; // Playback actively running
   bool _isTranslationInProgress = false; // Translation+TTS+Playback in progress (prevents concurrent processing)
+  
+  // TWS (True Wireless Stereo) connection state
+  bool _isTwsConnected = false; // Track TWS connection status
+  bool _hasShownTwsNotConnectedDialog = false; // Track if we've shown the "no TWS" dialog
+  bool _hasShownTwsConnectedDialog = false; // Track if we've shown the "TWS connected" dialog
+
+  // Session tracking for summary
+  DateTime? _sessionStartTime;
+  DateTime? _sessionEndTime;
+  double _audioSecondsProcessed = 0.0;
+  int _totalInputAudioTokens = 0; // Audio tokens (duration-based)
+  int _totalOutputTextTokens = 0; // Text tokens (character-based: transcription + translation)
+  int _totalTranscriptionCharacters = 0;
+  int _totalTranslationCharacters = 0;
+  Map<int, int> _transcriptionCharactersPerSpeaker = {0: 0, 1: 0};
+  Map<int, int> _translationCharactersPerSpeaker = {0: 0, 1: 0};
+  List<double> _translationLatencies = [];
+  int _totalTranslations = 0;
+  
+  // Soniox real-time pricing (https://soniox.com/pricing)
+  // Input audio: 1 hour = 30,000 tokens → 1 second = 8.333 tokens
+  static const double _tokensPerSecond = 8.333;
+  static const double _inputAudioCostPerMillion = 2.0; // $2.00 per 1M tokens
+  // Output text: 1 character = 0.3 tokens
+  static const double _tokensPerCharacter = 0.3;
+  static const double _outputTextCostPerMillion = 4.0; // $4.00 per 1M tokens
 
   // Real-time translation mode (NEW)
   bool _isRealtimeMode = true; // Real-time mode enabled by default
@@ -223,6 +250,47 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Map<int, StringBuffer> _sentenceTranscriptionBuffers = {};
   Map<int, StringBuffer> _sentenceTranslationBuffers = {};
   Map<int, String> _sentenceLanguages = {};
+
+  // Theme-aware color helpers
+  bool get _isDarkMode {
+    return Theme.of(context).brightness == Brightness.dark;
+  }
+
+  Color get _scaffoldBackgroundColor {
+    return _isDarkMode ? const Color(0xFF0A0E27) : Colors.grey[50]!;
+  }
+
+  Color get _appBarBackgroundColor {
+    return _isDarkMode ? const Color(0xFF1D1E33) : Colors.grey[200]!;
+  }
+
+  Color get _cardBackgroundColor {
+    return _isDarkMode ? const Color(0xFF1D1E33) : Colors.white;
+  }
+
+  Color get _secondaryCardBackgroundColor {
+    return _isDarkMode ? const Color(0xFF0A0E21) : Colors.grey[100]!;
+  }
+
+  Color get _primaryTextColor {
+    return _isDarkMode ? Colors.white : Colors.black87;
+  }
+
+  Color get _secondaryTextColor {
+    return _isDarkMode ? Colors.white70 : Colors.black54;
+  }
+
+  Color get _tertiaryTextColor {
+    return _isDarkMode ? Colors.white38 : Colors.black38;
+  }
+
+  Color get _dividerColor {
+    return _isDarkMode ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.1);
+  }
+
+  Color get _primaryAccentColor {
+    return const Color(0xFF00D9FF); // Keep accent color consistent across themes
+  }
 
   @override
   void initState() {
@@ -377,19 +445,20 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // This checks both A2DP and HEADSET profiles
       final deviceInfo = await _bluetoothService.checkConnection();
       
+      // Update TWS connection state
+      _isTwsConnected = deviceInfo.isConnected;
+      
       debugPrint('RealtimeTranslator: ═══ Bluetooth Connection Check ═══');
       debugPrint('RealtimeTranslator: Connected: ${deviceInfo.isConnected}');
       debugPrint('RealtimeTranslator: Device Name: ${deviceInfo.deviceName}');
       
-      if (!deviceInfo.isConnected && mounted) {
-        // Show dialog asking user to connect TWS
+      if (!deviceInfo.isConnected) {
         debugPrint('RealtimeTranslator: ⚠️ No Bluetooth device connected');
-        // Don't show dialog immediately - let user see the screen first
-        // Show it when they try to start recording instead
-        // The check will happen again when they try to start recording
-      } else if (deviceInfo.isConnected) {
+        debugPrint('RealtimeTranslator: ⚠️ Translation will work but playback will be disabled');
+        // Dialog will be shown when user tries to start recording
+      } else {
         debugPrint('RealtimeTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
-        debugPrint('RealtimeTranslator: Ready for Realtime Translation');
+        debugPrint('RealtimeTranslator: Ready for Realtime Translation with audio playback');
       }
     } catch (e) {
       debugPrint('RealtimeTranslator: ❌ Error checking Bluetooth: $e');
@@ -400,82 +469,298 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   }
   
   /// REALTIME TRANSLATION: Check Bluetooth before starting recording
+  /// NEW: Allows translation without TWS (playback will be disabled)
   Future<bool> _checkBluetoothBeforeRecording() async {
     try {
       final deviceInfo = await _bluetoothService.checkConnection();
       
+      // Update TWS connection state
+      _isTwsConnected = deviceInfo.isConnected;
+      
       if (!deviceInfo.isConnected) {
         debugPrint('RealtimeTranslator: ⚠️ No Bluetooth device connected before recording');
-        if (mounted) {
-          _showBluetoothConnectionDialog();
+        debugPrint('RealtimeTranslator: ⚠️ Translation will work but playback will be disabled');
+        
+        // Show dialog asking user to connect TWS for better performance
+        if (mounted && !_hasShownTwsNotConnectedDialog) {
+          _hasShownTwsNotConnectedDialog = true;
+          _showTwsNotConnectedDialog();
         }
-        return false;
+        
+        // Allow translation to proceed (without playback)
+        return true;
       }
       
       debugPrint('RealtimeTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
+      
+      // Show dialog with earpiece sharing instructions when TWS is connected
+      if (mounted && !_hasShownTwsConnectedDialog) {
+        _hasShownTwsConnectedDialog = true;
+        _showTwsConnectedDialog();
+      }
+      
       return true;
     } catch (e) {
       debugPrint('RealtimeTranslator: ❌ Error checking Bluetooth before recording: $e');
-      if (mounted) {
-        _showBluetoothConnectionDialog();
+      
+      // On error, assume TWS not connected but allow translation
+      _isTwsConnected = false;
+      
+      if (mounted && !_hasShownTwsNotConnectedDialog) {
+        _hasShownTwsNotConnectedDialog = true;
+        _showTwsNotConnectedDialog();
       }
-      return false;
+      
+      // Allow translation to proceed (without playback)
+      return true;
     }
   }
 
-  /// REALTIME TRANSLATION: Show Bluetooth connection dialog
-  void _showBluetoothConnectionDialog({bool allowRetry = true}) {
+  /// REALTIME TRANSLATION: Show dialog when TWS is NOT connected
+  /// NEW: Informative dialog asking user to connect TWS for better performance
+  void _showTwsNotConnectedDialog() {
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (BuildContext context) {
         return AlertDialog(
-          backgroundColor: const Color(0xFF1D1E33),
-          title: const Text(
-            'Bluetooth TWS Required',
-            style: TextStyle(color: Colors.white),
+          backgroundColor: _cardBackgroundColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
           ),
-          content: const Text(
-            'Realtime Translation requires a Bluetooth TWS (True Wireless Stereo) headset to be connected.\n\nPlease ensure your TWS earpieces are connected and try again.',
-            style: TextStyle(color: Colors.white70),
+          title: Row(
+            children: [
+              Icon(
+                Icons.bluetooth_disabled,
+                color: Colors.orange,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'TWS Not Connected',
+                  style: TextStyle(
+                    color: _primaryTextColor,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'You can still use translation, but audio playback will be disabled.',
+                style: TextStyle(
+                  color: _primaryTextColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'For better performance and audio playback:',
+                style: TextStyle(
+                  color: _secondaryTextColor,
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildDialogBulletPoint(
+                'Connect your TWS (True Wireless Stereo) earpieces',
+              ),
+              _buildDialogBulletPoint(
+                'Enable audio playback for translated text',
+              ),
+              _buildDialogBulletPoint(
+                'Get the best translation experience',
+              ),
+            ],
           ),
           actions: [
-            if (allowRetry)
-              TextButton(
-                onPressed: () async {
-                  Navigator.of(context).pop();
-                  // Retry Bluetooth check
-                  debugPrint('RealtimeTranslator: Retrying Bluetooth check...');
-                  final deviceInfo = await _bluetoothService.checkConnection();
-                  if (deviceInfo.isConnected) {
-                    debugPrint('RealtimeTranslator: ✅ Bluetooth now connected: ${deviceInfo.deviceName}');
-                    // User can now try starting recording again
-                  } else {
-                    debugPrint('RealtimeTranslator: ⚠️ Still not connected');
-                    // Show dialog again if still not connected
-                    if (mounted) {
-                      _showBluetoothConnectionDialog(allowRetry: true);
-                    }
-                  }
-                },
-                child: const Text('Retry', style: TextStyle(color: Color(0xFF00D9FF))),
-              ),
             TextButton(
-              onPressed: () {
+              onPressed: () async {
                 Navigator.of(context).pop();
-                if (!allowRetry) {
-                  // Only go back to hub if this was the initial check
-                  Navigator.of(context).pop();
+                // Retry Bluetooth check
+                debugPrint('RealtimeTranslator: Retrying Bluetooth check...');
+                final deviceInfo = await _bluetoothService.checkConnection();
+                _isTwsConnected = deviceInfo.isConnected;
+                if (deviceInfo.isConnected) {
+                  debugPrint('RealtimeTranslator: ✅ Bluetooth now connected: ${deviceInfo.deviceName}');
+                  _hasShownTwsConnectedDialog = false; // Reset to show connected dialog
+                  if (mounted) {
+                    _showTwsConnectedDialog();
+                  }
+                } else {
+                  debugPrint('RealtimeTranslator: ⚠️ Still not connected');
                 }
               },
               child: Text(
-                allowRetry ? 'Cancel' : 'OK',
-                style: const TextStyle(color: Colors.white70),
+                'Retry',
+                style: TextStyle(
+                  color: const Color(0xFF00D9FF),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text(
+                'Continue Without TWS',
+                style: TextStyle(
+                  color: _secondaryTextColor,
+                ),
               ),
             ),
           ],
         );
       },
+    );
+  }
+
+  /// REALTIME TRANSLATION: Show dialog when TWS IS connected
+  /// NEW: Instructions for earpiece sharing and phone placement
+  void _showTwsConnectedDialog() {
+    final speaker2Earpiece = _speakerEarpieces[1] ?? 'left';
+    final speaker2EarpieceLabel = speaker2Earpiece == 'left' ? 'Left' : 'Right';
+    final otherEarpiece = speaker2Earpiece == 'left' ? 'Right' : 'Left';
+    
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: _cardBackgroundColor,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Row(
+            children: [
+              Icon(
+                Icons.bluetooth_connected,
+                color: const Color(0xFF00D9FF),
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'TWS Connected',
+                  style: TextStyle(
+                    color: _primaryTextColor,
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'For the best translation experience:',
+                style: TextStyle(
+                  color: _primaryTextColor,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: _secondaryCardBackgroundColor,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: const Color(0xFF00D9FF).withValues(alpha: 0.3),
+                    width: 1,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Earpiece Sharing:',
+                      style: TextStyle(
+                        color: const Color(0xFF00D9FF),
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Speaker 2 is using the $speaker2EarpieceLabel earpiece. Please share the $otherEarpiece earpiece with Speaker 1.',
+                      style: TextStyle(
+                        color: _secondaryTextColor,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              _buildDialogBulletPoint(
+                'Keep your phone closer to both speakers',
+              ),
+              _buildDialogBulletPoint(
+                'This ensures clear audio capture',
+              ),
+              _buildDialogBulletPoint(
+                'Better transcription accuracy',
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+              },
+              child: Text(
+                'Got It',
+                style: TextStyle(
+                  color: const Color(0xFF00D9FF),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// Helper to build bullet points in dialogs
+  Widget _buildDialogBulletPoint(String text) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '• ',
+            style: TextStyle(
+              color: const Color(0xFF00D9FF),
+              fontSize: 16,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                color: _secondaryTextColor,
+                fontSize: 14,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -718,6 +1003,31 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _isProcessingQueue = true;
     debugPrint('RealtimeTranslator: ═══ PHASE 2: STEREO TTS Queue Processing ═══');
     debugPrint('RealtimeTranslator: Queue size: ${_ttsQueue.length} pre-generated STEREO files ready');
+    debugPrint('RealtimeTranslator: TWS connected: $_isTwsConnected');
+    
+    // NEW: Check TWS connection - skip playback if not connected
+    if (!_isTwsConnected) {
+      debugPrint('RealtimeTranslator: ⚠️ TWS not connected - skipping playback, cleaning up queue');
+      
+      // Clean up all TTS files in queue without playing
+      while (_ttsQueue.isNotEmpty) {
+        final item = _ttsQueue.removeFirst();
+        try {
+          final file = File(item.filePath);
+          if (await file.exists()) {
+            await file.delete();
+            debugPrint('RealtimeTranslator: ✅ Cleaned up TTS file (playback disabled): ${item.filePath}');
+          }
+        } catch (e) {
+          debugPrint('RealtimeTranslator: ⚠️ Error deleting TTS file: $e');
+        }
+      }
+      
+      _isProcessingQueue = false;
+      debugPrint('RealtimeTranslator: ✅ TTS queue cleared (playback disabled - TWS not connected)');
+      return;
+    }
+    
     debugPrint('RealtimeTranslator: Files are already converted to stereo - immediate channel-specific playback starts');
 
     while (_ttsQueue.isNotEmpty) {
@@ -1281,10 +1591,13 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       _pulseController.repeat(reverse: true);
 
       // Check Bluetooth connection
+      // NEW: Allows translation without TWS (playback will be disabled)
       debugPrint('RealtimeTranslator: Checking Bluetooth connection...');
       final hasBluetooth = await _checkBluetoothBeforeRecording();
+      // Note: hasBluetooth now always returns true (allows translation without TWS)
+      // TWS connection status is stored in _isTwsConnected for playback control
       if (!hasBluetooth) {
-        debugPrint('RealtimeTranslator: ❌ Cannot start - Bluetooth TWS not connected');
+        debugPrint('RealtimeTranslator: ❌ Cannot start - unexpected error');
         setState(() {
           _isInitializing = false;
         });
@@ -1305,21 +1618,30 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         return;
       }
 
+      // Reset session metrics for new session
+      _resetSessionMetrics();
+      _sessionStartTime = DateTime.now();
+      debugPrint('RealtimeTranslator: ✅ Session started at ${_sessionStartTime}');
+      
+      // Reset dialog flags for new session
+      _hasShownTwsNotConnectedDialog = false;
+      _hasShownTwsConnectedDialog = false;
+
       // Clear previous results
       debugPrint('RealtimeTranslator: Clearing previous session data...');
       _speaker1AudioPath = null;
-      _speaker2AudioPath = null;
-      _speaker1TtsAudioPath = null;
-      _speaker2TtsAudioPath = null;
-      _cachedStereoAudioPath = null;
-      _speakerSegments = [];
-      _transcriptions.clear();
-      _translations.clear();
-      _realtimeTranscriptions = {0: StringBuffer(), 1: StringBuffer()};
-      _realtimeTranslations = {0: StringBuffer(), 1: StringBuffer()};
-      _showTranslation = {0: false, 1: false};
-      _isPlayingTts1 = false;
-      _isPlayingTts2 = false;
+        _speaker2AudioPath = null;
+        _speaker1TtsAudioPath = null;
+        _speaker2TtsAudioPath = null;
+        _cachedStereoAudioPath = null;
+        _speakerSegments = [];
+        _transcriptions.clear();
+        _translations.clear();
+        _realtimeTranscriptions = {0: StringBuffer(), 1: StringBuffer()};
+        _realtimeTranslations = {0: StringBuffer(), 1: StringBuffer()};
+        _showTranslation = {0: false, 1: false};
+        _isPlayingTts1 = false;
+        _isPlayingTts2 = false;
 
       // Configure audio route
       debugPrint('RealtimeTranslator: Configuring audio route...');
@@ -1373,7 +1695,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // PHASE 2: READY STATE (Play beep to signal ready)
       // ═══════════════════════════════════════════════════════
       debugPrint('RealtimeTranslator: 📍 PHASE 2: READY (Playing start beep)');
-      
+
       // Play start beep to signal that system is ready to record
       await _playStartRecordingSound();
       
@@ -1442,6 +1764,17 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     try {
       debugPrint('RealtimeTranslator: Stopping real-time session...');
 
+      // Mark session end time
+      _sessionEndTime = DateTime.now();
+      debugPrint('RealtimeTranslator: ✅ Session ended at ${_sessionEndTime}');
+      
+      // Update UI to reflect TWS status
+      if (mounted) {
+        setState(() {
+          // UI will update to show TWS status indicator if needed
+        });
+      }
+
       // Stop audio polling timer
       _audioPollingTimer?.cancel();
       _audioPollingTimer = null;
@@ -1475,6 +1808,9 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
       debugPrint('RealtimeTranslator: ✅ Real-time session stopped');
       
+      // Show session summary
+      _showSessionSummary();
+      
       // Transfer accumulated text to main transcriptions/translations
       _transcriptions[0] = _realtimeTranscriptions[0]?.toString() ?? '';
       _transcriptions[1] = _realtimeTranscriptions[1]?.toString() ?? '';
@@ -1496,6 +1832,57 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     }
   }
 
+
+  /// Reset session metrics for new session
+  void _resetSessionMetrics() {
+    _sessionStartTime = null;
+    _sessionEndTime = null;
+    _audioSecondsProcessed = 0.0;
+    _totalInputAudioTokens = 0;
+    _totalOutputTextTokens = 0;
+    _totalTranscriptionCharacters = 0;
+    _totalTranslationCharacters = 0;
+    _transcriptionCharactersPerSpeaker = {0: 0, 1: 0};
+    _translationCharactersPerSpeaker = {0: 0, 1: 0};
+    _translationLatencies = [];
+    _totalTranslations = 0;
+    
+    debugPrint('RealtimeTranslator: ✅ Session metrics reset');
+  }
+
+  /// Calculate total session cost based on Soniox pricing
+  /// Reference: https://soniox.com/pricing
+  double _calculateSessionCost() {
+    // Input audio tokens: 1 hour = 30,000 tokens, so 1 second = 8.333 tokens
+    final inputAudioTokens = (_audioSecondsProcessed * _tokensPerSecond).round();
+    final inputAudioCost = (inputAudioTokens / 1000000) * _inputAudioCostPerMillion;
+    
+    // Output text tokens: 1 character = 0.3 tokens (transcription + translation)
+    final totalOutputCharacters = _totalTranscriptionCharacters + _totalTranslationCharacters;
+    final outputTextTokens = (totalOutputCharacters * _tokensPerCharacter).round();
+    final outputTextCost = (outputTextTokens / 1000000) * _outputTextCostPerMillion;
+    
+    final totalCost = inputAudioCost + outputTextCost;
+    
+    debugPrint('RealtimeTranslator: 💰 Session Cost Breakdown (Soniox Pricing):');
+    debugPrint('  Input Audio:');
+    debugPrint('    - Audio processed: ${_audioSecondsProcessed.toStringAsFixed(2)}s');
+    debugPrint('    - Tokens: $inputAudioTokens (${_audioSecondsProcessed.toStringAsFixed(2)}s × ${_tokensPerSecond.toStringAsFixed(3)} tokens/s)');
+    debugPrint('    - Cost: \$${inputAudioCost.toStringAsFixed(6)} ($inputAudioTokens tokens × \$${_inputAudioCostPerMillion}/1M)');
+    debugPrint('  Output Text:');
+    debugPrint('    - Transcription: $_totalTranscriptionCharacters chars');
+    debugPrint('    - Translation: $_totalTranslationCharacters chars');
+    debugPrint('    - Total chars: $totalOutputCharacters');
+    debugPrint('    - Tokens: $outputTextTokens ($totalOutputCharacters chars × ${_tokensPerCharacter.toStringAsFixed(1)} tokens/char)');
+    debugPrint('    - Cost: \$${outputTextCost.toStringAsFixed(6)} ($outputTextTokens tokens × \$${_outputTextCostPerMillion}/1M)');
+    debugPrint('  Total Cost: \$${totalCost.toStringAsFixed(4)}');
+    
+    // Store calculated tokens for summary display
+    _totalInputAudioTokens = inputAudioTokens;
+    _totalOutputTextTokens = outputTextTokens;
+    
+    return totalCost;
+  }
 
   /// Start polling audio file to simulate streaming
   /// This is a fallback approach until native streaming is implemented
@@ -1542,6 +1929,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             // Send chunk to Soniox
             await _sonioxService.sendAudio(chunk);
             _lastReadPosition += chunk.length;
+            
+            // Track audio seconds processed (16-bit PCM, 16000 Hz, mono = 32000 bytes/second)
+            final secondsInChunk = chunk.length / 32000.0;
+            _audioSecondsProcessed += secondsInChunk;
             
             debugPrint('RealtimeTranslator: 📤 Sent ${chunk.length} bytes to Soniox (position: $_lastReadPosition)');
           }
@@ -1720,6 +2111,16 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             }
             _realtimeTranscriptions[uiSpeakerIndex]!.write(transcriptionText);
             debugPrint('RealtimeTranslator: ✅ Appended FINAL transcription to UI Speaker $uiSpeakerIndex');
+            
+            // Track transcription characters (Soniox charges by character, not word)
+            // 1 character = 0.3 tokens according to Soniox pricing
+            final transcriptionCharCount = transcriptionText.length;
+            _totalTranscriptionCharacters += transcriptionCharCount;
+            _transcriptionCharactersPerSpeaker[uiSpeakerIndex] = 
+                (_transcriptionCharactersPerSpeaker[uiSpeakerIndex] ?? 0) + transcriptionCharCount;
+            
+            final transcriptionTokens = (transcriptionCharCount * _tokensPerCharacter).round();
+            debugPrint('RealtimeTranslator: 📊 Transcription: $transcriptionCharCount chars ≈ $transcriptionTokens tokens (total chars: $_totalTranscriptionCharacters)');
           }
 
           // Update UI with transcription immediately
@@ -1971,12 +2372,25 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _isTranslationInProgress = true;
     
     try {
+      final translationStartTime = DateTime.now();
+      
       debugPrint('RealtimeTranslator: ═══ Soniox Translation + TTS (FAST PATH) ═══');
       debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
       debugPrint('RealtimeTranslator: Source language: $sourceLanguage');
       debugPrint('RealtimeTranslator: Transcribed text: "$transcribedText"');
       debugPrint('RealtimeTranslator: Translated text (from Soniox): "$translatedText"');
       debugPrint('RealtimeTranslator: ✅ No Azure API call needed - saves ~2-3 seconds!');
+      
+      // Track translation characters (Soniox charges by character, not word)
+      // 1 character = 0.3 tokens according to Soniox pricing
+      final translationCharCount = translatedText.length;
+      _totalTranslationCharacters += translationCharCount;
+      _translationCharactersPerSpeaker[speakerIndex] = 
+          (_translationCharactersPerSpeaker[speakerIndex] ?? 0) + translationCharCount;
+      _totalTranslations++;
+      
+      final translationTokens = (translationCharCount * _tokensPerCharacter).round();
+      debugPrint('RealtimeTranslator: 📊 Translation: $translationCharCount chars ≈ $translationTokens tokens (total chars: $_totalTranslationCharacters)');
 
       // Update translation buffer for full conversation history
       if (_realtimeTranslations[speakerIndex]!.isNotEmpty) {
@@ -2065,6 +2479,11 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       }
 
       debugPrint('RealtimeTranslator: ✅ Soniox translation processing complete (FAST PATH - no Azure API delay)');
+      
+      // Track translation latency
+      final translationLatency = DateTime.now().difference(translationStartTime).inMilliseconds / 1000.0;
+      _translationLatencies.add(translationLatency);
+      debugPrint('RealtimeTranslator: ⏱️ Translation latency: ${translationLatency.toStringAsFixed(2)}s');
     } catch (e) {
       debugPrint('RealtimeTranslator: ❌ Error processing Soniox translation: $e');
       debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
@@ -4809,21 +5228,21 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1D1E33),
-        title: const Text(
+        backgroundColor: _cardBackgroundColor,
+        title: Text(
           'Error',
-          style: TextStyle(color: Colors.white),
+          style: TextStyle(color: _primaryTextColor),
         ),
         content: Text(
           message,
-          style: const TextStyle(color: Colors.white70),
+          style: TextStyle(color: _secondaryTextColor),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
+            child: Text(
               'OK',
-              style: TextStyle(color: Color(0xFF00D9FF)),
+              style: TextStyle(color: _primaryAccentColor),
             ),
           ),
         ],
@@ -5176,7 +5595,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       margin: const EdgeInsets.all(16),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
+        color: _cardBackgroundColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: _isRecording ? Colors.green : Colors.grey,
@@ -5582,11 +6001,328 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     super.dispose();
   }
 
+  /// Show session summary dialog
+  void _showSessionSummary() {
+    if (_sessionStartTime == null || _sessionEndTime == null) {
+      debugPrint('RealtimeTranslator: ⚠️ Cannot show summary - session times not set');
+      return;
+    }
+
+    final totalDuration = _sessionEndTime!.difference(_sessionStartTime!);
+    final totalCost = _calculateSessionCost();
+
+    final summary = TranslationSessionSummary(
+      sessionStart: _sessionStartTime!,
+      sessionEnd: _sessionEndTime!,
+      totalDuration: totalDuration,
+      audioSecondsProcessed: _audioSecondsProcessed,
+      inputAudioTokens: _totalInputAudioTokens,
+      outputTextTokens: _totalOutputTextTokens,
+      transcriptionCharacters: _totalTranscriptionCharacters,
+      translationCharacters: _totalTranslationCharacters,
+      charactersPerSpeaker: _transcriptionCharactersPerSpeaker,
+      translationCharactersPerSpeaker: _translationCharactersPerSpeaker,
+      languagesUsed: {
+        0: _speakerLanguages[0]?.name ?? 'Unknown',
+        1: _speakerLanguages[1]?.name ?? 'Unknown',
+      },
+      totalCost: totalCost,
+      totalTranslations: _totalTranslations,
+      translationLatencies: _translationLatencies,
+    );
+
+    showDialog(
+      context: context,
+      builder: (context) => _buildSummaryDialog(summary),
+    );
+  }
+
+  /// Build session summary dialog
+  Widget _buildSummaryDialog(TranslationSessionSummary summary) {
+    final speaker0Percentage = summary.speakerSplitPercentage[0] ?? 0.0;
+    final speaker1Percentage = summary.speakerSplitPercentage[1] ?? 0.0;
+
+    return Dialog(
+      backgroundColor: _cardBackgroundColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: _primaryAccentColor.withValues(alpha: 0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.check_circle,
+                      color: _primaryAccentColor,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Text(
+                      'Session Complete',
+                      style: TextStyle(
+                        color: _primaryTextColor,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.pop(context),
+                    icon: Icon(Icons.close, color: _secondaryTextColor),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 24),
+
+              // Session Time
+              _buildSummarySection(
+                icon: Icons.access_time,
+                title: 'SESSION TIME',
+                children: [
+                  _buildSummaryRow('Duration', summary.formattedDuration),
+                  _buildSummaryRow('Audio Processed', '${summary.audioSecondsProcessed.toStringAsFixed(1)}s'),
+                  _buildSummaryRow('Started', _formatTime(summary.sessionStart)),
+                  _buildSummaryRow('Ended', _formatTime(summary.sessionEnd)),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // Conversation Stats
+              _buildSummarySection(
+                icon: Icons.forum,
+                title: 'CONVERSATION',
+                children: [
+                  _buildSpeakerRow(
+                    speakerName: _getSpeakerDisplayName(0),
+                    language: summary.languagesUsed[0] ?? 'Unknown',
+                    characters: summary.charactersPerSpeaker[0] ?? 0,
+                    percentage: speaker0Percentage,
+                    color: _speakerColors[0],
+                  ),
+                  const SizedBox(height: 12),
+                  _buildSpeakerRow(
+                    speakerName: _getSpeakerDisplayName(1),
+                    language: summary.languagesUsed[1] ?? 'Unknown',
+                    characters: summary.charactersPerSpeaker[1] ?? 0,
+                    percentage: speaker1Percentage,
+                    color: _speakerColors[1],
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // Usage & Cost
+              _buildSummarySection(
+                icon: Icons.receipt_long,
+                title: 'USAGE & COST',
+                children: [
+                  _buildSummaryRow('Input Audio', '${summary.inputAudioTokens.toString()} tokens'),
+                  _buildSummaryRow('  └─ Duration', '${summary.audioSecondsProcessed.toStringAsFixed(1)}s'),
+                  const SizedBox(height: 8),
+                  _buildSummaryRow('Output Text', '${summary.outputTextTokens.toString()} tokens'),
+                  _buildSummaryRow('  └─ Characters', '${summary.totalCharacters.toString()}'),
+                  Divider(color: _dividerColor, height: 24),
+                  _buildSummaryRow(
+                    'TOTAL COST',
+                    summary.formattedCost,
+                    isTotal: true,
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 20),
+
+              // Performance
+              _buildSummarySection(
+                icon: Icons.speed,
+                title: 'PERFORMANCE',
+                children: [
+                  _buildSummaryRow('Total Translations', '${summary.totalTranslations}'),
+                  _buildSummaryRow('Avg Latency', '${summary.averageLatency.toStringAsFixed(2)}s'),
+                ],
+              ),
+
+              const SizedBox(height: 24),
+
+              // Action Button
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  onPressed: () => Navigator.pop(context),
+                  icon: const Icon(Icons.done, size: 20),
+                  label: const Text('Done'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _primaryAccentColor,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Build summary section
+  Widget _buildSummarySection({
+    required IconData icon,
+    required String title,
+    required List<Widget> children,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: _secondaryCardBackgroundColor,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: _dividerColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: _primaryAccentColor, size: 20),
+              const SizedBox(width: 8),
+              Text(
+                title,
+                style: TextStyle(
+                  color: _primaryAccentColor,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  letterSpacing: 1,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          ...children,
+        ],
+      ),
+    );
+  }
+
+  /// Build summary row
+  Widget _buildSummaryRow(String label, String value, {bool isTotal = false}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              color: isTotal ? _primaryTextColor : _secondaryTextColor,
+              fontSize: isTotal ? 16 : 14,
+              fontWeight: isTotal ? FontWeight.bold : FontWeight.normal,
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              color: isTotal ? _primaryAccentColor : _primaryTextColor,
+              fontSize: isTotal ? 18 : 14,
+              fontWeight: isTotal ? FontWeight.bold : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Build speaker row with progress bar
+  Widget _buildSpeakerRow({
+    required String speakerName,
+    required String language,
+    required int characters,
+    required double percentage,
+    required Color color,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              '$speakerName ($language)',
+                  style: TextStyle(
+                    color: _primaryTextColor,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+            Text(
+              '$characters chars',
+              style: TextStyle(
+                color: _secondaryTextColor,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: percentage / 100,
+                  backgroundColor: _dividerColor,
+                  valueColor: AlwaysStoppedAnimation<Color>(color),
+                  minHeight: 6,
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              '${percentage.toStringAsFixed(0)}%',
+              style: TextStyle(
+                color: color,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  /// Format time for display
+  String _formatTime(DateTime time) {
+    final hour12 = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
+    final minute = time.minute.toString().padLeft(2, '0');
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '$hour12:$minute $period';
+  }
+
   @override
   Widget build(BuildContext context) {
     if (!_isInitialized) {
       return Scaffold(
-        backgroundColor: const Color(0xFF0A0E27),
+        backgroundColor: _scaffoldBackgroundColor,
         body: Center(
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 40.0),
@@ -5594,17 +6330,17 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 // Circular progress indicator
-                const CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
+                CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(_primaryAccentColor),
                 ),
                 const SizedBox(height: 30),
 
                 // Status text
                 Text(
                   'Initializing translator...',
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
+                  style: TextStyle(
+                    color: _primaryTextColor,
+                    fontSize: 18,
                     fontWeight: FontWeight.w500,
                   ),
                   textAlign: TextAlign.center,
@@ -5617,7 +6353,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0A0E27),
+      backgroundColor: _scaffoldBackgroundColor,
       appBar: _buildAppBar(),
       body: _buildMainContent(),
     );
@@ -5625,18 +6361,18 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
   PreferredSizeWidget _buildAppBar() {
     return AppBar(
-      backgroundColor: const Color(0xFF1D1E33),
+      backgroundColor: _appBarBackgroundColor,
       elevation: 0,
-      title: const Text(
+      title: Text(
         'Realtime Translation',
         style: TextStyle(
-          color: Colors.white,
-          fontSize: 20,
+          color: _primaryTextColor,
+          fontSize: 24,
           fontWeight: FontWeight.bold,
         ),
       ),
       leading: IconButton(
-        icon: const Icon(Icons.arrow_back, color: Colors.white),
+        icon: Icon(Icons.arrow_back, color: _primaryTextColor),
         onPressed: () => Navigator.of(context).pop(),
       ),
       actions: [
@@ -5652,10 +6388,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const SizedBox(height: 8),
-          const Text(
+          Text(
             'Configure Speakers',
             style: TextStyle(
-              color: Colors.white,
+              color: _primaryTextColor,
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
@@ -5694,10 +6430,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                         ),
                       ),
                       const SizedBox(height: 4),
-                      const Text(
+                      Text(
                         'Continuous translation with instant TTS playback',
                         style: TextStyle(
-                          color: Colors.white70,
+                          color: _secondaryTextColor,
                           fontSize: 12,
                         ),
                       ),
@@ -5715,14 +6451,14 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           ElevatedButton(
             onPressed: _isStartingSession ? null : _startRecordingSession,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF00D9FF),
+              backgroundColor: _primaryAccentColor,
               padding: const EdgeInsets.symmetric(vertical: 14),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
             child: _isStartingSession
-                ? const Row(
+                ? Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
                       SizedBox(
@@ -5731,24 +6467,24 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                         child: CircularProgressIndicator(
                           strokeWidth: 2,
                           valueColor:
-                              AlwaysStoppedAnimation<Color>(Colors.white),
+                              AlwaysStoppedAnimation<Color>(_primaryTextColor),
                         ),
                       ),
-                      SizedBox(width: 12),
+                      const SizedBox(width: 12),
                       Text(
                         'Starting...',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: _primaryTextColor,
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                     ],
                   )
-                : const Text(
+                : Text(
                     'Start Recording',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: _primaryTextColor,
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
                     ),
@@ -5767,7 +6503,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
+        color: _cardBackgroundColor,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: speakerColor.withValues(alpha: 0.3),
@@ -5810,7 +6546,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             value: currentLanguage,
             decoration: InputDecoration(
               labelText: 'Select Language',
-              labelStyle: const TextStyle(color: Colors.white70, fontSize: 14),
+              labelStyle: TextStyle(color: _secondaryTextColor, fontSize: 14),
               contentPadding:
                   const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               isDense: true,
@@ -5829,8 +6565,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 borderSide: BorderSide(color: speakerColor),
               ),
             ),
-            dropdownColor: const Color(0xFF1D1E33),
-            style: const TextStyle(color: Colors.white, fontSize: 14),
+            dropdownColor: _cardBackgroundColor,
+                style: TextStyle(color: _primaryTextColor, fontSize: 14),
             items: _supportedLanguages.map((language) {
               return DropdownMenuItem<Language>(
                 value: language,
@@ -5954,7 +6690,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         decoration: BoxDecoration(
           color: isSelected
               ? speakerColor.withValues(alpha: 0.2)
-              : const Color(0xFF0A0E21),
+              : _secondaryCardBackgroundColor,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color:
@@ -6009,7 +6745,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         decoration: BoxDecoration(
           color: isSelected
               ? speakerColor.withValues(alpha: 0.2)
-              : const Color(0xFF0A0E21),
+              : _secondaryCardBackgroundColor,
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color:
@@ -6022,15 +6758,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           children: [
             Icon(
               icon,
-              color: isSelected ? speakerColor : Colors.white70,
+              color: isSelected ? speakerColor : _secondaryTextColor,
               size: 18,
             ),
             const SizedBox(height: 2),
             Text(
               label,
               style: TextStyle(
-                color: isSelected ? speakerColor : Colors.white70,
-                fontSize: 11,
+                color: isSelected ? speakerColor : _secondaryTextColor,
+                fontSize: 12,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
               ),
             ),
@@ -6043,6 +6779,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Widget _buildMainContent() {
     return Column(
       children: [
+        // NEW: TWS connection status indicator
+        if (!_isTwsConnected) _buildTwsStatusIndicator(),
         _buildSoundLevelGraph(),
         Expanded(
           child: _isProcessing
@@ -6056,6 +6794,67 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     );
   }
 
+  /// NEW: Build TWS status indicator showing playback is disabled
+  Widget _buildTwsStatusIndicator() {
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.orange.withValues(alpha: 0.15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: Colors.orange.withValues(alpha: 0.5),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.bluetooth_disabled,
+            color: Colors.orange,
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Audio Playback Disabled',
+                  style: TextStyle(
+                    color: _primaryTextColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'TWS not connected. Translation works, but audio playback is disabled.',
+                  style: TextStyle(
+                    color: _secondaryTextColor,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: Icon(
+              Icons.info_outline,
+              color: Colors.orange,
+              size: 20,
+            ),
+            onPressed: () {
+              _hasShownTwsNotConnectedDialog = false; // Reset to show dialog again
+              _showTwsNotConnectedDialog();
+            },
+            tooltip: 'Learn more',
+          ),
+        ],
+      ),
+    );
+  }
+
 
   Widget _buildProcessingView() {
     return Center(
@@ -6064,16 +6863,16 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const CircularProgressIndicator(
-              valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
+            CircularProgressIndicator(
+              valueColor: AlwaysStoppedAnimation<Color>(_primaryAccentColor),
               strokeWidth: 4,
             ),
             const SizedBox(height: 30),
             Text(
               _processingStatus,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
+                  style: TextStyle(
+                    color: _primaryTextColor,
+                fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
               textAlign: TextAlign.center,
@@ -6081,15 +6880,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             const SizedBox(height: 20),
             LinearProgressIndicator(
               value: _processingProgress,
-              backgroundColor: Colors.white24,
+              backgroundColor: _dividerColor,
               valueColor:
-                  const AlwaysStoppedAnimation<Color>(Color(0xFF00D9FF)),
+                  AlwaysStoppedAnimation<Color>(_primaryAccentColor),
             ),
             const SizedBox(height: 10),
             Text(
               '${(_processingProgress * 100).toStringAsFixed(0)}%',
-              style: const TextStyle(
-                color: Colors.white70,
+              style: TextStyle(
+                color: _secondaryTextColor,
                 fontSize: 14,
               ),
             ),
@@ -6113,33 +6912,33 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 shape: BoxShape.circle,
                 gradient: LinearGradient(
                   colors: [
-                    const Color(0xFF00D9FF).withValues(alpha: 0.3),
-                    const Color(0xFF00D9FF).withValues(alpha: 0.1),
+                    _primaryAccentColor.withValues(alpha: 0.3),
+                    _primaryAccentColor.withValues(alpha: 0.1),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
               ),
-              child: const Icon(
+              child: Icon(
                 Icons.mic,
-                color: Color(0xFF00D9FF),
+                color: _primaryAccentColor,
                 size: 60,
               ),
             ),
             const SizedBox(height: 30),
-            const Text(
+            Text(
               'Ready to Record',
               style: TextStyle(
-                color: Colors.white,
+                color: _primaryTextColor,
                 fontSize: 24,
                 fontWeight: FontWeight.bold,
               ),
             ),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'Tap the microphone button below to start recording a conversation between two speakers.',
               style: TextStyle(
-                color: Colors.white70,
+                color: _secondaryTextColor,
                 fontSize: 16,
                 height: 1.4,
               ),
@@ -6167,7 +6966,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         // Divider
         Container(
           height: 1,
-          color: Colors.white.withValues(alpha: 0.1),
+          color: _dividerColor,
         ),
         // Speaker 2 section (bottom)
         Expanded(
@@ -6199,39 +6998,39 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
+        color: _cardBackgroundColor,
         border: Border(
           top: BorderSide(
-            color: speakerColor.withValues(alpha: 0.2),
-            width: speakerIndex == 0 ? 1 : 0,
+            color: speakerColor.withValues(alpha: 0.3),
+            width: speakerIndex == 0 ? 2 : 0,
           ),
           bottom: BorderSide(
-            color: speakerColor.withValues(alpha: 0.2),
-            width: speakerIndex == 1 ? 1 : 0,
+            color: speakerColor.withValues(alpha: 0.3),
+            width: speakerIndex == 1 ? 2 : 0,
           ),
         ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Speaker header with inline settings (OPTIMIZED: More compact)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-            decoration: BoxDecoration(
-              color: speakerColor.withValues(alpha: 0.1),
-              border: Border(
-                bottom: BorderSide(
-                  color: speakerColor.withValues(alpha: 0.3),
-                  width: 1,
+            // Speaker header with inline settings (OPTIMIZED: More compact)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              decoration: BoxDecoration(
+                color: _cardBackgroundColor,
+                border: Border(
+                  bottom: BorderSide(
+                    color: speakerColor.withValues(alpha: 0.4),
+                    width: 2,
+                  ),
                 ),
               ),
-            ),
             child: Row(
               children: [
                 // Speaker icon (smaller)
                 Container(
-                  width: 28,
-                  height: 28,
+                  width: 32,
+                  height: 32,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: speakerColor.withValues(alpha: 0.2),
@@ -6239,16 +7038,16 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                   child: Icon(
                     Icons.person,
                     color: speakerColor,
-                    size: 16,
+                    size: 18,
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 // Speaker name (compact)
                 Text(
                   _getSpeakerDisplayName(speakerIndex),
                   style: TextStyle(
-                    color: speakerColor,
-                    fontSize: 13,
+                    color: _primaryTextColor,
+                    fontSize: 16,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -6264,11 +7063,11 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                           height: 28,
                           padding: const EdgeInsets.symmetric(horizontal: 6),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0A0E21),
-                            borderRadius: BorderRadius.circular(5),
+                            color: _secondaryCardBackgroundColor,
+                            borderRadius: BorderRadius.circular(6),
                             border: Border.all(
-                              color: speakerColor.withValues(alpha: 0.3),
-                              width: 1,
+                              color: speakerColor.withValues(alpha: 0.4),
+                              width: 1.5,
                             ),
                           ),
                           child: DropdownButtonHideUnderline(
@@ -6276,10 +7075,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                               value: language,
                               isDense: true,
                               isExpanded: true,
-                              dropdownColor: const Color(0xFF1D1E33),
+                              dropdownColor: _cardBackgroundColor,
                               style: TextStyle(
                                 color: speakerColor,
-                                fontSize: 10,
+                                fontSize: 12,
                                 fontWeight: FontWeight.w500,
                               ),
                               icon: Icon(
@@ -6322,10 +7121,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                           height: 28,
                           decoration: BoxDecoration(
                             color: speakerColor.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(5),
+                            borderRadius: BorderRadius.circular(6),
                             border: Border.all(
                               color: speakerColor.withValues(alpha: 0.4),
-                              width: 1,
+                              width: 1.5,
                             ),
                           ),
                           child: Icon(
@@ -6333,7 +7132,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                                 ? Icons.female
                                 : Icons.male,
                             color: speakerColor,
-                            size: 14,
+                            size: 16,
                           ),
                         ),
                       ),
@@ -6354,10 +7153,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                           height: 28,
                           decoration: BoxDecoration(
                             color: speakerColor.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(5),
+                            borderRadius: BorderRadius.circular(6),
                             border: Border.all(
                               color: speakerColor.withValues(alpha: 0.4),
-                              width: 1,
+                              width: 1.5,
                             ),
                           ),
                           child: Row(
@@ -6366,14 +7165,14 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                               Icon(
                                 Icons.headphones,
                                 color: speakerColor,
-                                size: 12,
+                                size: 14,
                               ),
-                              const SizedBox(width: 1),
+                              const SizedBox(width: 2),
                               Text(
                                 _speakerEarpieces[speakerIndex] == 'left' ? 'L' : 'R',
                                 style: TextStyle(
                                   color: speakerColor,
-                                  fontSize: 9,
+                                  fontSize: 12,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
@@ -6407,7 +7206,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 // Divider
                 Container(
                   width: 1,
-                  color: Colors.white.withValues(alpha: 0.1),
+                  color: _dividerColor,
                 ),
                 // Translation section (right)
                 Expanded(
@@ -6441,27 +7240,27 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   }) {
     return Container(
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.05),
+        color: _cardBackgroundColor,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // Section header (OPTIMIZED: More compact)
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.1),
+              color: _secondaryCardBackgroundColor,
               border: Border(
                 bottom: BorderSide(
-                  color: color.withValues(alpha: 0.2),
-                  width: 1,
+                  color: color.withValues(alpha: 0.3),
+                  width: 1.5,
                 ),
               ),
             ),
             child: Row(
               children: [
-                Icon(icon, color: color, size: 12),
-                const SizedBox(width: 4),
+                Icon(icon, color: color, size: 14),
+                const SizedBox(width: 6),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -6469,16 +7268,16 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                       Text(
                         title,
                         style: TextStyle(
-                          color: color,
-                          fontSize: 11,
+                          color: _primaryTextColor,
+                          fontSize: 14,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
                       Text(
                         subtitle,
                         style: TextStyle(
-                          color: color.withValues(alpha: 0.7),
-                          fontSize: 9,
+                          color: _secondaryTextColor,
+                          fontSize: 12,
                         ),
                       ),
                     ],
@@ -6495,7 +7294,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               child: Text(
                 text,
                 style: TextStyle(
-                  color: isEmpty ? Colors.white38 : Colors.white,
+                  color: isEmpty ? _tertiaryTextColor : _primaryTextColor,
                   fontSize: 18,
                   height: 1.5,
                   fontStyle: isEmpty ? FontStyle.italic : FontStyle.normal,
@@ -6522,10 +7321,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             color: Colors.green,
           ),
           const SizedBox(height: 16),
-          const Text(
+          Text(
             'Audio Separated Successfully!',
             style: TextStyle(
-              color: Colors.white,
+              color: _primaryTextColor,
               fontSize: 20,
               fontWeight: FontWeight.bold,
             ),
@@ -6534,8 +7333,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           const SizedBox(height: 8),
           Text(
             'Found ${_speakerSegments.length} speaker segments',
-            style: const TextStyle(
-              color: Colors.white70,
+            style: TextStyle(
+              color: _secondaryTextColor,
               fontSize: 14,
             ),
             textAlign: TextAlign.center,
@@ -6575,7 +7374,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
+        color: _cardBackgroundColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: isPlaying ? speakerColor : speakerColor.withValues(alpha: 0.3),
@@ -6627,8 +7426,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                       const SizedBox(height: 4),
                       Text(
                         isPlaying ? 'Playing...' : 'Tap to play',
-                        style: const TextStyle(
-                          color: Colors.white70,
+                        style: TextStyle(
+                          color: _secondaryTextColor,
                           fontSize: 14,
                         ),
                       ),
@@ -6637,7 +7436,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 ),
                 Icon(
                   Icons.volume_up,
-                  color: isPlaying ? speakerColor : Colors.white54,
+                  color: isPlaying ? speakerColor : _tertiaryTextColor,
                   size: 24,
                 ),
               ],
@@ -6784,14 +7583,14 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             width: double.infinity,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.black.withValues(alpha: 0.2),
+              color: _secondaryCardBackgroundColor,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Text(
               displayText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 18,
+                  style: TextStyle(
+                    color: _primaryTextColor,
+                fontSize: 16,
                 height: 1.5,
               ),
             ),
@@ -6904,7 +7703,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
+        color: _cardBackgroundColor,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
           color: _isPlayingStereo
@@ -6950,7 +7749,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                     Text(
                       'Stereo Audio Playback',
                       style: TextStyle(
-                        color: _isPlayingStereo ? Colors.purple : Colors.white,
+                        color: _isPlayingStereo ? Colors.purple : _primaryTextColor,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -6959,7 +7758,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                     Text(
                       'Left: Speaker 1\'s translation → Right: Speaker 2\'s translation',
                       style: TextStyle(
-                        color: Colors.grey.shade400,
+                        color: _secondaryTextColor,
                         fontSize: 12,
                       ),
                     ),
@@ -7059,16 +7858,16 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFF1D1E33),
+        color: _cardBackgroundColor,
         borderRadius: BorderRadius.circular(16),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
+          Text(
             'Speaker Segments',
             style: TextStyle(
-              color: Colors.white,
+              color: _primaryTextColor,
               fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
@@ -7112,8 +7911,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                         ),
                         Text(
                           '${segment.startTime.toStringAsFixed(1)}s - ${segment.endTime.toStringAsFixed(1)}s (${(segment.endTime - segment.startTime).toStringAsFixed(1)}s)',
-                          style: const TextStyle(
-                            color: Colors.white70,
+                          style: TextStyle(
+                            color: _secondaryTextColor,
                             fontSize: 12,
                           ),
                         ),
@@ -7135,8 +7934,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           if (_speakerSegments.length > 10)
             Text(
               '... and ${_speakerSegments.length - 10} more segments',
-              style: const TextStyle(
-                color: Colors.white54,
+              style: TextStyle(
+                color: _tertiaryTextColor,
                 fontSize: 12,
                 fontStyle: FontStyle.italic,
               ),
@@ -7149,7 +7948,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Widget _buildRecordingControls() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: const Color(0xFF1D1E33),
+      color: _appBarBackgroundColor,
       child: SafeArea(
         child: Column(
           children: [
@@ -7173,127 +7972,78 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
             // Manual Recording Controls with 3-column layout: Status (left), Mic (center), Empty (right)
             if (!_isAutomaticMode) ...[
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              Column(
+                mainAxisAlignment: MainAxisAlignment.center,
                 crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  // Left: Status indicator
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: _isInitializing
-                              ? Colors.blue.withValues(alpha: 0.2)
-                              : (_isRecording
-                                  ? Colors.red.withValues(alpha: 0.2)
-                                  : (_isRealtimeListeningPaused
-                                      ? Colors.orange.withValues(alpha: 0.2)
-                                      : Colors.green.withValues(alpha: 0.2))),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: _isInitializing
-                                ? Colors.blue.withValues(alpha: 0.5)
-                                : (_isRecording
-                                    ? Colors.red.withValues(alpha: 0.5)
-                                    : (_isRealtimeListeningPaused
-                                        ? Colors.orange.withValues(alpha: 0.5)
-                                        : Colors.green.withValues(alpha: 0.5))),
-                            width: 1,
-                          ),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _isInitializing
-                                  ? Icons.hourglass_bottom
-                                  : (_isRecording
-                                      ? Icons.mic
-                                      : _isRealtimeListeningPaused
-                                          ? Icons.hearing_disabled
-                                          : Icons.check_circle),
-                              color: _isInitializing
-                                  ? Colors.blue
-                                  : (_isRecording
-                                      ? Colors.red
-                                      : (_isRealtimeListeningPaused
-                                          ? Colors.orange
-                                          : Colors.green)),
-                              size: 14,
-                            ),
-                            const SizedBox(width: 4),
-                            Text(
-                              _isInitializing
-                                  ? 'Initializing'
-                                  : (_isRecording
-                                      ? 'Recording'
-                                      : _isRealtimeListeningPaused
-                                          ? 'Playing'
-                                          : 'Ready'),
-                              style: TextStyle(
-                                color: _isInitializing
-                                    ? Colors.blue
-                                    : (_isRecording
-                                        ? Colors.red
-                                        : (_isRealtimeListeningPaused
-                                            ? Colors.orange
-                                            : Colors.green)),
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
                   // Center: Mic button (always centered)
-                  Expanded(
-                    child: Align(
-                      alignment: Alignment.center,
-                      child: GestureDetector(
-                        onTap: _isProcessing ? null : _toggleRecording,
-                        child: AnimatedBuilder(
-                          animation: _pulseAnimation,
-                          builder: (context, child) {
-                            return Transform.scale(
-                              scale: _isRecording ? _pulseAnimation.value : 1.0,
-                              child: Container(
-                                width: 70,
-                                height: 70,
-                                decoration: BoxDecoration(
-                                  shape: BoxShape.circle,
-                                  color: _isRecording
-                                      ? Colors.red
-                                      : const Color(0xFF00D9FF),
-                                  boxShadow: _isRecording
-                                      ? [
-                                          BoxShadow(
-                                            color:
-                                                Colors.red.withValues(alpha: 0.3),
-                                            blurRadius: 15,
-                                            spreadRadius: 3,
-                                          ),
-                                        ]
-                                      : [],
-                                ),
-                                child: Icon(
-                                  _isRecording ? Icons.stop : Icons.mic,
-                                  color: Colors.white,
-                                  size: 36,
-                                ),
-                              ),
-                            );
-                          },
-                        ),
-                      ),
+                  GestureDetector(
+                    onTap: _isProcessing ? null : _toggleRecording,
+                    child: AnimatedBuilder(
+                      animation: _pulseAnimation,
+                      builder: (context, child) {
+                        return Transform.scale(
+                          scale: _isRecording ? _pulseAnimation.value : 1.0,
+                          child: Container(
+                            width: 70,
+                            height: 70,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: _isRecording
+                                  ? Colors.red
+                                  : (_isDarkMode 
+                                      ? const Color(0xFF00D9FF) 
+                                      : const Color(0xFF007A99)),
+                              boxShadow: _isRecording
+                                  ? [
+                                      BoxShadow(
+                                        color: Colors.red.withValues(alpha: 0.3),
+                                        blurRadius: 15,
+                                        spreadRadius: 3,
+                                      ),
+                                    ]
+                                  : [
+                                      BoxShadow(
+                                        color: (_isDarkMode 
+                                            ? const Color(0xFF00D9FF) 
+                                            : const Color(0xFF007A99))
+                                            .withValues(alpha: 0.3),
+                                        blurRadius: 10,
+                                        spreadRadius: 2,
+                                      ),
+                                    ],
+                            ),
+                            child: Icon(
+                              _isRecording ? Icons.stop : Icons.mic,
+                              color: Colors.white,
+                              size: 36,
+                            ),
+                          ),
+                        );
+                      },
                     ),
                   ),
-                  // Right: Empty slot for future use
-                  Expanded(
-                    child: Container(),
+                  const SizedBox(height: 8),
+                  // Status indicator under mic icon
+                  Text(
+                    _isInitializing
+                        ? 'Initializing'
+                        : (_isRecording
+                        ? 'Recording'
+                        : _isRealtimeListeningPaused
+                            ? 'Playing'
+                            : 'Ready'),
+                    style: TextStyle(
+                      color: _isInitializing
+                          ? Colors.blue
+                          : (_isRecording
+                          ? Colors.red
+                          : (_isRealtimeListeningPaused
+                              ? Colors.orange
+                              : Colors.green)),
+                      fontSize: 12,
+                      fontWeight: FontWeight.normal,
+                    ),
                   ),
                 ],
               ),

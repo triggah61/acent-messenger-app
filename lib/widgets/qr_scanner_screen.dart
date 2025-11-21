@@ -57,7 +57,7 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
                 hasScanned = true;
                 final String code = capture.barcodes.first.rawValue ?? '';
                 final extractedAddress = _extractBitcoinAddress(code);
-                
+
                 if (extractedAddress.isNotEmpty) {
                   Navigator.pop(context, extractedAddress);
                 } else {
@@ -207,10 +207,10 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
 
   String _extractBitcoinAddress(String qrData) {
     if (qrData.isEmpty) return '';
-    
+
     // Clean the data
     String cleanData = qrData.trim();
-    
+
     // Handle Bitcoin URI format (bitcoin:address?amount=...)
     if (cleanData.toLowerCase().startsWith('bitcoin:')) {
       final uri = Uri.tryParse(cleanData);
@@ -221,33 +221,33 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
           return address;
         }
       }
-      
+
       // Fallback: extract address manually
-      final addressMatch = RegExp(r'bitcoin:([a-zA-Z0-9]+)').firstMatch(cleanData);
+      final addressMatch =
+          RegExp(r'bitcoin:([a-zA-Z0-9]+)').firstMatch(cleanData);
       if (addressMatch != null) {
         return addressMatch.group(1) ?? '';
       }
     }
-    
+
     // Validate if it's a direct Bitcoin address
     if (_isValidBitcoinAddress(cleanData)) {
       return cleanData;
     }
-    
+
     return '';
   }
 
   bool _isValidBitcoinAddress(String address) {
     if (address.isEmpty) return false;
-    
+
     // Basic Bitcoin address validation
     // Legacy addresses (P2PKH) start with '1'
     // Script addresses (P2SH) start with '3'
     // Bech32 addresses (P2WPKH/P2WSH) start with 'bc1'
     final bitcoinAddressRegex = RegExp(
-      r'^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59})$'
-    );
-    
+        r'^(1[a-km-zA-HJ-NP-Z1-9]{25,34}|3[a-km-zA-HJ-NP-Z1-9]{25,34}|bc1[a-z0-9]{39,59})$');
+
     return bitcoinAddressRegex.hasMatch(address);
   }
 
@@ -317,4 +317,4 @@ class _QRScannerScreenState extends State<QRScannerScreen> {
     controller.dispose();
     super.dispose();
   }
-} 
+}

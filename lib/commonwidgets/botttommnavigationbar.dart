@@ -1,7 +1,5 @@
 import 'package:acent_messenger/views/contacts/contacts.dart';
 import 'package:acent_messenger/views/settings/settings.dart';
-import 'package:acent_messenger/views/status/status.dart';
-import 'package:acent_messenger/views/wallet/wallet_screen.dart';
 import 'package:acent_messenger/views/translator/realtime_translator.dart';
 import 'package:flutter/material.dart';
 
@@ -23,9 +21,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
     GroupChatList(),
     ContactsScreen(),
     // CallsScreen(),
-    StatusScreen(),
     const RealtimeTranslator(),
-    WalletScreen(),
     // SearchScreen(),
     SettingsScreen()
   ];
@@ -68,10 +64,8 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
             _buildBottomNavBarItem(
                 Icons.contacts, 'Contacts'), // Contacts Screen
             // _buildBottomNavBarItem(Icons.call, 'Calls'),         // Calls Screen
-            _buildBottomNavBarItem(Icons.update, 'Status'), // Status Screen
             _buildBottomNavBarItem(
                 Icons.translate, 'Translator'), // Translator Screen
-            _buildBottomNavBarItem(Icons.wallet, 'Wallet'), // Wallet Screen
             // _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen
             _buildBottomNavBarItem(
                 Icons.settings, 'Settings'), // Settings Screen
