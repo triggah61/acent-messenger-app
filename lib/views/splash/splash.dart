@@ -126,7 +126,7 @@ class _SplashScreenState extends State<SplashScreen>
           const SizedBox(height: 20),
           Text(
             "Q Messenger",
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.montserrat(
               fontSize: 28,
               fontWeight: FontWeight.bold,
               color: Colors.white,
@@ -135,7 +135,7 @@ class _SplashScreenState extends State<SplashScreen>
           const SizedBox(height: 10),
           Text(
             "Stay connected with your friends",
-            style: GoogleFonts.poppins(
+            style: GoogleFonts.montserrat(
               fontSize: 16,
               color: Colors.white70,
             ),

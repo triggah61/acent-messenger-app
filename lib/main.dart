@@ -1,5 +1,6 @@
 import 'package:acent_messenger/constants/colors.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'views/splash/splash.dart';
 import 'providers/auth_provider.dart';
@@ -269,6 +270,42 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
       title: 'Chat App',
       theme: ThemeData(
         scaffoldBackgroundColor: AppColors.bgColor,
+        // Set Montserrat as the global font family for the entire application
+        // Using GoogleFonts.montserratTextTheme() applies Montserrat to all text styles
+        textTheme: GoogleFonts.montserratTextTheme(),
+        primaryTextTheme: GoogleFonts.montserratTextTheme(),
+        // Apply Montserrat to AppBar titles
+        appBarTheme: AppBarTheme(
+          titleTextStyle: GoogleFonts.montserrat(
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        // Apply Montserrat to all button types
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(
+            textStyle: GoogleFonts.montserrat(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        textButtonTheme: TextButtonThemeData(
+          style: TextButton.styleFrom(
+            textStyle: GoogleFonts.montserrat(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            textStyle: GoogleFonts.montserrat(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
       ),
       home: const SplashScreen(),
     );

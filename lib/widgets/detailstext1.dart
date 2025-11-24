@@ -19,7 +19,7 @@ class Text1 extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text1,
-      style: GoogleFonts.roboto( // You can change 'Roboto' to any other Google Font
+      style: GoogleFonts.montserrat(
         textStyle: TextStyle(
           color: color,
           fontWeight: FontWeight.w500,
