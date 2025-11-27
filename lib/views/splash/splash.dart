@@ -1,12 +1,13 @@
-import 'package:acent_messenger/views/chats/chat_screen.dart';
 import 'package:acent_messenger/views/authentication/login_screen.dart';
 import 'package:acent_messenger/views/profile/profile_setup_screen.dart';
+import 'package:acent_messenger/views/maintenance/maintenance_screen.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_spinkit/flutter_spinkit.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:acent_messenger/providers/auth_provider.dart';
 import 'package:acent_messenger/commonwidgets/botttommnavigationbar.dart';
+import 'package:acent_messenger/services/config_service.dart';
 
 
 class SplashScreen extends StatefulWidget {
@@ -20,6 +21,8 @@ class _SplashScreenState extends State<SplashScreen>
     with TickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _scaleAnimation;
+  bool _isCheckingMaintenance = true;
+  bool _isMaintenanceMode = false;
 
   @override
   void initState() {
@@ -31,10 +34,48 @@ class _SplashScreenState extends State<SplashScreen>
     );
     _controller.repeat(reverse: true);
 
-    // Initialize authentication check
+    // Check maintenance mode first, then proceed with auth check
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<AuthProvider>().checkAuthStatus();
+      _checkMaintenanceMode();
     });
+  }
+
+  /// Check if maintenance mode is enabled
+  Future<void> _checkMaintenanceMode() async {
+    try {
+      final configService = ConfigService.instance;
+      final isMaintenanceMode = await configService.isMaintenanceModeEnabled();
+
+      if (mounted) {
+        setState(() {
+          _isCheckingMaintenance = false;
+          _isMaintenanceMode = isMaintenanceMode;
+        });
+
+        if (isMaintenanceMode) {
+          // Navigate to maintenance screen
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const MaintenanceScreen(),
+            ),
+          );
+        } else {
+          // Maintenance mode is off, proceed with normal auth check
+          context.read<AuthProvider>().checkAuthStatus();
+        }
+      }
+    } catch (e) {
+      print('SplashScreen: Error checking maintenance mode: $e');
+      // If there's an error, assume maintenance mode is off and proceed
+      if (mounted) {
+        setState(() {
+          _isCheckingMaintenance = false;
+          _isMaintenanceMode = false;
+        });
+        context.read<AuthProvider>().checkAuthStatus();
+      }
+    }
   }
 
   @override
@@ -54,6 +95,21 @@ class _SplashScreenState extends State<SplashScreen>
 
   @override
   Widget build(BuildContext context) {
+    // If checking maintenance mode, show splash screen
+    if (_isCheckingMaintenance) {
+      return Scaffold(
+        backgroundColor: Colors.blue.shade800,
+        body: _buildSplashContent(),
+      );
+    }
+
+    // If maintenance mode is enabled, maintenance screen should already be shown
+    // This should not be reached, but just in case
+    if (_isMaintenanceMode) {
+      return const MaintenanceScreen();
+    }
+
+    // Normal flow - check auth status
     return Scaffold(
       backgroundColor: Colors.blue.shade800,
       body: Consumer<AuthProvider>(

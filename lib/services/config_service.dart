@@ -105,4 +105,43 @@ class ConfigService {
     _configCache = null;
     _supportedLanguages = null;
   }
+
+  /// Checks if maintenance mode is enabled
+  /// Returns true if MAINTENANCE_MODE is "true", "1", or true
+  Future<bool> isMaintenanceModeEnabled() async {
+    try {
+      final config = await getConfig();
+      final maintenanceMode = config['MAINTENANCE_MODE'];
+      
+      // Handle different possible values
+      if (maintenanceMode == null) {
+        return false;
+      }
+      
+      if (maintenanceMode is bool) {
+        return maintenanceMode;
+      }
+      
+      if (maintenanceMode is String) {
+        return maintenanceMode.toLowerCase() == 'true' || maintenanceMode == '1';
+      }
+      
+      if (maintenanceMode is int) {
+        return maintenanceMode == 1;
+      }
+      
+      return false;
+    } catch (e) {
+      // If there's an error fetching config, assume maintenance mode is off
+      // This allows the app to continue functioning if config service fails
+      print('ConfigService: Error checking maintenance mode: $e');
+      return false;
+    }
+  }
+
+  /// Force refresh config (clears cache and fetches fresh data)
+  Future<Map<String, dynamic>> refreshConfig() async {
+    clearCache();
+    return await getConfig();
+  }
 }
