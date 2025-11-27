@@ -2,9 +2,12 @@ import 'package:acent_messenger/views/contacts/contacts.dart';
 import 'package:acent_messenger/views/settings/settings.dart';
 import 'package:acent_messenger/views/translator/realtime_translator.dart';
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 
 import '../views/chats/chat_screen.dart';
 import '../views/groups/groups.dart';
+import '../models/subscription_plan.dart';
+import '../widgets/subscription_modal.dart';
 
 class BottomNavBarScreen extends StatefulWidget {
   const BottomNavBarScreen({super.key});
@@ -15,6 +18,13 @@ class BottomNavBarScreen extends StatefulWidget {
 
 class BottomNavBarScreenState extends State<BottomNavBarScreen> {
   int _selectedIndex = 0;
+
+  // TODO: Replace with actual user subscription from provider/state management
+  // For now, using default free plan with sample balance
+  UserSubscription _userSubscription = const UserSubscription(
+    planId: 'free',
+    creditBalance: 100.0,
+  );
 
   final List<Widget> _screens = [
     HomeScreen(),
@@ -27,9 +37,19 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
   ];
 
   void _onItemTapped(int index) {
+    // Handle subscription/credits item separately (last item)
+    if (index == _screens.length) {
+      _showSubscriptionModal();
+      return;
+    }
+    
     setState(() {
       _selectedIndex = index;
     });
+  }
+
+  void _showSubscriptionModal() {
+    SubscriptionModal.show(context, _userSubscription);
   }
 
   @override
@@ -69,6 +89,7 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
             // _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen
             _buildBottomNavBarItem(
                 Icons.settings, 'Settings'), // Settings Screen
+            _buildSubscriptionNavBarItem(), // Subscription/Credits
           ],
           currentIndex: _selectedIndex,
           selectedItemColor: Colors.white,
@@ -81,6 +102,46 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
         ),
       ),
     );
+  }
+
+  BottomNavigationBarItem _buildSubscriptionNavBarItem() {
+    final plan = _userSubscription.plan;
+    final isSelected = _selectedIndex == _screens.length;
+    
+    return BottomNavigationBarItem(
+      icon: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _buildAnimatedIcon(_getPlanIcon(plan.id)),
+          const SizedBox(height: 2),
+          Text(
+            '${_userSubscription.creditBalance.toStringAsFixed(0)}',
+            style: GoogleFonts.montserrat(
+              fontSize: 10,
+              fontWeight: FontWeight.w600,
+              color: isSelected ? Colors.white : Colors.white70,
+            ),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+      label: 'Credits',
+      tooltip: '${_userSubscription.creditBalance.toStringAsFixed(0)} Credits - ${plan.name} Plan',
+    );
+  }
+
+  IconData _getPlanIcon(String planId) {
+    switch (planId) {
+      case 'free':
+        return Icons.free_breakfast;
+      case 'standard':
+        return Icons.star;
+      case 'premium':
+        return Icons.diamond;
+      default:
+        return Icons.workspace_premium;
+    }
   }
 
   BottomNavigationBarItem _buildBottomNavBarItem(IconData icon, String label) {

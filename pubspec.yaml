@@ -67,6 +67,7 @@ dependencies:
   qr_flutter: ^4.1.0
   mobile_scanner: ^3.5.7
   url_launcher: ^6.2.4
+  flutter_html: ^3.0.0-beta.2
   audioplayers: ^6.0.0
   # Firebase packages for FCM
   firebase_core: ^3.6.0
