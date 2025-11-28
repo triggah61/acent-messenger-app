@@ -250,6 +250,22 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Map<int, StringBuffer> _sentenceTranscriptionBuffers = {};
   Map<int, StringBuffer> _sentenceTranslationBuffers = {};
   Map<int, String> _sentenceLanguages = {};
+  
+  // BATCH PROCESSING: Smart adaptive timer to accumulate multiple sentences before TTS generation
+  // This prevents generating TTS for each chunk individually
+  // Timer waits for a pause in translation chunks before processing all accumulated sentences
+  Map<int, Timer?> _sentenceProcessingTimers = {}; // Per-speaker timers
+  Map<int, DateTime?> _lastChunkReceivedTime = {}; // Track when last chunk arrived per speaker
+  Map<int, int> _accumulatedChunkCount = {}; // Track how many chunks accumulated per speaker
+  
+  // ADAPTIVE DELAYS: Longer delay allows more sentences to accumulate
+  static const Duration _minProcessingDelay = Duration(milliseconds: 2000); // Minimum 2s wait
+  static const Duration _maxProcessingDelay = Duration(milliseconds: 4000); // Maximum 4s wait
+  static const Duration _adaptiveExtension = Duration(milliseconds: 500); // Extend by 500ms per chunk
+  
+  // Sentence thresholds
+  static const int _minSentencesForBatch = 2; // Wait for at least 2 sentences if possible
+  static const int _maxSentencesForBatch = 10; // Process if we have 10+ sentences
 
   // Theme-aware color helpers
   bool get _isDarkMode {
@@ -2327,6 +2343,183 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     return false;
   }
 
+  /// Extract ALL completed sentences from text buffer
+  /// Returns a map with 'completed' (all completed sentences as one text) and 'incomplete' (remaining text)
+  /// PRODUCTION-READY: Handles multiple completed sentences in one buffer
+  /// Example: "Hello. How are you? I am fine" + incomplete text → returns completed: "Hello. How are you? I am fine", incomplete: ""
+  /// Example: "Hello. How are you? I am" → returns completed: "Hello. How are you?", incomplete: "I am"
+  Map<String, String> _extractCompletedSentences(String text) {
+    if (text.isEmpty) {
+      return {'completed': '', 'incomplete': ''};
+    }
+    
+    final trimmedText = text.trim();
+    if (trimmedText.isEmpty) {
+      return {'completed': '', 'incomplete': ''};
+    }
+    
+    // Sentence-ending punctuation marks
+    final sentenceEnders = [
+      '.', '!', '?',           // English/Latin
+      '।', '॥',                // Bengali/Devanagari
+      '。', '！', '？',         // Chinese/Japanese
+      '؟', '۔',                // Arabic/Urdu
+      ':', ';',                // Additional punctuation (sometimes ends thoughts)
+    ];
+    
+    // Find the last occurrence of any sentence-ending punctuation
+    int lastSentenceEndIndex = -1;
+    String lastEnderFound = '';
+    
+    for (final ender in sentenceEnders) {
+      final index = trimmedText.lastIndexOf(ender);
+      if (index > lastSentenceEndIndex) {
+        lastSentenceEndIndex = index;
+        lastEnderFound = ender;
+      }
+    }
+    
+    // If no sentence-ending punctuation found, entire text is incomplete
+    if (lastSentenceEndIndex == -1) {
+      return {'completed': '', 'incomplete': trimmedText};
+    }
+    
+    // Split at the last sentence-ending punctuation
+    // Include the punctuation in the completed part
+    final completedPart = trimmedText.substring(0, lastSentenceEndIndex + 1).trim();
+    
+    // Everything after the last punctuation is incomplete
+    final incompletePart = lastSentenceEndIndex < trimmedText.length - 1
+        ? trimmedText.substring(lastSentenceEndIndex + 1).trim()
+        : '';
+    
+    debugPrint('RealtimeTranslator: 📝 Sentence Extraction:');
+    debugPrint('RealtimeTranslator:   Original text length: ${trimmedText.length} chars');
+    debugPrint('RealtimeTranslator:   Last sentence ender: "$lastEnderFound" at index $lastSentenceEndIndex');
+    debugPrint('RealtimeTranslator:   Completed sentences: "${completedPart.length > 100 ? completedPart.substring(0, 100) + '...' : completedPart}"');
+    debugPrint('RealtimeTranslator:   Incomplete text: "${incompletePart.length > 50 ? incompletePart.substring(0, 50) + '...' : incompletePart}"');
+    debugPrint('RealtimeTranslator:   Completed sentences count: ${_countSentences(completedPart)}');
+    
+    return {
+      'completed': completedPart,
+      'incomplete': incompletePart,
+    };
+  }
+  
+  /// Count the number of completed sentences in text
+  /// Helper method for logging and analytics
+  int _countSentences(String text) {
+    if (text.isEmpty) return 0;
+    
+    final sentenceEnders = ['.', '!', '?', '।', '॥', '。', '！', '？', '؟', '۔', ':', ';'];
+    
+    int count = 0;
+    for (final ender in sentenceEnders) {
+      count += ender.allMatches(text).length;
+    }
+    
+    return count;
+  }
+
+  /// Process accumulated sentences in batch after adaptive delay
+  /// This is called by the timer after no new translation chunks arrive
+  /// PRODUCTION-READY: Generates ONE TTS for ALL completed sentences
+  Future<void> _processSentenceBatch({
+    required int speakerIndex,
+    required int targetSpeakerIndex,
+    required Language targetLanguage,
+  }) async {
+    try {
+      final chunkCount = _accumulatedChunkCount[speakerIndex] ?? 0;
+      final lastChunkTime = _lastChunkReceivedTime[speakerIndex];
+      final timeSinceLastChunk = lastChunkTime != null 
+          ? DateTime.now().difference(lastChunkTime).inMilliseconds 
+          : 0;
+      
+      debugPrint('RealtimeTranslator: ═══ BATCH Sentence Processing (Adaptive Timer Fired) ═══');
+      debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
+      debugPrint('RealtimeTranslator: Chunks accumulated: $chunkCount');
+      debugPrint('RealtimeTranslator: Time since last chunk: ${timeSinceLastChunk}ms');
+      debugPrint('RealtimeTranslator: Processing ALL accumulated sentences in ONE batch');
+      
+      // Get current buffer content
+      final currentBuffer = _sentenceTranslationBuffers[speakerIndex]?.toString().trim() ?? '';
+      
+      if (currentBuffer.isEmpty) {
+        debugPrint('RealtimeTranslator: Buffer is empty, nothing to process');
+        return;
+      }
+      
+      debugPrint('RealtimeTranslator: Buffer content length: ${currentBuffer.length} chars');
+      
+      // Extract completed and incomplete parts
+      final extracted = _extractCompletedSentences(currentBuffer);
+      final completedSentences = extracted['completed'] ?? '';
+      final incompleteSentence = extracted['incomplete'] ?? '';
+      
+      final sentenceCount = _countSentences(completedSentences);
+      
+      debugPrint('RealtimeTranslator: Completed sentences: $sentenceCount');
+      debugPrint('RealtimeTranslator: Incomplete text length: ${incompleteSentence.length} chars');
+
+      if (completedSentences.isNotEmpty) {
+        // Generate TTS for ALL completed sentences at once (BATCH PROCESSING)
+        final targetGender = _speakerGenders[targetSpeakerIndex] ?? 'male';
+        final earpiece = _speakerEarpieces[targetSpeakerIndex] ?? 'left';
+
+        debugPrint('RealtimeTranslator: ═══ BATCH TTS Generation ═══');
+        debugPrint('RealtimeTranslator: TTS for target speaker: $targetSpeakerIndex');
+        debugPrint('RealtimeTranslator: TTS language: ${targetLanguage.code}');
+        debugPrint('RealtimeTranslator: Processing $sentenceCount completed sentence(s) in ONE batch');
+        debugPrint('RealtimeTranslator: Combined TTS text: "${completedSentences.length > 100 ? completedSentences.substring(0, 100) + '...' : completedSentences}"');
+        debugPrint('RealtimeTranslator: TTS gender: $targetGender');
+        debugPrint('RealtimeTranslator: TTS earpiece: $earpiece');
+        debugPrint('RealtimeTranslator: ✅ ADVANTAGE: All completed sentences processed in ONE TTS generation');
+        debugPrint('RealtimeTranslator: ✅ This eliminates multiple TTS files for consecutive sentences');
+
+        // Add to TTS queue for pre-generation and playback (ALL completed sentences at once)
+        _addToTtsQueue(
+          speakerIndex: targetSpeakerIndex,
+          text: completedSentences, // All completed sentences combined
+          languageCode: targetLanguage.code,
+          gender: targetGender,
+        );
+
+        // Update sentence buffers: Keep only the incomplete text
+        // CRITICAL: Don't clear buffers completely - keep incomplete sentence for next iteration
+        _sentenceTranscriptionBuffers[speakerIndex]?.clear();
+        _sentenceTranslationBuffers[speakerIndex]?.clear();
+        
+        if (incompleteSentence.isNotEmpty) {
+          _sentenceTranslationBuffers[speakerIndex]?.write(incompleteSentence);
+          debugPrint('RealtimeTranslator: ✅ Batch processing complete, incomplete text kept in buffer: "$incompleteSentence"');
+        } else {
+          debugPrint('RealtimeTranslator: ✅ Batch processing complete, all sentences were completed, buffer cleared');
+        }
+        
+        debugPrint('RealtimeTranslator: ✅ $sentenceCount completed sentence(s) processed as ONE batch');
+        debugPrint('RealtimeTranslator: ✅ Result: ONE TTS file instead of $sentenceCount separate files');
+        debugPrint('RealtimeTranslator: ✅ Batch efficiency: $chunkCount chunks → 1 TTS file');
+      } else {
+        debugPrint('RealtimeTranslator: ⏳ No completed sentences yet, all text is incomplete');
+        debugPrint('RealtimeTranslator: Current buffer: "$incompleteSentence"');
+        debugPrint('RealtimeTranslator: Waiting for more text to complete sentences');
+      }
+      
+      // Reset chunk counter after processing
+      _accumulatedChunkCount[speakerIndex] = 0;
+      _lastChunkReceivedTime[speakerIndex] = null;
+      
+    } catch (e) {
+      debugPrint('RealtimeTranslator: ❌ Error in batch sentence processing: $e');
+      debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
+      
+      // Reset counters on error
+      _accumulatedChunkCount[speakerIndex] = 0;
+      _lastChunkReceivedTime[speakerIndex] = null;
+    }
+  }
+
   /// Check if text appears to be phonetically transcribed
   /// (e.g., English words written in Bengali script like "গুড আফটারনুন")
   bool _isPhoneticTranscription(String text, String detectedLanguage) {
@@ -2442,41 +2635,74 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         _autoScrollToBottom(speakerIndex, isTranslation: true);
       }
 
-      // SMART SENTENCE DETECTION: Only generate TTS when we have a complete sentence
-      final currentSentence = _sentenceTranslationBuffers[speakerIndex]!.toString().trim();
-      final isComplete = _isCompleteSentence(currentSentence);
+      // ADAPTIVE BATCH SENTENCE PROCESSING
+      // Track chunk arrival for intelligent batching
+      _lastChunkReceivedTime[speakerIndex] = DateTime.now();
+      _accumulatedChunkCount[speakerIndex] = (_accumulatedChunkCount[speakerIndex] ?? 0) + 1;
       
-      debugPrint('RealtimeTranslator: 📝 Sentence buffer: "$currentSentence"');
-      debugPrint('RealtimeTranslator: 📝 Complete sentence: $isComplete');
-
-      if (isComplete) {
-        // Generate TTS for complete sentence
-        final targetGender = _speakerGenders[targetSpeakerIndex] ?? 'male';
-        final earpiece = _speakerEarpieces[targetSpeakerIndex] ?? 'left';
-
-        debugPrint('RealtimeTranslator: ═══ TTS Generation (Complete Sentence) ═══');
-        debugPrint('RealtimeTranslator: TTS for target speaker: $targetSpeakerIndex');
-        debugPrint('RealtimeTranslator: TTS language: ${targetLanguage.code}');
-        debugPrint('RealtimeTranslator: TTS text: "$currentSentence"');
-        debugPrint('RealtimeTranslator: TTS gender: $targetGender');
-        debugPrint('RealtimeTranslator: TTS earpiece: $earpiece');
-
-        // Add to TTS queue for pre-generation and playback
-        _addToTtsQueue(
-          speakerIndex: targetSpeakerIndex,
-          text: currentSentence,
-          languageCode: targetLanguage.code,
-          gender: targetGender,
-        );
-
-        // Clear sentence buffers after TTS generation
-        _sentenceTranscriptionBuffers[speakerIndex]?.clear();
-        _sentenceTranslationBuffers[speakerIndex]?.clear();
-        
-        debugPrint('RealtimeTranslator: ✅ Complete sentence processed, buffers cleared');
+      // Get current buffer to check sentence count
+      final currentBuffer = _sentenceTranslationBuffers[speakerIndex]!.toString().trim();
+      final extracted = _extractCompletedSentences(currentBuffer);
+      final completedSentences = extracted['completed'] ?? '';
+      final sentenceCount = _countSentences(completedSentences);
+      
+      debugPrint('RealtimeTranslator: 🕐 ADAPTIVE Batch Processing for Speaker $speakerIndex');
+      debugPrint('RealtimeTranslator: 📊 Current state:');
+      debugPrint('RealtimeTranslator:   - Chunks accumulated: ${_accumulatedChunkCount[speakerIndex]}');
+      debugPrint('RealtimeTranslator:   - Completed sentences: $sentenceCount');
+      debugPrint('RealtimeTranslator:   - Buffer length: ${currentBuffer.length} chars');
+      
+      // Cancel existing timer
+      _sentenceProcessingTimers[speakerIndex]?.cancel();
+      
+      // SMART DECISION: Determine optimal processing delay
+      Duration processingDelay;
+      
+      if (sentenceCount >= _maxSentencesForBatch) {
+        // Case 1: We have many sentences (10+) - process immediately
+        processingDelay = const Duration(milliseconds: 500);
+        debugPrint('RealtimeTranslator: ⚡ Many sentences ($sentenceCount) - processing in 500ms');
+      } else if (sentenceCount >= _minSentencesForBatch) {
+        // Case 2: We have 2+ sentences - use moderate delay (2.5s)
+        processingDelay = const Duration(milliseconds: 2500);
+        debugPrint('RealtimeTranslator: ⏱️ Good batch ($sentenceCount sentences) - processing in 2.5s');
+      } else if (sentenceCount == 1) {
+        // Case 3: Only 1 sentence - wait longer for more (3.5s)
+        processingDelay = const Duration(milliseconds: 3500);
+        debugPrint('RealtimeTranslator: ⏳ Single sentence - waiting 3.5s for more');
       } else {
-        debugPrint('RealtimeTranslator: ⏳ Buffering text, waiting for complete sentence...');
+        // Case 4: No completed sentences yet - standard delay (3s)
+        processingDelay = const Duration(milliseconds: 3000);
+        debugPrint('RealtimeTranslator: ⏳ No completed sentences - waiting 3s');
       }
+      
+      // Adaptive extension: Add time based on chunk velocity
+      // If chunks are coming rapidly, extend the timer
+      final chunkCount = _accumulatedChunkCount[speakerIndex] ?? 0;
+      if (chunkCount > 3 && sentenceCount < _minSentencesForBatch) {
+        final extension = Duration(milliseconds: 500 * (chunkCount - 3));
+        final extendedDelay = Duration(milliseconds: processingDelay.inMilliseconds + extension.inMilliseconds);
+        
+        // Cap at max delay
+        if (extendedDelay <= _maxProcessingDelay) {
+          processingDelay = extendedDelay;
+          debugPrint('RealtimeTranslator: 🔄 Extended delay to ${processingDelay.inMilliseconds}ms (chunks arriving rapidly)');
+        } else {
+          processingDelay = _maxProcessingDelay;
+          debugPrint('RealtimeTranslator: 🔄 Capped at max delay ${_maxProcessingDelay.inMilliseconds}ms');
+        }
+      }
+      
+      debugPrint('RealtimeTranslator: ⏰ Timer set for ${processingDelay.inMilliseconds}ms');
+      
+      // Start adaptive timer
+      _sentenceProcessingTimers[speakerIndex] = Timer(processingDelay, () {
+        _processSentenceBatch(
+          speakerIndex: speakerIndex,
+          targetSpeakerIndex: targetSpeakerIndex,
+          targetLanguage: targetLanguage,
+        );
+      });
 
       debugPrint('RealtimeTranslator: ✅ Soniox translation processing complete (FAST PATH - no Azure API delay)');
       
@@ -5991,6 +6217,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _sentenceTranscriptionBuffers.clear();
     _sentenceTranslationBuffers.clear();
     _sentenceLanguages.clear();
+    
+    // Clean up sentence processing timers (batch processing adaptive timers)
+    for (var timer in _sentenceProcessingTimers.values) {
+      timer?.cancel();
+    }
+    _sentenceProcessingTimers.clear();
+    _accumulatedChunkCount.clear();
+    _lastChunkReceivedTime.clear();
+    debugPrint('RealtimeTranslator: Sentence processing timers and counters cleared');
 
     // Clean up scroll controllers
     _speaker1TranscriptionScrollController.dispose();
