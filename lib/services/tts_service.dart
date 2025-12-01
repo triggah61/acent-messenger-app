@@ -7,6 +7,7 @@ import 'dart:async';
 import 'dart:io';
 
 /// Text-to-Speech service for generating audio from translated text
+/// ENHANCED: Supports dual-channel simultaneous playback for parallel translation
 class TtsService {
   static final TtsService _instance = TtsService._internal();
   factory TtsService() => _instance;
@@ -16,17 +17,27 @@ class TtsService {
   AudioPlayer? _audioPlayer;
   bool _isInitialized = false;
   bool _isTtsEngineReady = false;
+  
+  // DUAL CHANNEL SUPPORT: Separate state for left and right channels
+  // This enables true simultaneous playback for both speakers
+  bool _isPlayingLeft = false;
+  bool _isPlayingRight = false;
+  String? _currentAudioPathLeft;
+  String? _currentAudioPathRight;
+  Completer<void>? _playbackCompleterLeft;
+  Completer<void>? _playbackCompleterRight;
+  
+  // Legacy single-channel support (for backward compatibility)
   bool _isPlaying = false;
   String? _currentAudioPath;
+  Completer<void>? _playbackCompleter;
 
   // Callbacks for UI state synchronization
   VoidCallback? _onPlaybackCompleted;
   VoidCallback? _onPlaybackError;
   
-  // Completer for awaiting playback completion
-  Completer<void>? _playbackCompleter;
-  
-  // Native audio player channel (for explicit A2DP routing)
+  // DUAL CHANNEL SUPPORT: Separate native audio players for left and right channels
+  // Note: We'll use the same channel but with different player IDs in the native code
   static const MethodChannel _nativeAudioChannel = MethodChannel('audio_route');
   
   // Flag to use native player (for guaranteed A2DP routing)
@@ -41,6 +52,51 @@ class TtsService {
       debugPrint('TtsService: Initializing TTS engine...');
       _flutterTts = FlutterTts();
       _audioPlayer = AudioPlayer();
+
+      // CRITICAL: Set up persistent method call handler for ALL playback callbacks
+      // This single handler routes callbacks for both channels and legacy playback
+      _nativeAudioChannel.setMethodCallHandler((call) async {
+        debugPrint('TtsService: Received callback: ${call.method}');
+        
+        switch (call.method) {
+          case 'onNativePlaybackCompleted':
+            debugPrint('TtsService: ✅ Legacy playback completed');
+            if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+              _playbackCompleter!.complete();
+            }
+            break;
+            
+          case 'onNativePlaybackStarted':
+            debugPrint('TtsService: ✅ Legacy playback started');
+            break;
+            
+          case 'onNativePlaybackCompletedLeft':
+            debugPrint('TtsService: ✅ LEFT channel playback completed');
+            if (_playbackCompleterLeft != null && !_playbackCompleterLeft!.isCompleted) {
+              _playbackCompleterLeft!.complete();
+            }
+            break;
+            
+          case 'onNativePlaybackStartedLeft':
+            debugPrint('TtsService: ✅ LEFT channel playback started');
+            break;
+            
+          case 'onNativePlaybackCompletedRight':
+            debugPrint('TtsService: ✅ RIGHT channel playback completed');
+            if (_playbackCompleterRight != null && !_playbackCompleterRight!.isCompleted) {
+              _playbackCompleterRight!.complete();
+            }
+            break;
+            
+          case 'onNativePlaybackStartedRight':
+            debugPrint('TtsService: ✅ RIGHT channel playback started');
+            break;
+            
+          default:
+            debugPrint('TtsService: Unknown callback method: ${call.method}');
+        }
+      });
+      debugPrint('TtsService: ✅ Unified method call handler set up for all channels');
 
       // Set up TTS parameters
       await _flutterTts!.setLanguage("en-US");
@@ -363,20 +419,10 @@ class TtsService {
         _playbackCompleter = Completer<void>();
         
         try {
-          // CRITICAL: Set up method call handler for completion callback BEFORE starting playback
-          // This ensures we don't miss the completion notification
-          _nativeAudioChannel.setMethodCallHandler((call) async {
-            if (call.method == 'onNativePlaybackCompleted') {
-              debugPrint('TtsService: ✅ Received native playback completion callback');
-              if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
-                _playbackCompleter!.complete();
-              }
-            } else if (call.method == 'onNativePlaybackStarted') {
-              debugPrint('TtsService: ✅ Native playback started (confirmed by callback)');
-            }
-          });
+          // Note: Method call handler is set up once during initialize()
+          // No need to set it up again here - it's persistent and handles all callbacks
           
-          debugPrint('TtsService: ✅ Completion callback handler set up - starting playback...');
+          debugPrint('TtsService: Starting native playback (using persistent callback handler)...');
           
           // Start native playback
           final success = await _nativeAudioChannel.invokeMethod<bool>(
@@ -518,9 +564,6 @@ class TtsService {
           } catch (timeoutError) {
             debugPrint('TtsService: ⚠️ Playback wait error: $timeoutError');
           }
-        } finally {
-          // Clean up method call handler
-          _nativeAudioChannel.setMethodCallHandler(null);
         }
       } else {
         // Use AudioPlayer (fallback or if native player is disabled)
@@ -543,6 +586,148 @@ class TtsService {
       // Complete the completer if there was an error
       if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
         _playbackCompleter!.complete();
+      }
+    }
+  }
+
+  /// DUAL CHANNEL SUPPORT: Play audio file on specific channel (left or right)
+  /// This enables simultaneous playback of both channels for true parallel translation
+  /// Can be called concurrently for left and right channels using Future.wait()
+  Future<void> playAudioFileOnChannel(String audioPath, String channel) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+
+    if (channel != 'left' && channel != 'right') {
+      debugPrint('TtsService: Invalid channel: $channel. Must be "left" or "right"');
+      return;
+    }
+
+    try {
+      // Check if file exists
+      final file = File(audioPath);
+      if (!await file.exists()) {
+        debugPrint('TtsService: Audio file does not exist: $audioPath');
+        return;
+      }
+
+      final isLeftChannel = channel == 'left';
+      
+      if (isLeftChannel) {
+        _currentAudioPathLeft = audioPath;
+        _isPlayingLeft = true;
+      } else {
+        _currentAudioPathRight = audioPath;
+        _isPlayingRight = true;
+      }
+
+      debugPrint('TtsService: ═══ Playing TTS Audio on ${channel.toUpperCase()} Channel ═══');
+      debugPrint('TtsService: Audio file: $audioPath');
+      debugPrint('TtsService: Channel: $channel');
+      debugPrint('TtsService: Expected output: TWS $channel earpiece via A2DP');
+
+      // Wait for A2DP routing to be ready
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      // Use native player for explicit A2DP routing
+      if (_useNativePlayer) {
+        debugPrint('TtsService: Using native player for $channel channel');
+        
+        if (isLeftChannel) {
+          _playbackCompleterLeft = Completer<void>();
+        } else {
+          _playbackCompleterRight = Completer<void>();
+        }
+        
+        try {
+          // Note: Method call handler is set up once during initialize()
+          // It's persistent and routes callbacks for BOTH channels simultaneously
+          // No need to set it up again here - this enables true parallel playback
+          
+          debugPrint('TtsService: Starting playback on $channel channel (using unified callback handler)...');
+          
+          // CRITICAL: Call native player with channel identifier
+          final success = await _nativeAudioChannel.invokeMethod<bool>(
+            'playAudioFileNativeOnChannel',
+            {
+              'filePath': audioPath,
+              'channel': channel,
+            },
+          );
+          
+          if (success == true) {
+            debugPrint('TtsService: ✅ Native playback initiated on $channel channel');
+            
+            // Wait for completion with timeout
+            try {
+              final completer = isLeftChannel ? _playbackCompleterLeft : _playbackCompleterRight;
+              await completer!.future.timeout(
+                const Duration(seconds: 30),
+                onTimeout: () {
+                  debugPrint('TtsService: ⚠️ Playback timeout on $channel channel (30s)');
+                  if (!completer.isCompleted) {
+                    completer.complete();
+                  }
+                },
+              );
+              debugPrint('TtsService: ✅ Playback completed on $channel channel');
+            } catch (e) {
+              debugPrint('TtsService: ⚠️ Error waiting for playback on $channel: $e');
+            }
+          } else {
+            debugPrint('TtsService: ❌ Failed to start native playback on $channel channel');
+            if (isLeftChannel) {
+              if (_playbackCompleterLeft != null && !_playbackCompleterLeft!.isCompleted) {
+                _playbackCompleterLeft!.complete();
+              }
+            } else {
+              if (_playbackCompleterRight != null && !_playbackCompleterRight!.isCompleted) {
+                _playbackCompleterRight!.complete();
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('TtsService: ❌ Exception in $channel channel playback: $e');
+          if (isLeftChannel) {
+            if (_playbackCompleterLeft != null && !_playbackCompleterLeft!.isCompleted) {
+              _playbackCompleterLeft!.complete();
+            }
+          } else {
+            if (_playbackCompleterRight != null && !_playbackCompleterRight!.isCompleted) {
+              _playbackCompleterRight!.complete();
+            }
+          }
+        }
+      } else {
+        // Fallback to AudioPlayer (legacy, single-channel)
+        debugPrint('TtsService: ⚠️ Using AudioPlayer fallback - channel separation may not work');
+        await _audioPlayer!.play(DeviceFileSource(audioPath));
+      }
+      
+      debugPrint('TtsService: ✅ Playback completed on $channel channel');
+    } catch (e) {
+      debugPrint('TtsService: Error playing audio file on $channel channel: $e');
+      
+      // Complete the completer if there was an error
+      if (channel == 'left') {
+        _isPlayingLeft = false;
+        if (_playbackCompleterLeft != null && !_playbackCompleterLeft!.isCompleted) {
+          _playbackCompleterLeft!.complete();
+        }
+      } else {
+        _isPlayingRight = false;
+        if (_playbackCompleterRight != null && !_playbackCompleterRight!.isCompleted) {
+          _playbackCompleterRight!.complete();
+        }
+      }
+    } finally {
+      // Reset state
+      if (channel == 'left') {
+        _isPlayingLeft = false;
+        _currentAudioPathLeft = null;
+      } else {
+        _isPlayingRight = false;
+        _currentAudioPathRight = null;
       }
     }
   }
@@ -584,7 +769,7 @@ class TtsService {
     }
   }
 
-  /// Stop current TTS playback
+  /// Stop current TTS playback (all channels)
   Future<void> stop() async {
     if (!_isInitialized) return;
 
@@ -592,9 +777,36 @@ class TtsService {
       // Stop both TTS and audio player
       await _flutterTts!.stop();
       await _audioPlayer!.stop();
+      
+      // Reset all playback state (both legacy and dual-channel)
       _isPlaying = false;
       _currentAudioPath = null;
-      debugPrint('TtsService: TTS playback stopped');
+      
+      _isPlayingLeft = false;
+      _isPlayingRight = false;
+      _currentAudioPathLeft = null;
+      _currentAudioPathRight = null;
+      
+      // Complete any pending playback completers
+      if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+        _playbackCompleter!.complete();
+      }
+      if (_playbackCompleterLeft != null && !_playbackCompleterLeft!.isCompleted) {
+        _playbackCompleterLeft!.complete();
+      }
+      if (_playbackCompleterRight != null && !_playbackCompleterRight!.isCompleted) {
+        _playbackCompleterRight!.complete();
+      }
+      
+      // Stop native players on both channels
+      try {
+        await _nativeAudioChannel.invokeMethod('stopNativePlayback', {'channel': 'left'});
+        await _nativeAudioChannel.invokeMethod('stopNativePlayback', {'channel': 'right'});
+      } catch (e) {
+        debugPrint('TtsService: Note: Native player stop failed (may not be implemented yet): $e');
+      }
+      
+      debugPrint('TtsService: TTS playback stopped (all channels)');
     } catch (e) {
       debugPrint('TtsService: Error stopping TTS: $e');
     }
@@ -720,11 +932,30 @@ class TtsService {
   void dispose() {
     _flutterTts?.stop();
     _audioPlayer?.stop();
+    
+    // Clean up method call handler
+    _nativeAudioChannel.setMethodCallHandler(null);
+    
+    // Complete any pending completers to avoid memory leaks
+    if (_playbackCompleter != null && !_playbackCompleter!.isCompleted) {
+      _playbackCompleter!.complete();
+    }
+    if (_playbackCompleterLeft != null && !_playbackCompleterLeft!.isCompleted) {
+      _playbackCompleterLeft!.complete();
+    }
+    if (_playbackCompleterRight != null && !_playbackCompleterRight!.isCompleted) {
+      _playbackCompleterRight!.complete();
+    }
+    
     _flutterTts = null;
     _audioPlayer = null;
     _isInitialized = false;
     _isPlaying = false;
+    _isPlayingLeft = false;
+    _isPlayingRight = false;
     _currentAudioPath = null;
-    debugPrint('TtsService: Disposed');
+    _currentAudioPathLeft = null;
+    _currentAudioPathRight = null;
+    debugPrint('TtsService: Disposed (all channels and handlers cleaned up)');
   }
 }

@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Native Audio Player with explicit Bluetooth A2DP routing
+ * ENHANCED: Supports dual-channel simultaneous playback (left + right)
  * This bypasses Flutter's AudioPlayer to ensure proper routing to TWS
  * Production-ready with proper completion callbacks and error handling
  */
@@ -24,9 +25,22 @@ class NativeAudioPlayer(
         private const val TAG = "NativeAudioPlayer"
     }
 
+    // DUAL CHANNEL SUPPORT: Separate MediaPlayer instances for left and right channels
+    private var mediaPlayerLeft: MediaPlayer? = null
+    private var mediaPlayerRight: MediaPlayer? = null
+    
+    // Legacy single MediaPlayer (for backward compatibility)
     private var mediaPlayer: MediaPlayer? = null
+    
+    private val isPlayingLeft = AtomicBoolean(false)
+    private val isPlayingRight = AtomicBoolean(false)
+    private val isPreparedLeft = AtomicBoolean(false)
+    private val isPreparedRight = AtomicBoolean(false)
+    
+    // Legacy state
     private val isPlaying = AtomicBoolean(false)
     private val isPrepared = AtomicBoolean(false)
+    
     private var playbackCompletionCallback: (() -> Unit)? = null
     private var playbackStarted = false
 
@@ -552,11 +566,230 @@ class NativeAudioPlayer(
     }
 
     /**
-     * Stop playback and release MediaPlayer resources
+     * DUAL CHANNEL SUPPORT: Play audio file on specific channel (left or right)
+     * Enables simultaneous playback on both channels for true parallel translation
+     */
+    fun playAudioFileOnChannel(
+        filePath: String,
+        channel: String,
+        onCompletion: (() -> Unit)? = null
+    ): Boolean {
+        try {
+            val isLeftChannel = (channel == "left")
+            val TAG_CHANNEL = if (isLeftChannel) "$TAG-LEFT" else "$TAG-RIGHT"
+            
+            Log.d(TAG_CHANNEL, "═══ Starting Dual-Channel Playback ═══")
+            Log.d(TAG_CHANNEL, "File: $filePath")
+            Log.d(TAG_CHANNEL, "Channel: $channel")
+            
+            // CRITICAL: Stop any existing playback on this channel
+            stopChannel(channel)
+            var releaseWaitAttempts = 0
+            val targetPlayer = if (isLeftChannel) mediaPlayerLeft else mediaPlayerRight
+            while (targetPlayer != null && releaseWaitAttempts < 20) {
+                Thread.sleep(50)
+                releaseWaitAttempts++
+            }
+            
+            if (isLeftChannel) {
+                if (mediaPlayerLeft != null) {
+                    Log.w(TAG_CHANNEL, "⚠️ MediaPlayer still exists - forcing null")
+                    mediaPlayerLeft = null
+                }
+                isPlayingLeft.set(false)
+                isPreparedLeft.set(false)
+            } else {
+                if (mediaPlayerRight != null) {
+                    Log.w(TAG_CHANNEL, "⚠️ MediaPlayer still exists - forcing null")
+                    mediaPlayerRight = null
+                }
+                isPlayingRight.set(false)
+                isPreparedRight.set(false)
+            }
+
+            // Verify file exists
+            val file = java.io.File(filePath)
+            if (!file.exists()) {
+                Log.e(TAG_CHANNEL, "❌ File does not exist: $filePath")
+                methodChannel?.invokeMethod(
+                    if (isLeftChannel) "onNativePlaybackCompletedLeft" else "onNativePlaybackCompletedRight",
+                    mapOf("error" to true)
+                )
+                onCompletion?.invoke()
+                return false
+            }
+
+            val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+
+            // Create AudioAttributes for A2DP routing
+            val audioAttributes = AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_MEDIA)
+                .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                .build()
+
+            // Create new MediaPlayer
+            val player = MediaPlayer()
+            
+            if (isLeftChannel) {
+                mediaPlayerLeft = player
+            } else {
+                mediaPlayerRight = player
+            }
+            
+            player.setAudioAttributes(audioAttributes)
+            player.setDataSource(filePath)
+
+            // Set up completion listener
+            player.setOnCompletionListener { mp ->
+                Log.d(TAG_CHANNEL, "✅ Playback completed")
+                
+                if (isLeftChannel) {
+                    isPlayingLeft.set(false)
+                    isPreparedLeft.set(false)
+                } else {
+                    isPlayingRight.set(false)
+                    isPreparedRight.set(false)
+                }
+                
+                methodChannel?.invokeMethod(
+                    if (isLeftChannel) "onNativePlaybackCompletedLeft" else "onNativePlaybackCompletedRight",
+                    null
+                )
+                onCompletion?.invoke()
+                
+                try {
+                    mp.release()
+                    if (isLeftChannel) {
+                        mediaPlayerLeft = null
+                    } else {
+                        mediaPlayerRight = null
+                    }
+                } catch (e: Exception) {
+                    Log.w(TAG_CHANNEL, "Error releasing: ${e.message}")
+                }
+            }
+
+            // Set up error listener
+            player.setOnErrorListener { mp, what, extra ->
+                Log.e(TAG_CHANNEL, "❌ Error: what=$what, extra=$extra")
+                
+                if (isLeftChannel) {
+                    isPlayingLeft.set(false)
+                    isPreparedLeft.set(false)
+                } else {
+                    isPlayingRight.set(false)
+                    isPreparedRight.set(false)
+                }
+                
+                methodChannel?.invokeMethod(
+                    if (isLeftChannel) "onNativePlaybackCompletedLeft" else "onNativePlaybackCompletedRight",
+                    mapOf("error" to true)
+                )
+                onCompletion?.invoke()
+                
+                try {
+                    mp.release()
+                    if (isLeftChannel) {
+                        mediaPlayerLeft = null
+                    } else {
+                        mediaPlayerRight = null
+                    }
+                } catch (e: Exception) {}
+                
+                true
+            }
+
+            // Set up prepared listener
+            player.setOnPreparedListener { mp ->
+                Log.d(TAG_CHANNEL, "✅ Prepared - starting playback")
+                
+                if (isLeftChannel) {
+                    isPreparedLeft.set(true)
+                } else {
+                    isPreparedRight.set(true)
+                }
+                
+                // Force A2DP routing
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    val devices = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                    for (device in devices) {
+                        if (device.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP) {
+                            mp.setPreferredDevice(device)
+                            Log.d(TAG_CHANNEL, "✅ A2DP routing set: ${device.productName}")
+                            break
+                        }
+                    }
+                }
+                
+                Log.d(TAG_CHANNEL, "Starting playback...")
+                mp.start()
+                Thread.sleep(100)
+                
+                if (mp.isPlaying) {
+                    if (isLeftChannel) {
+                        isPlayingLeft.set(true)
+                    } else {
+                        isPlayingRight.set(true)
+                    }
+                    Log.d(TAG_CHANNEL, "✅ Playback started")
+                    methodChannel?.invokeMethod(
+                        if (isLeftChannel) "onNativePlaybackStartedLeft" else "onNativePlaybackStartedRight",
+                        null
+                    )
+                }
+            }
+
+            player.prepareAsync()
+            Log.d(TAG_CHANNEL, "✅ Dual-channel playback initiated")
+            return true
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "❌ Error in dual-channel playback: ${e.message}")
+            e.printStackTrace()
+            return false
+        }
+    }
+
+    /**
+     * Stop playback on specific channel
+     */
+    fun stopChannel(channel: String) {
+        try {
+            val isLeftChannel = (channel == "left")
+            val player = if (isLeftChannel) mediaPlayerLeft else mediaPlayerRight
+            
+            if (player != null) {
+                try {
+                    if (player.isPlaying) {
+                        player.stop()
+                    }
+                    player.release()
+                } catch (e: Exception) {
+                    Log.w(TAG, "Error stopping channel: ${e.message}")
+                }
+                
+                if (isLeftChannel) {
+                    mediaPlayerLeft = null
+                    isPlayingLeft.set(false)
+                    isPreparedLeft.set(false)
+                } else {
+                    mediaPlayerRight = null
+                    isPlayingRight.set(false)
+                    isPreparedRight.set(false)
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Error in stopChannel: ${e.message}")
+        }
+    }
+
+    /**
+     * Stop playback and release MediaPlayer resources (all channels)
      * CRITICAL: This must complete before creating a new MediaPlayer instance
      */
     fun stop() {
         try {
+            // Stop legacy player
             val mp = mediaPlayer
             if (mp != null) {
                 try {
@@ -573,8 +806,6 @@ class NativeAudioPlayer(
                     Log.w(TAG, "⚠️ Error checking playback state: ${e.message}")
                 }
                 
-                // CRITICAL: Remove all listeners before release to prevent callbacks
-                // during cleanup
                 try {
                     mp.setOnPreparedListener(null)
                     mp.setOnCompletionListener(null)
@@ -584,7 +815,6 @@ class NativeAudioPlayer(
                     Log.w(TAG, "⚠️ Error clearing listeners: ${e.message}")
                 }
                 
-                // CRITICAL: Release MediaPlayer resources
                 try {
                     mp.release()
                     Log.d(TAG, "✅ MediaPlayer released")
@@ -597,14 +827,25 @@ class NativeAudioPlayer(
                 isPrepared.set(false)
                 playbackStarted = false
             }
+            
+            // Stop dual-channel players
+            stopChannel("left")
+            stopChannel("right")
+            
             playbackCompletionCallback = null
-            Log.d(TAG, "✅ Stop complete - MediaPlayer state cleared")
+            Log.d(TAG, "✅ Stop complete - all MediaPlayers cleared")
         } catch (e: Exception) {
             Log.e(TAG, "❌ Error in stop(): ${e.message}", e)
-            // Force cleanup even on error
+            // Force cleanup
             mediaPlayer = null
+            mediaPlayerLeft = null
+            mediaPlayerRight = null
             isPlaying.set(false)
             isPrepared.set(false)
+            isPlayingLeft.set(false)
+            isPreparedLeft.set(false)
+            isPlayingRight.set(false)
+            isPreparedRight.set(false)
             playbackStarted = false
             playbackCompletionCallback = null
         }

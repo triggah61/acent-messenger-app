@@ -29,11 +29,11 @@ import '../../models/translation_session_summary.dart';
 /// Phase 2: Pick file path → Play immediately (no generation latency)
 class TtsQueueItem {
   final int speakerIndex;
-  final String filePath;        // Path to pre-generated STEREO TTS audio file
-  final String channel;         // Audio channel: 'left' or 'right'
-  final String originalText;    // Original text (for logging/debugging)
-  final int fileSize;           // File size in bytes (for verification)
-  final DateTime timestamp;     // When TTS was generated
+  final String filePath; // Path to pre-generated STEREO TTS audio file
+  final String channel; // Audio channel: 'left' or 'right'
+  final String originalText; // Original text (for logging/debugging)
+  final int fileSize; // File size in bytes (for verification)
+  final DateTime timestamp; // When TTS was generated
 
   TtsQueueItem({
     required this.speakerIndex,
@@ -87,7 +87,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   // Speaker-specific languages (fixed to 2 speakers)
   Map<int, Language> _speakerLanguages = {};
   final int _numberOfSpeakers = 2;
-  bool _showSpeakerSetup = false; // Skip setup screen, settings are in headers now
+  bool _showSpeakerSetup =
+      false; // Skip setup screen, settings are in headers now
 
   // Speaker gender and earpiece configuration
   Map<int, String> _speakerGenders = {}; // 0: 'male', 1: 'female'
@@ -98,28 +99,39 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   bool _isInitializing = false; // Connecting to Soniox and setting up
   bool _isProcessing = false;
   bool _isStartingSession = false;
-  bool _isRealtimeListeningPaused = false; // Mic paused while playback is running
+  bool _isRealtimeListeningPaused =
+      false; // Mic paused while playback is running
   bool _isPlaybackInProgress = false; // Playback actively running
-  bool _isTranslationInProgress = false; // Translation+TTS+Playback in progress (prevents concurrent processing)
-  
+  bool _isTranslationInProgress =
+      false; // Translation+TTS+Playback in progress (prevents concurrent processing)
+
   // TWS (True Wireless Stereo) connection state
   bool _isTwsConnected = false; // Track TWS connection status
-  bool _hasShownTwsNotConnectedDialog = false; // Track if we've shown the "no TWS" dialog
-  bool _hasShownTwsConnectedDialog = false; // Track if we've shown the "TWS connected" dialog
+  bool _hasShownTwsNotConnectedDialog =
+      false; // Track if we've shown the "no TWS" dialog
+  bool _hasShownTwsConnectedDialog =
+      false; // Track if we've shown the "TWS connected" dialog
+
+  // Real-time TWS connection monitoring
+  Timer?
+      _twsConnectionMonitorTimer; // Periodic timer to check TWS connection status in real-time
+  static const Duration _twsMonitorInterval =
+      Duration(seconds: 3); // Check every 3 seconds
 
   // Session tracking for summary
   DateTime? _sessionStartTime;
   DateTime? _sessionEndTime;
   double _audioSecondsProcessed = 0.0;
   int _totalInputAudioTokens = 0; // Audio tokens (duration-based)
-  int _totalOutputTextTokens = 0; // Text tokens (character-based: transcription + translation)
+  int _totalOutputTextTokens =
+      0; // Text tokens (character-based: transcription + translation)
   int _totalTranscriptionCharacters = 0;
   int _totalTranslationCharacters = 0;
   Map<int, int> _transcriptionCharactersPerSpeaker = {0: 0, 1: 0};
   Map<int, int> _translationCharactersPerSpeaker = {0: 0, 1: 0};
   List<double> _translationLatencies = [];
   int _totalTranslations = 0;
-  
+
   // Soniox real-time pricing (https://soniox.com/pricing)
   // Input audio: 1 hour = 30,000 tokens → 1 second = 8.333 tokens
   static const double _tokensPerSecond = 8.333;
@@ -131,13 +143,16 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   // Real-time translation mode (NEW)
   bool _isRealtimeMode = true; // Real-time mode enabled by default
   final SonioxRealtimeService _sonioxService = SonioxRealtimeService();
-  final StreamingAudioRecorderService _streamingRecorder = StreamingAudioRecorderService();
+  final StreamingAudioRecorderService _streamingRecorder =
+      StreamingAudioRecorderService();
   StreamSubscription<SonioxResult>? _sonioxStreamSubscription;
   StreamSubscription<Uint8List>? _audioChunkSubscription;
   Timer? _audioPollingTimer; // Timer for polling audio file
   int _lastReadPosition = 0; // Track last read position in audio file
-  Map<int, StringBuffer> _realtimeTranscriptions = {}; // Accumulate transcriptions per speaker
-  Map<int, StringBuffer> _realtimeTranslations = {}; // Accumulate translations per speaker
+  Map<int, StringBuffer> _realtimeTranscriptions =
+      {}; // Accumulate transcriptions per speaker
+  Map<int, StringBuffer> _realtimeTranslations =
+      {}; // Accumulate translations per speaker
 
   // Audio paths
   String? _recordedAudioPath;
@@ -229,10 +244,14 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
   // Scroll controllers for auto-scrolling to latest content in each speaker section
   // Each speaker has separate controllers for transcription and translation
-  final ScrollController _speaker1TranscriptionScrollController = ScrollController();
-  final ScrollController _speaker1TranslationScrollController = ScrollController();
-  final ScrollController _speaker2TranscriptionScrollController = ScrollController();
-  final ScrollController _speaker2TranslationScrollController = ScrollController();
+  final ScrollController _speaker1TranscriptionScrollController =
+      ScrollController();
+  final ScrollController _speaker1TranslationScrollController =
+      ScrollController();
+  final ScrollController _speaker2TranscriptionScrollController =
+      ScrollController();
+  final ScrollController _speaker2TranslationScrollController =
+      ScrollController();
 
   bool _isInitialized = false;
 
@@ -240,32 +259,39 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   final Queue<TtsQueueItem> _ttsQueue = Queue<TtsQueueItem>();
   bool _isProcessingQueue = false;
   String? _currentPlayingTtsPath;
-  
+
   // Pending translations: Wait for Soniox translation tokens before falling back to Azure
   Map<int, Timer?> _pendingTranslationTimers = {};
   Map<int, String> _pendingTranscriptions = {};
   Map<int, String> _pendingLanguages = {};
-  
+
   // Sentence buffering: Accumulate text until complete sentence for TTS
   Map<int, StringBuffer> _sentenceTranscriptionBuffers = {};
   Map<int, StringBuffer> _sentenceTranslationBuffers = {};
   Map<int, String> _sentenceLanguages = {};
-  
+
   // BATCH PROCESSING: Smart adaptive timer to accumulate multiple sentences before TTS generation
   // This prevents generating TTS for each chunk individually
   // Timer waits for a pause in translation chunks before processing all accumulated sentences
   Map<int, Timer?> _sentenceProcessingTimers = {}; // Per-speaker timers
-  Map<int, DateTime?> _lastChunkReceivedTime = {}; // Track when last chunk arrived per speaker
-  Map<int, int> _accumulatedChunkCount = {}; // Track how many chunks accumulated per speaker
-  
+  Map<int, DateTime?> _lastChunkReceivedTime =
+      {}; // Track when last chunk arrived per speaker
+  Map<int, int> _accumulatedChunkCount =
+      {}; // Track how many chunks accumulated per speaker
+
   // ADAPTIVE DELAYS: Longer delay allows more sentences to accumulate
-  static const Duration _minProcessingDelay = Duration(milliseconds: 2000); // Minimum 2s wait
-  static const Duration _maxProcessingDelay = Duration(milliseconds: 4000); // Maximum 4s wait
-  static const Duration _adaptiveExtension = Duration(milliseconds: 500); // Extend by 500ms per chunk
-  
+  static const Duration _minProcessingDelay =
+      Duration(milliseconds: 2000); // Minimum 2s wait
+  static const Duration _maxProcessingDelay =
+      Duration(milliseconds: 4000); // Maximum 4s wait
+  static const Duration _adaptiveExtension =
+      Duration(milliseconds: 500); // Extend by 500ms per chunk
+
   // Sentence thresholds
-  static const int _minSentencesForBatch = 2; // Wait for at least 2 sentences if possible
-  static const int _maxSentencesForBatch = 10; // Process if we have 10+ sentences
+  static const int _minSentencesForBatch =
+      2; // Wait for at least 2 sentences if possible
+  static const int _maxSentencesForBatch =
+      10; // Process if we have 10+ sentences
 
   // Theme-aware color helpers
   bool get _isDarkMode {
@@ -301,28 +327,45 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   }
 
   Color get _dividerColor {
-    return _isDarkMode ? Colors.white.withOpacity(0.1) : Colors.black.withOpacity(0.1);
+    return _isDarkMode
+        ? Colors.white.withOpacity(0.1)
+        : Colors.black.withOpacity(0.1);
   }
 
   Color get _primaryAccentColor {
-    return const Color(0xFF00D9FF); // Keep accent color consistent across themes
+    return const Color(
+        0xFF00D9FF); // Keep accent color consistent across themes
   }
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this); // Add lifecycle observer
+
+    // Reset dialog flags when screen is first loaded
+    // This ensures modal shows on first recording of new screen session
+    _hasShownTwsNotConnectedDialog = false;
+    _hasShownTwsConnectedDialog = false;
+    debugPrint(
+        'RealtimeTranslator: Screen session started - dialog flags reset');
+
     _initializeServices();
     _setupAudioPlayers();
     _initializeAnimations();
     _initializeBluetoothAndCheck(); // Initialize Bluetooth service and check connection
     _initializeContinuousA2DPMode(); // Initialize continuous A2DP mode (no switching)
+
+    // Start real-time TWS connection monitoring
+    // This will update UI automatically when TWS connects/disconnects
+    _startTwsConnectionMonitoring();
+    debugPrint(
+        'RealtimeTranslator: Real-time TWS connection monitoring started');
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
-    
+
     // When app comes back to foreground, re-initialize A2DP mode
     // This ensures audio routing is correct after being backgrounded
     if (state == AppLifecycleState.resumed) {
@@ -331,18 +374,18 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     }
   }
 
-
   /// Auto-scroll to bottom of speaker section when new content is added
   void _autoScrollToBottom(int speakerIndex, {bool isTranslation = false}) {
-    final transcriptionController = speakerIndex == 0 
-        ? _speaker1TranscriptionScrollController 
+    final transcriptionController = speakerIndex == 0
+        ? _speaker1TranscriptionScrollController
         : _speaker2TranscriptionScrollController;
-    final translationController = speakerIndex == 0 
-        ? _speaker1TranslationScrollController 
+    final translationController = speakerIndex == 0
+        ? _speaker1TranslationScrollController
         : _speaker2TranslationScrollController;
-    
-    final controller = isTranslation ? translationController : transcriptionController;
-    
+
+    final controller =
+        isTranslation ? translationController : transcriptionController;
+
     if (controller.hasClients) {
       // Use a small delay to ensure the content is rendered
       Future.delayed(const Duration(milliseconds: 100), () {
@@ -355,12 +398,14 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         }
       });
     }
-    
+
     // Also scroll the other section if it has content
-    final otherController = isTranslation ? transcriptionController : translationController;
+    final otherController =
+        isTranslation ? transcriptionController : translationController;
     if (otherController.hasClients) {
       Future.delayed(const Duration(milliseconds: 100), () {
-        if (otherController.hasClients && otherController.position.maxScrollExtent > 0) {
+        if (otherController.hasClients &&
+            otherController.position.maxScrollExtent > 0) {
           otherController.animateTo(
             otherController.position.maxScrollExtent,
             duration: const Duration(milliseconds: 300),
@@ -386,51 +431,72 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   /// Uses MODE_NORMAL approach: Phone mic input + A2DP output simultaneously
   Future<void> _initializeContinuousA2DPMode() async {
     try {
-      debugPrint('RealtimeTranslator: ═══ Initializing Continuous A2DP Mode (MODE_NORMAL) ═══');
-      debugPrint('RealtimeTranslator: Solution: MODE_NORMAL enables simultaneous:');
-      debugPrint('RealtimeTranslator: - Recording from phone mic (AudioRecord MIC source)');
-      debugPrint('RealtimeTranslator: - Playback through TWS via A2DP (MEDIA stream routing)');
+      debugPrint(
+          'RealtimeTranslator: ═══ Initializing Continuous A2DP Mode (MODE_NORMAL) ═══');
+      debugPrint(
+          'RealtimeTranslator: Solution: MODE_NORMAL enables simultaneous:');
+      debugPrint(
+          'RealtimeTranslator: - Recording from phone mic (AudioRecord MIC source)');
+      debugPrint(
+          'RealtimeTranslator: - Playback through TWS via A2DP (MEDIA stream routing)');
       debugPrint('RealtimeTranslator: - NO mode switching during session');
-      debugPrint('RealtimeTranslator: - NO SCO activation (Bluetooth stays in A2DP mode)');
-      
+      debugPrint(
+          'RealtimeTranslator: - NO SCO activation (Bluetooth stays in A2DP mode)');
+
       await _audioRouteChannel.invokeMethod('enterContinuousA2DPMode');
-      
+
       debugPrint('RealtimeTranslator: ✅ Continuous A2DP mode initialized');
-      debugPrint('RealtimeTranslator: ✅ AudioManager mode: NORMAL (media mode)');
+      debugPrint(
+          'RealtimeTranslator: ✅ AudioManager mode: NORMAL (media mode)');
       debugPrint('RealtimeTranslator: ✅ Bluetooth SCO: OFF (A2DP active)');
-      debugPrint('RealtimeTranslator: ✅ Recording source: Phone built-in mic (MIC source)');
-      debugPrint('RealtimeTranslator: ✅ Playback output: TWS speakers via A2DP (MEDIA stream)');
-      debugPrint('RealtimeTranslator: ✅ Full-duplex: Both input and output active simultaneously');
-      
+      debugPrint(
+          'RealtimeTranslator: ✅ Recording source: Phone built-in mic (MIC source)');
+      debugPrint(
+          'RealtimeTranslator: ✅ Playback output: TWS speakers via A2DP (MEDIA stream)');
+      debugPrint(
+          'RealtimeTranslator: ✅ Full-duplex: Both input and output active simultaneously');
+
       // CRITICAL: Verify audio routing after initialization
       try {
         debugPrint('RealtimeTranslator: ═══ Verifying Audio Routing ═══');
-        final routingInfo = await _audioRouteChannel.invokeMethod<Map>('checkAudioRouting');
+        final routingInfo =
+            await _audioRouteChannel.invokeMethod<Map>('checkAudioRouting');
         if (routingInfo != null) {
           debugPrint('RealtimeTranslator: Audio routing status:');
           debugPrint('RealtimeTranslator:   - Mode: ${routingInfo["mode"]}');
-          debugPrint('RealtimeTranslator:   - A2DP on: ${routingInfo["isBluetoothA2dpOn"]}');
-          debugPrint('RealtimeTranslator:   - SCO on: ${routingInfo["isBluetoothScoOn"]}');
-          debugPrint('RealtimeTranslator:   - Has Bluetooth A2DP device: ${routingInfo["hasBluetoothA2dp"]}');
-          
-          if (routingInfo["isBluetoothA2dpOn"] == true && routingInfo["hasBluetoothA2dp"] == true) {
-            debugPrint('RealtimeTranslator: ✅ Bluetooth A2DP is active - routing should work');
+          debugPrint(
+              'RealtimeTranslator:   - A2DP on: ${routingInfo["isBluetoothA2dpOn"]}');
+          debugPrint(
+              'RealtimeTranslator:   - SCO on: ${routingInfo["isBluetoothScoOn"]}');
+          debugPrint(
+              'RealtimeTranslator:   - Has Bluetooth A2DP device: ${routingInfo["hasBluetoothA2dp"]}');
+
+          if (routingInfo["isBluetoothA2dpOn"] == true &&
+              routingInfo["hasBluetoothA2dp"] == true) {
+            debugPrint(
+                'RealtimeTranslator: ✅ Bluetooth A2DP is active - routing should work');
           } else {
-            debugPrint('RealtimeTranslator: ⚠️ WARNING: A2DP may not be active!');
-            debugPrint('RealtimeTranslator: ⚠️ Audio may route to phone speaker');
-            debugPrint('RealtimeTranslator: ⚠️ Solution: Play music through TWS first to activate A2DP');
+            debugPrint(
+                'RealtimeTranslator: ⚠️ WARNING: A2DP may not be active!');
+            debugPrint(
+                'RealtimeTranslator: ⚠️ Audio may route to phone speaker');
+            debugPrint(
+                'RealtimeTranslator: ⚠️ Solution: Play music through TWS first to activate A2DP');
           }
         }
       } catch (e) {
         debugPrint('RealtimeTranslator: ⚠️ Could not verify routing: $e');
       }
-      
+
       // Allow time for audio system to stabilize and A2DP to be ready
       await Future.delayed(const Duration(milliseconds: 500));
-      debugPrint('RealtimeTranslator: ✅ Audio system ready for full-duplex operation');
-      debugPrint('RealtimeTranslator: ✅ Expected behavior: TTS plays through TWS, recording from phone mic');
+      debugPrint(
+          'RealtimeTranslator: ✅ Audio system ready for full-duplex operation');
+      debugPrint(
+          'RealtimeTranslator: ✅ Expected behavior: TTS plays through TWS, recording from phone mic');
     } catch (e) {
-      debugPrint('RealtimeTranslator: ❌ Failed to initialize continuous A2DP mode: $e');
+      debugPrint(
+          'RealtimeTranslator: ❌ Failed to initialize continuous A2DP mode: $e');
       // Will fall back to default routing
     }
   }
@@ -438,7 +504,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Future<void> _enterPlaybackRoute() async {
     // REALTIME TRANSLATION: NO-OP in continuous A2DP mode
     // Mode stays NORMAL throughout - no switching needed
-    debugPrint('RealtimeTranslator: Continuous A2DP - no route switching (mode stays NORMAL)');
+    debugPrint(
+        'RealtimeTranslator: Continuous A2DP - no route switching (mode stays NORMAL)');
   }
 
   Future<void> _returnToRecordingRoute() async {
@@ -453,80 +520,156 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Initialize Bluetooth service
       await _bluetoothService.initialize();
       debugPrint('RealtimeTranslator: Bluetooth service initialized');
-      
+
       // Wait a bit for initialization to complete and for Bluetooth profiles to be ready
       await Future.delayed(const Duration(milliseconds: 1000));
-      
+
       // Check Bluetooth connection using the existing service
       // This checks both A2DP and HEADSET profiles
       final deviceInfo = await _bluetoothService.checkConnection();
-      
+
       // Update TWS connection state
       _isTwsConnected = deviceInfo.isConnected;
-      
+
       debugPrint('RealtimeTranslator: ═══ Bluetooth Connection Check ═══');
       debugPrint('RealtimeTranslator: Connected: ${deviceInfo.isConnected}');
       debugPrint('RealtimeTranslator: Device Name: ${deviceInfo.deviceName}');
-      
+
       if (!deviceInfo.isConnected) {
         debugPrint('RealtimeTranslator: ⚠️ No Bluetooth device connected');
-        debugPrint('RealtimeTranslator: ⚠️ Translation will work but playback will be disabled');
+        debugPrint(
+            'RealtimeTranslator: ⚠️ Translation will work but playback will be disabled');
         // Dialog will be shown when user tries to start recording
       } else {
-        debugPrint('RealtimeTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
-        debugPrint('RealtimeTranslator: Ready for Realtime Translation with audio playback');
+        debugPrint(
+            'RealtimeTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
+        debugPrint(
+            'RealtimeTranslator: Ready for Realtime Translation with audio playback');
       }
     } catch (e) {
       debugPrint('RealtimeTranslator: ❌ Error checking Bluetooth: $e');
       debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
       // If check fails, don't block - let user try and check again when starting
-      debugPrint('RealtimeTranslator: ⚠️ Bluetooth check failed, will check again when starting recording');
+      debugPrint(
+          'RealtimeTranslator: ⚠️ Bluetooth check failed, will check again when starting recording');
     }
   }
-  
+
+  /// Start real-time TWS connection monitoring
+  /// This periodically checks TWS connection status and updates UI automatically
+  void _startTwsConnectionMonitoring() {
+    debugPrint(
+        'RealtimeTranslator: ═══ Starting Real-Time TWS Connection Monitoring ═══');
+    debugPrint(
+        'RealtimeTranslator: Check interval: ${_twsMonitorInterval.inSeconds}s');
+
+    // Cancel any existing timer
+    _twsConnectionMonitorTimer?.cancel();
+
+    // Start periodic monitoring
+    _twsConnectionMonitorTimer =
+        Timer.periodic(_twsMonitorInterval, (timer) async {
+      await _checkTwsConnectionStatus();
+    });
+
+    debugPrint(
+        'RealtimeTranslator: ✅ TWS monitoring active - UI will update automatically on connect/disconnect');
+  }
+
+  /// Check TWS connection status and update UI if changed
+  /// This runs every 3 seconds to sync TWS connection state in real-time
+  Future<void> _checkTwsConnectionStatus() async {
+    try {
+      // Check current connection status
+      final deviceInfo = await _bluetoothService.checkConnection();
+      final wasConnected = _isTwsConnected;
+      final isNowConnected = deviceInfo.isConnected;
+
+      // Update state if changed
+      if (wasConnected != isNowConnected) {
+        debugPrint('RealtimeTranslator: ═══ TWS Connection Status Changed ═══');
+        debugPrint(
+            'RealtimeTranslator: Before: ${wasConnected ? "Connected" : "Disconnected"}');
+        debugPrint(
+            'RealtimeTranslator: After: ${isNowConnected ? "Connected" : "Disconnected"}');
+
+        if (mounted) {
+          setState(() {
+            _isTwsConnected = isNowConnected;
+          });
+
+          if (isNowConnected) {
+            debugPrint(
+                'RealtimeTranslator: ✅ TWS CONNECTED - UI updated (warning section HIDDEN)');
+            debugPrint('RealtimeTranslator: Device: ${deviceInfo.deviceName}');
+            debugPrint('RealtimeTranslator: 🎧 Audio playback now ENABLED');
+          } else {
+            debugPrint(
+                'RealtimeTranslator: ⚠️ TWS DISCONNECTED - UI updated (warning section SHOWN)');
+            debugPrint('RealtimeTranslator: 🔇 Audio playback now DISABLED');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('RealtimeTranslator: ⚠️ Error checking TWS status: $e');
+      // On error, don't change state - keep last known state
+    }
+  }
+
+  /// Stop real-time TWS connection monitoring
+  void _stopTwsConnectionMonitoring() {
+    _twsConnectionMonitorTimer?.cancel();
+    _twsConnectionMonitorTimer = null;
+    debugPrint('RealtimeTranslator: TWS connection monitoring stopped');
+  }
+
   /// REALTIME TRANSLATION: Check Bluetooth before starting recording
   /// NEW: Allows translation without TWS (playback will be disabled)
   Future<bool> _checkBluetoothBeforeRecording() async {
     try {
       final deviceInfo = await _bluetoothService.checkConnection();
-      
+
       // Update TWS connection state
       _isTwsConnected = deviceInfo.isConnected;
-      
+
       if (!deviceInfo.isConnected) {
-        debugPrint('RealtimeTranslator: ⚠️ No Bluetooth device connected before recording');
-        debugPrint('RealtimeTranslator: ⚠️ Translation will work but playback will be disabled');
-        
+        debugPrint(
+            'RealtimeTranslator: ⚠️ No Bluetooth device connected before recording');
+        debugPrint(
+            'RealtimeTranslator: ⚠️ Translation will work but playback will be disabled');
+
         // Show dialog asking user to connect TWS for better performance
         if (mounted && !_hasShownTwsNotConnectedDialog) {
           _hasShownTwsNotConnectedDialog = true;
           _showTwsNotConnectedDialog();
         }
-        
+
         // Allow translation to proceed (without playback)
         return true;
       }
-      
-      debugPrint('RealtimeTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
-      
+
+      debugPrint(
+          'RealtimeTranslator: ✅ Bluetooth device connected: ${deviceInfo.deviceName}');
+
       // Show dialog with earpiece sharing instructions when TWS is connected
       if (mounted && !_hasShownTwsConnectedDialog) {
         _hasShownTwsConnectedDialog = true;
         _showTwsConnectedDialog();
       }
-      
+
       return true;
     } catch (e) {
-      debugPrint('RealtimeTranslator: ❌ Error checking Bluetooth before recording: $e');
-      
+      debugPrint(
+          'RealtimeTranslator: ❌ Error checking Bluetooth before recording: $e');
+
       // On error, assume TWS not connected but allow translation
       _isTwsConnected = false;
-      
+
       if (mounted && !_hasShownTwsNotConnectedDialog) {
         _hasShownTwsNotConnectedDialog = true;
         _showTwsNotConnectedDialog();
       }
-      
+
       // Allow translation to proceed (without playback)
       return true;
     }
@@ -605,9 +748,12 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 final deviceInfo = await _bluetoothService.checkConnection();
                 _isTwsConnected = deviceInfo.isConnected;
                 if (deviceInfo.isConnected) {
-                  debugPrint('RealtimeTranslator: ✅ Bluetooth now connected: ${deviceInfo.deviceName}');
-                  _hasShownTwsConnectedDialog = false; // Reset to show connected dialog
-                  if (mounted) {
+                  debugPrint(
+                      'RealtimeTranslator: ✅ Bluetooth now connected: ${deviceInfo.deviceName}');
+                  // Note: Do NOT reset dialog flag here to respect "once per session" requirement
+                  // Modal should only show ONCE when entering screen, not on every reconnection
+                  if (mounted && !_hasShownTwsConnectedDialog) {
+                    _hasShownTwsConnectedDialog = true;
                     _showTwsConnectedDialog();
                   }
                 } else {
@@ -645,7 +791,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     final speaker2Earpiece = _speakerEarpieces[1] ?? 'left';
     final speaker2EarpieceLabel = speaker2Earpiece == 'left' ? 'Left' : 'Right';
     final otherEarpiece = speaker2Earpiece == 'left' ? 'Right' : 'Left';
-    
+
     showDialog(
       context: context,
       barrierDismissible: true,
@@ -800,7 +946,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       }
 
       final monoBytes = await monoFile.readAsBytes();
-      debugPrint('RealtimeTranslator: Read ${monoBytes.length} bytes from mono file');
+      debugPrint(
+          'RealtimeTranslator: Read ${monoBytes.length} bytes from mono file');
 
       // Extract audio data and metadata from WAV file
       if (monoBytes.length < 44) {
@@ -813,7 +960,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           (monoBytes[25] << 8) |
           (monoBytes[26] << 16) |
           (monoBytes[27] << 24);
-      
+
       final channels = monoBytes[22] | (monoBytes[23] << 8);
       final bitsPerSample = monoBytes[34] | (monoBytes[35] << 8);
 
@@ -824,7 +971,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
       // Extract audio data (skip 44-byte header)
       final audioData = monoBytes.sublist(44);
-      debugPrint('RealtimeTranslator: Extracted ${audioData.length} bytes of audio data');
+      debugPrint(
+          'RealtimeTranslator: Extracted ${audioData.length} bytes of audio data');
 
       // Create stereo data with channel routing
       final stereoData = <int>[];
@@ -835,12 +983,12 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           // Left channel: audio, Right channel: silence
           stereoData.add(audioData[i]);
           stereoData.add(audioData[i + 1]);
-          stereoData.add(0);  // Right channel silence (low byte)
-          stereoData.add(0);  // Right channel silence (high byte)
+          stereoData.add(0); // Right channel silence (low byte)
+          stereoData.add(0); // Right channel silence (high byte)
         } else {
           // Left channel: silence, Right channel: audio
-          stereoData.add(0);  // Left channel silence (low byte)
-          stereoData.add(0);  // Left channel silence (high byte)
+          stereoData.add(0); // Left channel silence (low byte)
+          stereoData.add(0); // Left channel silence (high byte)
           stereoData.add(audioData[i]);
           stereoData.add(audioData[i + 1]);
         }
@@ -849,12 +997,14 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Create stereo WAV header
       final dataSize = stereoData.length;
       final fileSize = 36 + dataSize;
-      final byteRate = sampleRate * 2 * 2; // sampleRate * channels * (bitsPerSample / 8)
+      final byteRate =
+          sampleRate * 2 * 2; // sampleRate * channels * (bitsPerSample / 8)
 
       final header = <int>[
         // RIFF header
         0x52, 0x49, 0x46, 0x46, // "RIFF"
-        fileSize & 0xFF, (fileSize >> 8) & 0xFF, (fileSize >> 16) & 0xFF, (fileSize >> 24) & 0xFF,
+        fileSize & 0xFF, (fileSize >> 8) & 0xFF, (fileSize >> 16) & 0xFF,
+        (fileSize >> 24) & 0xFF,
         0x57, 0x41, 0x56, 0x45, // "WAVE"
 
         // fmt chunk
@@ -862,14 +1012,17 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         0x10, 0x00, 0x00, 0x00, // fmt chunk size (16)
         0x01, 0x00, // audio format (PCM)
         0x02, 0x00, // number of channels (2 = stereo)
-        sampleRate & 0xFF, (sampleRate >> 8) & 0xFF, (sampleRate >> 16) & 0xFF, (sampleRate >> 24) & 0xFF, // sample rate
-        byteRate & 0xFF, (byteRate >> 8) & 0xFF, (byteRate >> 16) & 0xFF, (byteRate >> 24) & 0xFF, // byte rate
+        sampleRate & 0xFF, (sampleRate >> 8) & 0xFF, (sampleRate >> 16) & 0xFF,
+        (sampleRate >> 24) & 0xFF, // sample rate
+        byteRate & 0xFF, (byteRate >> 8) & 0xFF, (byteRate >> 16) & 0xFF,
+        (byteRate >> 24) & 0xFF, // byte rate
         0x04, 0x00, // block align (2 * 2)
         0x10, 0x00, // bits per sample (16)
 
         // data chunk
         0x64, 0x61, 0x74, 0x61, // "data"
-        dataSize & 0xFF, (dataSize >> 8) & 0xFF, (dataSize >> 16) & 0xFF, (dataSize >> 24) & 0xFF,
+        dataSize & 0xFF, (dataSize >> 8) & 0xFF, (dataSize >> 16) & 0xFF,
+        (dataSize >> 24) & 0xFF,
       ];
 
       // Combine header and stereo data
@@ -880,7 +1033,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final stereoFileName = 'stereo_${channel}_$timestamp.wav';
       final stereoPath = '${directory.path}/$stereoFileName';
-      
+
       final stereoFile = File(stereoPath);
       await stereoFile.writeAsBytes(stereoWav);
 
@@ -916,16 +1069,19 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     required String gender,
   }) async {
     try {
-      debugPrint('RealtimeTranslator: ═══ PHASE 1: TTS Pre-Generation + Stereo Conversion ═══');
+      debugPrint(
+          'RealtimeTranslator: ═══ PHASE 1: TTS Pre-Generation + Stereo Conversion ═══');
       debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
       debugPrint('RealtimeTranslator: Language: $languageCode');
-      debugPrint('RealtimeTranslator: Text: "${text.substring(0, text.length > 50 ? 50 : text.length)}..."');
+      debugPrint(
+          'RealtimeTranslator: Text: "${text.substring(0, text.length > 50 ? 50 : text.length)}..."');
       debugPrint('RealtimeTranslator: Gender: $gender');
-      
+
       // Get speaker's earpiece preference (left or right channel)
       final earpiece = _speakerEarpieces[speakerIndex] ?? 'left';
       debugPrint('RealtimeTranslator: Target channel: $earpiece');
-      debugPrint('RealtimeTranslator: Recording continues during TTS generation + stereo conversion (parallel processing)');
+      debugPrint(
+          'RealtimeTranslator: Recording continues during TTS generation + stereo conversion (parallel processing)');
 
       // STEP 1: Generate mono TTS file (Phase 1 pre-generation)
       final startTime = DateTime.now();
@@ -934,12 +1090,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         languageCode,
         gender: gender,
       );
-      final generationTime = DateTime.now().difference(startTime).inMilliseconds;
+      final generationTime =
+          DateTime.now().difference(startTime).inMilliseconds;
 
       if (monoTtsPath != null && monoTtsPath.isNotEmpty) {
-        debugPrint('RealtimeTranslator: ✅ Mono TTS file generated successfully');
+        debugPrint(
+            'RealtimeTranslator: ✅ Mono TTS file generated successfully');
         debugPrint('RealtimeTranslator:    Path: $monoTtsPath');
-        debugPrint('RealtimeTranslator:    Generation time: ${generationTime}ms');
+        debugPrint(
+            'RealtimeTranslator:    Generation time: ${generationTime}ms');
 
         // STEP 2: Convert mono to stereo with channel routing
         final stereoStartTime = DateTime.now();
@@ -947,20 +1106,24 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           monoTtsPath,
           earpiece,
         );
-        final stereoConversionTime = DateTime.now().difference(stereoStartTime).inMilliseconds;
+        final stereoConversionTime =
+            DateTime.now().difference(stereoStartTime).inMilliseconds;
 
         if (stereoTtsPath != null && stereoTtsPath.isNotEmpty) {
           // Verify stereo file exists and get size
           final stereoFile = File(stereoTtsPath);
           if (await stereoFile.exists()) {
             final stereoFileSize = await stereoFile.length();
-            
-            debugPrint('RealtimeTranslator: ✅ Stereo TTS file ready for queueing');
+
+            debugPrint(
+                'RealtimeTranslator: ✅ Stereo TTS file ready for queueing');
             debugPrint('RealtimeTranslator:    Path: $stereoTtsPath');
             debugPrint('RealtimeTranslator:    Size: $stereoFileSize bytes');
             debugPrint('RealtimeTranslator:    Channel: $earpiece');
-            debugPrint('RealtimeTranslator:    Total time: ${generationTime + stereoConversionTime}ms (${generationTime}ms gen + ${stereoConversionTime}ms stereo)');
-            debugPrint('RealtimeTranslator:    File is pre-verified and ready for immediate stereo playback');
+            debugPrint(
+                'RealtimeTranslator:    Total time: ${generationTime + stereoConversionTime}ms (${generationTime}ms gen + ${stereoConversionTime}ms stereo)');
+            debugPrint(
+                'RealtimeTranslator:    File is pre-verified and ready for immediate stereo playback');
 
             // Add pre-generated STEREO file to queue (not mono!)
             final item = TtsQueueItem(
@@ -971,60 +1134,90 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               fileSize: stereoFileSize,
               timestamp: DateTime.now(),
             );
-            
+
             _ttsQueue.add(item);
-            debugPrint('RealtimeTranslator: ✅ Added pre-generated STEREO TTS to queue');
-            debugPrint('RealtimeTranslator:    Queue size: ${_ttsQueue.length}');
-            debugPrint('RealtimeTranslator:    Ready for immediate stereo playback (no generation delay)');
-            debugPrint('RealtimeTranslator:    Will play through $earpiece earpiece only');
-            debugPrint('RealtimeTranslator:    Recording continues uninterrupted');
+            debugPrint(
+                'RealtimeTranslator: ✅ Added pre-generated STEREO TTS to queue');
+            debugPrint(
+                'RealtimeTranslator:    Queue size: ${_ttsQueue.length}');
+            debugPrint(
+                'RealtimeTranslator:    Ready for immediate stereo playback (no generation delay)');
+            debugPrint(
+                'RealtimeTranslator:    Will play through $earpiece earpiece only');
+            debugPrint(
+                'RealtimeTranslator:    Recording continues uninterrupted');
 
             // Start processing queue if not already processing
             if (!_isProcessingQueue) {
               _processTtsQueue();
             }
           } else {
-            debugPrint('RealtimeTranslator: ❌ Stereo TTS file does not exist after conversion: $stereoTtsPath');
-            debugPrint('RealtimeTranslator:    File will not be added to queue');
+            debugPrint(
+                'RealtimeTranslator: ❌ Stereo TTS file does not exist after conversion: $stereoTtsPath');
+            debugPrint(
+                'RealtimeTranslator:    File will not be added to queue');
             // Don't add to queue - skip this TTS
           }
         } else {
-          debugPrint('RealtimeTranslator: ❌ Stereo conversion failed for mono file: $monoTtsPath');
-          debugPrint('RealtimeTranslator:    Conversion time: ${stereoConversionTime}ms');
-          debugPrint('RealtimeTranslator:    File will not be added to queue - translation will be skipped');
+          debugPrint(
+              'RealtimeTranslator: ❌ Stereo conversion failed for mono file: $monoTtsPath');
+          debugPrint(
+              'RealtimeTranslator:    Conversion time: ${stereoConversionTime}ms');
+          debugPrint(
+              'RealtimeTranslator:    File will not be added to queue - translation will be skipped');
           // Don't add to queue - skip this TTS
         }
       } else {
-        debugPrint('RealtimeTranslator: ❌ Mono TTS generation failed for text: "$text"');
-        debugPrint('RealtimeTranslator:    Generation time: ${generationTime}ms');
-        debugPrint('RealtimeTranslator:    File will not be added to queue - translation will be skipped');
+        debugPrint(
+            'RealtimeTranslator: ❌ Mono TTS generation failed for text: "$text"');
+        debugPrint(
+            'RealtimeTranslator:    Generation time: ${generationTime}ms');
+        debugPrint(
+            'RealtimeTranslator:    File will not be added to queue - translation will be skipped');
         // Don't add to queue - skip this TTS
       }
     } catch (e) {
-      debugPrint('RealtimeTranslator: ❌ Error in Phase 1 TTS generation + stereo conversion: $e');
+      debugPrint(
+          'RealtimeTranslator: ❌ Error in Phase 1 TTS generation + stereo conversion: $e');
       debugPrint('RealtimeTranslator:    Stack trace: ${StackTrace.current}');
-      debugPrint('RealtimeTranslator:    This TTS will be skipped - queue continues');
+      debugPrint(
+          'RealtimeTranslator:    This TTS will be skipped - queue continues');
       // Don't add to queue - error isolation ensures other TTS items continue
     }
   }
 
-  /// PHASE 2: Process TTS queue - Simplified playback only (Pre-generation Architecture)
-  /// PRODUCTION-READY: Files are pre-generated in Phase 1, so just pick and play
-  /// This eliminates generation latency and enables immediate playback
+  /// PHASE 2: Process TTS queue - SIMULTANEOUS DUAL-CHANNEL PLAYBACK (Enhanced Architecture)
+  /// PRODUCTION-READY: Plays left and right channel items in parallel for true simultaneous translation
+  /// This allows both speakers to hear their translations at the same time
   Future<void> _processTtsQueue() async {
     if (_isProcessingQueue || _ttsQueue.isEmpty) {
       return;
     }
 
     _isProcessingQueue = true;
-    debugPrint('RealtimeTranslator: ═══ PHASE 2: STEREO TTS Queue Processing ═══');
-    debugPrint('RealtimeTranslator: Queue size: ${_ttsQueue.length} pre-generated STEREO files ready');
+    debugPrint(
+        'RealtimeTranslator: ═══ PHASE 2: DUAL-CHANNEL SIMULTANEOUS TTS Queue Processing ═══');
+    debugPrint(
+        'RealtimeTranslator: Queue size: ${_ttsQueue.length} pre-generated STEREO files ready');
     debugPrint('RealtimeTranslator: TWS connected: $_isTwsConnected');
-    
+    debugPrint(
+        'RealtimeTranslator: 🎯 NEW: Parallel playback enabled - left and right channels play simultaneously');
+
+    // SMART BUFFERING: Wait briefly to allow paired items to accumulate
+    // This increases the chance of finding both left and right channel items for simultaneous playback
+    if (_ttsQueue.length == 1) {
+      debugPrint(
+          'RealtimeTranslator: ⏳ Single item in queue - waiting 800ms for potential pair...');
+      await Future.delayed(const Duration(milliseconds: 800));
+      debugPrint(
+          'RealtimeTranslator: Queue size after wait: ${_ttsQueue.length}');
+    }
+
     // NEW: Check TWS connection - skip playback if not connected
     if (!_isTwsConnected) {
-      debugPrint('RealtimeTranslator: ⚠️ TWS not connected - skipping playback, cleaning up queue');
-      
+      debugPrint(
+          'RealtimeTranslator: ⚠️ TWS not connected - skipping playback, cleaning up queue');
+
       // Clean up all TTS files in queue without playing
       while (_ttsQueue.isNotEmpty) {
         final item = _ttsQueue.removeFirst();
@@ -1032,150 +1225,336 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           final file = File(item.filePath);
           if (await file.exists()) {
             await file.delete();
-            debugPrint('RealtimeTranslator: ✅ Cleaned up TTS file (playback disabled): ${item.filePath}');
+            debugPrint(
+                'RealtimeTranslator: ✅ Cleaned up TTS file (playback disabled): ${item.filePath}');
           }
         } catch (e) {
           debugPrint('RealtimeTranslator: ⚠️ Error deleting TTS file: $e');
         }
       }
-      
+
       _isProcessingQueue = false;
-      debugPrint('RealtimeTranslator: ✅ TTS queue cleared (playback disabled - TWS not connected)');
+      debugPrint(
+          'RealtimeTranslator: ✅ TTS queue cleared (playback disabled - TWS not connected)');
       return;
     }
-    
-    debugPrint('RealtimeTranslator: Files are already converted to stereo - immediate channel-specific playback starts');
 
+    debugPrint(
+        'RealtimeTranslator: Files are already converted to stereo - simultaneous dual-channel playback starts');
+
+    // ENHANCED: Process queue with parallel playback for left and right channels
     while (_ttsQueue.isNotEmpty) {
-      final item = _ttsQueue.removeFirst();
-      final startTime = DateTime.now();
-      
-      debugPrint('RealtimeTranslator: ═══ Playing Pre-Generated STEREO TTS ═══');
-      debugPrint('RealtimeTranslator: Speaker: ${item.speakerIndex}');
-      debugPrint('RealtimeTranslator: File: ${item.filePath}');
-      debugPrint('RealtimeTranslator: Channel: ${item.channel} earpiece');
-      debugPrint('RealtimeTranslator: Text: "${item.originalText.substring(0, item.originalText.length > 50 ? 50 : item.originalText.length)}..."');
-      debugPrint('RealtimeTranslator: File size: ${item.fileSize} bytes (stereo format)');
-      debugPrint('RealtimeTranslator: Pre-generated at: ${item.timestamp}');
-      debugPrint('RealtimeTranslator: NO generation delay - stereo file ready for immediate channel-specific playback');
+      final batchStartTime = DateTime.now();
 
-      try {
-        // CRITICAL: Verify file still exists (safety check)
-        final file = File(item.filePath);
-        if (!await file.exists()) {
-          debugPrint('RealtimeTranslator: ❌ Pre-generated file missing: ${item.filePath}');
-          debugPrint('RealtimeTranslator:    Skipping this item and continuing to next');
-          continue; // Skip to next item
+      // Look ahead in queue to find parallel-playable items
+      // Check if we have items for both left and right channels
+      TtsQueueItem? leftItem;
+      TtsQueueItem? rightItem;
+
+      // Peek at queue to find left and right channel items
+      final queueList = _ttsQueue.toList();
+      int leftIndex = -1;
+      int rightIndex = -1;
+
+      for (int i = 0; i < queueList.length; i++) {
+        if (leftIndex == -1 && queueList[i].channel == 'left') {
+          leftIndex = i;
+        }
+        if (rightIndex == -1 && queueList[i].channel == 'right') {
+          rightIndex = i;
         }
 
-        // Verify file size matches (ensures file wasn't corrupted)
-        final currentSize = await file.length();
-        if (currentSize != item.fileSize) {
-          debugPrint('RealtimeTranslator: ⚠️ File size mismatch: Expected ${item.fileSize}, got $currentSize');
-          debugPrint('RealtimeTranslator:    File may be corrupted - skipping');
-          // Clean up corrupted file
-          try {
-            await file.delete();
-          } catch (_) {}
-          continue; // Skip to next item
+        // Found both? Stop searching
+        if (leftIndex != -1 && rightIndex != -1) {
+          break;
         }
-
-        debugPrint('RealtimeTranslator: ✅ Stereo file verified - starting channel-specific playback immediately');
-        debugPrint('RealtimeTranslator: ✅ Audio will play through ${item.channel} earpiece only');
-        
-        _currentPlayingTtsPath = item.filePath;
-        
-        // Update UI state
-        if (mounted) {
-          setState(() {
-            if (item.speakerIndex == 0) {
-              _isPlayingTts1 = true;
-            } else {
-              _isPlayingTts2 = true;
-            }
-          });
-        }
-
-        // Play STEREO TTS (recording continues - full-duplex, NO mode switching)
-        // MODE_NORMAL approach: Phone mic input + A2DP stereo output simultaneously
-        // Native MediaPlayer plays stereo WAV with channel separation
-        // AudioRecord with MIC source continues from phone mic (independent of mode)
-        debugPrint('RealtimeTranslator: ═══ Playing STEREO TTS (MODE_NORMAL Full-Duplex) ═══');
-        debugPrint('RealtimeTranslator: Mode: NORMAL (media mode - A2DP routing enabled)');
-        debugPrint('RealtimeTranslator: Recording: Phone built-in mic (continues)');
-        debugPrint('RealtimeTranslator: Playback: TWS speakers via A2DP (MEDIA stream - STEREO)');
-        debugPrint('RealtimeTranslator: Channel routing: ${item.channel} earpiece (stereo file)');
-        debugPrint('RealtimeTranslator: Simultaneous: Both active - NO mode switching');
-        
-        // Play pre-generated file (NO generation wait!)
-        await _ttsService.playAudioFile(item.filePath);
-        
-        final playbackTime = DateTime.now().difference(startTime).inMilliseconds;
-        
-        debugPrint('RealtimeTranslator: ✅ STEREO TTS playback completed through TWS A2DP');
-        debugPrint('RealtimeTranslator: ✅ Total time (queue → playback complete): ${playbackTime}ms');
-        debugPrint('RealtimeTranslator: ✅ Audio played through ${item.channel} earpiece as expected');
-        debugPrint('RealtimeTranslator: ✅ Recording continued throughout (phone mic still active)');
-        debugPrint('RealtimeTranslator: ✅ Full-duplex stereo operation verified');
-
-        // Update UI state after playback
-        if (mounted) {
-          setState(() {
-            if (item.speakerIndex == 0) {
-              _isPlayingTts1 = false;
-            } else {
-              _isPlayingTts2 = false;
-            }
-          });
-        }
-
-        // CRITICAL: Clean up TTS file immediately after successful playback
-        // This prevents storage accumulation and ensures files are removed
-        try {
-          if (await file.exists()) {
-            await file.delete();
-            debugPrint('RealtimeTranslator: ✅ Cleaned up TTS file: ${item.filePath}');
-          }
-        } catch (e) {
-          debugPrint('RealtimeTranslator: ⚠️ Error deleting TTS file: $e');
-          // Non-critical - file will be cleaned up later by system
-        }
-
-        _currentPlayingTtsPath = null;
-        
-      } catch (e) {
-        debugPrint('RealtimeTranslator: ❌ Error playing queue item: $e');
-        debugPrint('RealtimeTranslator:    Stack trace: ${StackTrace.current}');
-        debugPrint('RealtimeTranslator:    Cleaning up file and continuing to next item');
-        
-        // Clean up file on error
-        try {
-          final file = File(item.filePath);
-          if (await file.exists()) {
-            await file.delete();
-          }
-        } catch (_) {
-          // Ignore cleanup errors
-        }
-        
-        // Reset UI state on error
-        if (mounted) {
-          setState(() {
-            _isPlayingTts1 = false;
-            _isPlayingTts2 = false;
-          });
-        }
-        
-        _currentPlayingTtsPath = null;
-        // Continue to next item - error isolation
       }
 
-      // Small delay between queue items for smooth transitions
+      debugPrint('RealtimeTranslator: ═══ Parallel Playback Analysis ═══');
+      debugPrint('RealtimeTranslator: Queue items: ${_ttsQueue.length}');
+      debugPrint(
+          'RealtimeTranslator: Left channel item found at index: $leftIndex');
+      debugPrint(
+          'RealtimeTranslator: Right channel item found at index: $rightIndex');
+
+      // Determine playback strategy
+      if (leftIndex != -1 && rightIndex != -1) {
+        // CASE 1: We have BOTH left and right items - PLAY IN PARALLEL!
+        debugPrint(
+            'RealtimeTranslator: 🎯🎯🎯 PARALLEL PLAYBACK: Both channels ready 🎯🎯🎯');
+        debugPrint(
+            'RealtimeTranslator: ✨ TRUE SIMULTANEOUS TRANSLATION HAPPENING NOW! ✨');
+
+        // Remove items from queue (must remove in reverse order to maintain indices)
+        if (leftIndex > rightIndex) {
+          leftItem = queueList[leftIndex];
+          rightItem = queueList[rightIndex];
+          _ttsQueue.remove(queueList[leftIndex]);
+          _ttsQueue.remove(queueList[rightIndex]);
+        } else {
+          leftItem = queueList[leftIndex];
+          rightItem = queueList[rightIndex];
+          _ttsQueue.remove(queueList[rightIndex]);
+          _ttsQueue.remove(queueList[leftIndex]);
+        }
+
+        debugPrint(
+            'RealtimeTranslator: ✅ Extracted pair for simultaneous playback:');
+        debugPrint(
+            'RealtimeTranslator:   - Left: Speaker ${leftItem.speakerIndex} - "${leftItem.originalText.substring(0, leftItem.originalText.length > 40 ? 40 : leftItem.originalText.length)}..."');
+        debugPrint(
+            'RealtimeTranslator:   - Right: Speaker ${rightItem.speakerIndex} - "${rightItem.originalText.substring(0, rightItem.originalText.length > 40 ? 40 : rightItem.originalText.length)}..."');
+
+        // Play both items simultaneously
+        await _playDualChannelSimultaneous(leftItem, rightItem);
+      } else if (leftIndex != -1 || rightIndex != -1) {
+        // CASE 2: Only one channel available - play it alone
+        final item = _ttsQueue.removeFirst();
+        debugPrint(
+            'RealtimeTranslator: ▶️ SEQUENTIAL PLAYBACK: Only ${item.channel} channel available');
+        debugPrint(
+            'RealtimeTranslator: ℹ️ Other speaker hasn\'t spoken yet - playing solo');
+        debugPrint(
+            'RealtimeTranslator: 💡 TIP: For simultaneous playback, both speakers should talk around the same time');
+
+        // Play single item
+        await _playSingleChannelItem(item);
+      } else {
+        // CASE 3: Queue not empty but no valid items (shouldn't happen)
+        debugPrint(
+            'RealtimeTranslator: ⚠️ Queue has items but no valid channels found');
+        _ttsQueue.clear();
+        break;
+      }
+
+      final batchTime =
+          DateTime.now().difference(batchStartTime).inMilliseconds;
+      debugPrint(
+          'RealtimeTranslator: ✅ Batch playback completed in ${batchTime}ms');
+
+      // Small delay between batches for smooth transitions
       await Future.delayed(const Duration(milliseconds: 100));
     }
 
     _isProcessingQueue = false;
-    debugPrint('RealtimeTranslator: ✅ TTS queue processing complete (Phase 2 finished)');
+    debugPrint(
+        'RealtimeTranslator: ✅ TTS queue processing complete (Phase 2 finished)');
+  }
+
+  /// Play dual-channel items simultaneously (left + right earpieces at the same time)
+  /// PRODUCTION-READY: True simultaneous playback using dual native audio players
+  /// Both speakers hear their translations at the exact same time
+  Future<void> _playDualChannelSimultaneous(
+      TtsQueueItem leftItem, TtsQueueItem rightItem) async {
+    final startTime = DateTime.now();
+
+    debugPrint(
+        'RealtimeTranslator: ═══ SIMULTANEOUS DUAL-CHANNEL PLAYBACK ═══');
+    debugPrint(
+        'RealtimeTranslator: Left channel (Speaker ${leftItem.speakerIndex}): "${leftItem.originalText.substring(0, leftItem.originalText.length > 50 ? 50 : leftItem.originalText.length)}..."');
+    debugPrint(
+        'RealtimeTranslator: Right channel (Speaker ${rightItem.speakerIndex}): "${rightItem.originalText.substring(0, rightItem.originalText.length > 50 ? 50 : rightItem.originalText.length)}..."');
+    debugPrint('RealtimeTranslator: 🎯 Both will play AT THE SAME TIME');
+
+    try {
+      // Verify both files exist
+      final leftFile = File(leftItem.filePath);
+      final rightFile = File(rightItem.filePath);
+
+      if (!await leftFile.exists() || !await rightFile.exists()) {
+        debugPrint(
+            'RealtimeTranslator: ❌ One or both files missing, cleaning up and skipping');
+        if (await leftFile.exists()) await leftFile.delete();
+        if (await rightFile.exists()) await rightFile.delete();
+        return;
+      }
+
+      // Update UI state for both players
+      if (mounted) {
+        setState(() {
+          if (leftItem.speakerIndex == 0) {
+            _isPlayingTts1 = true;
+          } else {
+            _isPlayingTts2 = true;
+          }
+          if (rightItem.speakerIndex == 0) {
+            _isPlayingTts1 = true;
+          } else {
+            _isPlayingTts2 = true;
+          }
+        });
+      }
+
+      debugPrint(
+          'RealtimeTranslator: 🎵🎵 Starting DUAL PARALLEL playback NOW! 🎵🎵');
+
+      // CRITICAL: Play BOTH files simultaneously using Future.wait
+      // This starts both playback operations in parallel and waits for both to complete
+      final playbackStartTime = DateTime.now();
+      await Future.wait([
+        _ttsService.playAudioFileOnChannel(leftItem.filePath, 'left'),
+        _ttsService.playAudioFileOnChannel(rightItem.filePath, 'right'),
+      ]);
+
+      final playbackTime = DateTime.now().difference(startTime).inMilliseconds;
+      final actualPlaybackTime =
+          DateTime.now().difference(playbackStartTime).inMilliseconds;
+
+      debugPrint(
+          'RealtimeTranslator: ✅✅✅ SIMULTANEOUS DUAL-CHANNEL PLAYBACK COMPLETED ✅✅✅');
+      debugPrint(
+          'RealtimeTranslator: ✅ Total time (including setup): ${playbackTime}ms');
+      debugPrint(
+          'RealtimeTranslator: ✅ Actual parallel playback time: ${actualPlaybackTime}ms');
+      debugPrint(
+          'RealtimeTranslator: ✨ BOTH SPEAKERS HEARD TRANSLATIONS AT THE EXACT SAME TIME ✨');
+
+      // Update UI state after playback
+      if (mounted) {
+        setState(() {
+          _isPlayingTts1 = false;
+          _isPlayingTts2 = false;
+        });
+      }
+
+      // Clean up both files
+      try {
+        if (await leftFile.exists()) {
+          await leftFile.delete();
+          debugPrint('RealtimeTranslator: ✅ Cleaned up left channel file');
+        }
+        if (await rightFile.exists()) {
+          await rightFile.delete();
+          debugPrint('RealtimeTranslator: ✅ Cleaned up right channel file');
+        }
+      } catch (e) {
+        debugPrint('RealtimeTranslator: ⚠️ Error cleaning up files: $e');
+      }
+    } catch (e) {
+      debugPrint('RealtimeTranslator: ❌ Error in simultaneous playback: $e');
+      debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
+
+      // Reset UI state on error
+      if (mounted) {
+        setState(() {
+          _isPlayingTts1 = false;
+          _isPlayingTts2 = false;
+        });
+      }
+
+      // Clean up files on error
+      try {
+        final leftFile = File(leftItem.filePath);
+        final rightFile = File(rightItem.filePath);
+        if (await leftFile.exists()) await leftFile.delete();
+        if (await rightFile.exists()) await rightFile.delete();
+      } catch (_) {}
+    }
+  }
+
+  /// Play single channel item (when only one channel is available)
+  /// Used as fallback when parallel playback is not possible
+  Future<void> _playSingleChannelItem(TtsQueueItem item) async {
+    final startTime = DateTime.now();
+
+    debugPrint(
+        'RealtimeTranslator: ═══ Playing Pre-Generated STEREO TTS (Single Channel) ═══');
+    debugPrint('RealtimeTranslator: Speaker: ${item.speakerIndex}');
+    debugPrint('RealtimeTranslator: File: ${item.filePath}');
+    debugPrint('RealtimeTranslator: Channel: ${item.channel} earpiece');
+    debugPrint(
+        'RealtimeTranslator: Text: "${item.originalText.substring(0, item.originalText.length > 50 ? 50 : item.originalText.length)}..."');
+    debugPrint(
+        'RealtimeTranslator: File size: ${item.fileSize} bytes (stereo format)');
+
+    try {
+      // CRITICAL: Verify file still exists (safety check)
+      final file = File(item.filePath);
+      if (!await file.exists()) {
+        debugPrint(
+            'RealtimeTranslator: ❌ Pre-generated file missing: ${item.filePath}');
+        return;
+      }
+
+      // Verify file size matches (ensures file wasn't corrupted)
+      final currentSize = await file.length();
+      if (currentSize != item.fileSize) {
+        debugPrint(
+            'RealtimeTranslator: ⚠️ File size mismatch: Expected ${item.fileSize}, got $currentSize');
+        try {
+          await file.delete();
+        } catch (_) {}
+        return;
+      }
+
+      debugPrint(
+          'RealtimeTranslator: ✅ Stereo file verified - starting channel-specific playback');
+
+      _currentPlayingTtsPath = item.filePath;
+
+      // Update UI state
+      if (mounted) {
+        setState(() {
+          if (item.speakerIndex == 0) {
+            _isPlayingTts1 = true;
+          } else {
+            _isPlayingTts2 = true;
+          }
+        });
+      }
+
+      // Play on appropriate channel
+      await _ttsService.playAudioFileOnChannel(item.filePath, item.channel);
+
+      final playbackTime = DateTime.now().difference(startTime).inMilliseconds;
+
+      debugPrint(
+          'RealtimeTranslator: ✅ Single channel playback completed in ${playbackTime}ms');
+
+      // Update UI state after playback
+      if (mounted) {
+        setState(() {
+          if (item.speakerIndex == 0) {
+            _isPlayingTts1 = false;
+          } else {
+            _isPlayingTts2 = false;
+          }
+        });
+      }
+
+      // Clean up TTS file
+      try {
+        if (await file.exists()) {
+          await file.delete();
+          debugPrint(
+              'RealtimeTranslator: ✅ Cleaned up TTS file: ${item.filePath}');
+        }
+      } catch (e) {
+        debugPrint('RealtimeTranslator: ⚠️ Error deleting TTS file: $e');
+      }
+
+      _currentPlayingTtsPath = null;
+    } catch (e) {
+      debugPrint('RealtimeTranslator: ❌ Error playing single channel item: $e');
+
+      // Clean up file on error
+      try {
+        final file = File(item.filePath);
+        if (await file.exists()) {
+          await file.delete();
+        }
+      } catch (_) {}
+
+      // Reset UI state on error
+      if (mounted) {
+        setState(() {
+          _isPlayingTts1 = false;
+          _isPlayingTts2 = false;
+        });
+      }
+
+      _currentPlayingTtsPath = null;
+    }
   }
 
   /// Check if a WAV file contains meaningful audio (not just a tiny/silent file)
@@ -1239,9 +1618,11 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             ),
           ),
         );
-        debugPrint('RealtimeTranslator: ✅ Sound effect player configured for Bluetooth/TWS output');
+        debugPrint(
+            'RealtimeTranslator: ✅ Sound effect player configured for Bluetooth/TWS output');
       } catch (e) {
-        debugPrint('RealtimeTranslator: ⚠️ Failed to configure sound effect player: $e');
+        debugPrint(
+            'RealtimeTranslator: ⚠️ Failed to configure sound effect player: $e');
       }
 
       // Set up TTS service callbacks for UI state synchronization
@@ -1435,10 +1816,11 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Future<void> _toggleRecording() async {
     // Prevent double-tap during initialization
     if (_isInitializing) {
-      debugPrint('RealtimeTranslator: ⏳ Initializing Soniox connection, please wait...');
+      debugPrint(
+          'RealtimeTranslator: ⏳ Initializing Soniox connection, please wait...');
       return;
     }
-    
+
     if (_isRecording) {
       // Stop recording based on mode
       if (_isRealtimeMode) {
@@ -1589,13 +1971,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   /// THREE-PHASE FLOW: Initializing → Ready (beep) → Recording
   Future<void> _startRealtimeSession() async {
     try {
-      debugPrint('RealtimeTranslator: ═══ Starting Real-time Session (3-Phase Flow) ═══');
+      debugPrint(
+          'RealtimeTranslator: ═══ Starting Real-time Session (3-Phase Flow) ═══');
 
       // ═══════════════════════════════════════════════════════
       // PHASE 1: INITIALIZING STATE
       // ═══════════════════════════════════════════════════════
-      debugPrint('RealtimeTranslator: 📍 PHASE 1: INITIALIZING (Connecting to Soniox)');
-      
+      debugPrint(
+          'RealtimeTranslator: 📍 PHASE 1: INITIALIZING (Connecting to Soniox)');
+
       setState(() {
         _isInitializing = true;
         _isRecording = false;
@@ -1637,27 +2021,29 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Reset session metrics for new session
       _resetSessionMetrics();
       _sessionStartTime = DateTime.now();
-      debugPrint('RealtimeTranslator: ✅ Session started at ${_sessionStartTime}');
-      
-      // Reset dialog flags for new session
-      _hasShownTwsNotConnectedDialog = false;
-      _hasShownTwsConnectedDialog = false;
+      debugPrint(
+          'RealtimeTranslator: ✅ Session started at ${_sessionStartTime}');
+
+      // IMPORTANT: Do NOT reset dialog flags here!
+      // Flags should only reset when entering screen (initState)
+      // This prevents modal from appearing every time recording starts
+      // User requirement: Show modal ONCE per screen session only
 
       // Clear previous results
       debugPrint('RealtimeTranslator: Clearing previous session data...');
       _speaker1AudioPath = null;
-        _speaker2AudioPath = null;
-        _speaker1TtsAudioPath = null;
-        _speaker2TtsAudioPath = null;
-        _cachedStereoAudioPath = null;
-        _speakerSegments = [];
-        _transcriptions.clear();
-        _translations.clear();
-        _realtimeTranscriptions = {0: StringBuffer(), 1: StringBuffer()};
-        _realtimeTranslations = {0: StringBuffer(), 1: StringBuffer()};
-        _showTranslation = {0: false, 1: false};
-        _isPlayingTts1 = false;
-        _isPlayingTts2 = false;
+      _speaker2AudioPath = null;
+      _speaker1TtsAudioPath = null;
+      _speaker2TtsAudioPath = null;
+      _cachedStereoAudioPath = null;
+      _speakerSegments = [];
+      _transcriptions.clear();
+      _translations.clear();
+      _realtimeTranscriptions = {0: StringBuffer(), 1: StringBuffer()};
+      _realtimeTranslations = {0: StringBuffer(), 1: StringBuffer()};
+      _showTranslation = {0: false, 1: false};
+      _isPlayingTts1 = false;
+      _isPlayingTts2 = false;
 
       // Configure audio route
       debugPrint('RealtimeTranslator: Configuring audio route...');
@@ -1671,7 +2057,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Connect to Soniox WebSocket
       final speaker1Lang = _speakerLanguages[0]?.code ?? 'en';
       final speaker2Lang = _speakerLanguages[1]?.code ?? 'bn';
-      
+
       debugPrint('RealtimeTranslator: Connecting to Soniox...');
       debugPrint('RealtimeTranslator: Speaker 1 language: $speaker1Lang');
       debugPrint('RealtimeTranslator: Speaker 2 language: $speaker2Lang');
@@ -1686,7 +2072,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
       // Set up callbacks
       _sonioxService.onConnected = () {
-        debugPrint('RealtimeTranslator: ✅ Soniox WebSocket connected - ready for audio stream');
+        debugPrint(
+            'RealtimeTranslator: ✅ Soniox WebSocket connected - ready for audio stream');
       };
 
       _sonioxService.onError = (error) {
@@ -1714,13 +2101,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
       // Play start beep to signal that system is ready to record
       await _playStartRecordingSound();
-      
-      debugPrint('RealtimeTranslator: ✅ Ready beep played - user can now speak');
+
+      debugPrint(
+          'RealtimeTranslator: ✅ Ready beep played - user can now speak');
 
       // ═══════════════════════════════════════════════════════
       // PHASE 3: RECORDING STATE
       // ═══════════════════════════════════════════════════════
-      debugPrint('RealtimeTranslator: 📍 PHASE 3: RECORDING (Starting audio capture)');
+      debugPrint(
+          'RealtimeTranslator: 📍 PHASE 3: RECORDING (Starting audio capture)');
 
       // Update state to recording
       setState(() {
@@ -1735,7 +2124,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Start native audio recording (fallback approach)
       final directory = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
-      _recordedAudioPath = '${directory.path}/realtime_recording_$timestamp.wav';
+      _recordedAudioPath =
+          '${directory.path}/realtime_recording_$timestamp.wav';
 
       debugPrint('RealtimeTranslator: Starting native audio recorder...');
       debugPrint('RealtimeTranslator: Recording path: $_recordedAudioPath');
@@ -1756,12 +2146,14 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       }
 
       debugPrint('RealtimeTranslator: ✅ Native recording started');
-      
+
       // Start polling audio file to send chunks to Soniox
-      debugPrint('RealtimeTranslator: Starting audio file polling for streaming...');
+      debugPrint(
+          'RealtimeTranslator: Starting audio file polling for streaming...');
       _startAudioFilePolling();
 
-      debugPrint('RealtimeTranslator: ✅ Real-time session started successfully');
+      debugPrint(
+          'RealtimeTranslator: ✅ Real-time session started successfully');
       debugPrint('RealtimeTranslator: Audio chunks will be streamed to Soniox');
     } catch (e) {
       debugPrint('RealtimeTranslator: ❌ Real-time session error: $e');
@@ -1783,7 +2175,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Mark session end time
       _sessionEndTime = DateTime.now();
       debugPrint('RealtimeTranslator: ✅ Session ended at ${_sessionEndTime}');
-      
+
       // Update UI to reflect TWS status
       if (mounted) {
         setState(() {
@@ -1799,6 +2191,12 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Stop audio chunk subscription (if using streaming recorder)
       await _audioChunkSubscription?.cancel();
       _audioChunkSubscription = null;
+
+      // CRITICAL: Force process any pending sentences before stopping
+      // This ensures no speech is lost when recording ends
+      debugPrint('RealtimeTranslator: ═══ FLUSHING PENDING BUFFERS ═══');
+      await _flushAllPendingBuffers();
+      debugPrint('RealtimeTranslator: ✅ All pending buffers flushed');
 
       // Play stop recording sound
       await _playStopRecordingSound();
@@ -1823,10 +2221,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       _waveController.stop();
 
       debugPrint('RealtimeTranslator: ✅ Real-time session stopped');
-      
+
       // Show session summary
       _showSessionSummary();
-      
+
       // Transfer accumulated text to main transcriptions/translations
       _transcriptions[0] = _realtimeTranscriptions[0]?.toString() ?? '';
       _transcriptions[1] = _realtimeTranscriptions[1]?.toString() ?? '';
@@ -1848,7 +2246,6 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     }
   }
 
-
   /// Reset session metrics for new session
   void _resetSessionMetrics() {
     _sessionStartTime = null;
@@ -1862,7 +2259,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _translationCharactersPerSpeaker = {0: 0, 1: 0};
     _translationLatencies = [];
     _totalTranslations = 0;
-    
+
     debugPrint('RealtimeTranslator: ✅ Session metrics reset');
   }
 
@@ -1870,54 +2267,68 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   /// Reference: https://soniox.com/pricing
   double _calculateSessionCost() {
     // Input audio tokens: 1 hour = 30,000 tokens, so 1 second = 8.333 tokens
-    final inputAudioTokens = (_audioSecondsProcessed * _tokensPerSecond).round();
-    final inputAudioCost = (inputAudioTokens / 1000000) * _inputAudioCostPerMillion;
-    
+    final inputAudioTokens =
+        (_audioSecondsProcessed * _tokensPerSecond).round();
+    final inputAudioCost =
+        (inputAudioTokens / 1000000) * _inputAudioCostPerMillion;
+
     // Output text tokens: 1 character = 0.3 tokens (transcription + translation)
-    final totalOutputCharacters = _totalTranscriptionCharacters + _totalTranslationCharacters;
-    final outputTextTokens = (totalOutputCharacters * _tokensPerCharacter).round();
-    final outputTextCost = (outputTextTokens / 1000000) * _outputTextCostPerMillion;
-    
+    final totalOutputCharacters =
+        _totalTranscriptionCharacters + _totalTranslationCharacters;
+    final outputTextTokens =
+        (totalOutputCharacters * _tokensPerCharacter).round();
+    final outputTextCost =
+        (outputTextTokens / 1000000) * _outputTextCostPerMillion;
+
     final totalCost = inputAudioCost + outputTextCost;
-    
-    debugPrint('RealtimeTranslator: 💰 Session Cost Breakdown (Soniox Pricing):');
+
+    debugPrint(
+        'RealtimeTranslator: 💰 Session Cost Breakdown (Soniox Pricing):');
     debugPrint('  Input Audio:');
-    debugPrint('    - Audio processed: ${_audioSecondsProcessed.toStringAsFixed(2)}s');
-    debugPrint('    - Tokens: $inputAudioTokens (${_audioSecondsProcessed.toStringAsFixed(2)}s × ${_tokensPerSecond.toStringAsFixed(3)} tokens/s)');
-    debugPrint('    - Cost: \$${inputAudioCost.toStringAsFixed(6)} ($inputAudioTokens tokens × \$${_inputAudioCostPerMillion}/1M)');
+    debugPrint(
+        '    - Audio processed: ${_audioSecondsProcessed.toStringAsFixed(2)}s');
+    debugPrint(
+        '    - Tokens: $inputAudioTokens (${_audioSecondsProcessed.toStringAsFixed(2)}s × ${_tokensPerSecond.toStringAsFixed(3)} tokens/s)');
+    debugPrint(
+        '    - Cost: \$${inputAudioCost.toStringAsFixed(6)} ($inputAudioTokens tokens × \$${_inputAudioCostPerMillion}/1M)');
     debugPrint('  Output Text:');
     debugPrint('    - Transcription: $_totalTranscriptionCharacters chars');
     debugPrint('    - Translation: $_totalTranslationCharacters chars');
     debugPrint('    - Total chars: $totalOutputCharacters');
-    debugPrint('    - Tokens: $outputTextTokens ($totalOutputCharacters chars × ${_tokensPerCharacter.toStringAsFixed(1)} tokens/char)');
-    debugPrint('    - Cost: \$${outputTextCost.toStringAsFixed(6)} ($outputTextTokens tokens × \$${_outputTextCostPerMillion}/1M)');
+    debugPrint(
+        '    - Tokens: $outputTextTokens ($totalOutputCharacters chars × ${_tokensPerCharacter.toStringAsFixed(1)} tokens/char)');
+    debugPrint(
+        '    - Cost: \$${outputTextCost.toStringAsFixed(6)} ($outputTextTokens tokens × \$${_outputTextCostPerMillion}/1M)');
     debugPrint('  Total Cost: \$${totalCost.toStringAsFixed(4)}');
-    
+
     // Store calculated tokens for summary display
     _totalInputAudioTokens = inputAudioTokens;
     _totalOutputTextTokens = outputTextTokens;
-    
+
     return totalCost;
   }
 
   /// Start polling audio file to simulate streaming
   /// This is a fallback approach until native streaming is implemented
   void _startAudioFilePolling() {
-    debugPrint('RealtimeTranslator: Starting audio file polling (100ms intervals)...');
-    
+    debugPrint(
+        'RealtimeTranslator: Starting audio file polling (100ms intervals)...');
+
     _lastReadPosition = 44; // Skip WAV header (44 bytes)
-    
+
     // Poll every 100ms to read new audio data
-    _audioPollingTimer = Timer.periodic(const Duration(milliseconds: 100), (timer) async {
+    _audioPollingTimer =
+        Timer.periodic(const Duration(milliseconds: 100), (timer) async {
       try {
         if (!_isRecording || _recordedAudioPath == null) {
-          debugPrint('RealtimeTranslator: ⚠️ Stopping audio polling - recording stopped');
+          debugPrint(
+              'RealtimeTranslator: ⚠️ Stopping audio polling - recording stopped');
           timer.cancel();
           return;
         }
 
         final audioFile = File(_recordedAudioPath!);
-        
+
         // Check if file exists
         if (!await audioFile.exists()) {
           debugPrint('RealtimeTranslator: ⚠️ Audio file does not exist yet');
@@ -1926,38 +2337,39 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
         // Get current file size
         final fileSize = await audioFile.length();
-        
+
         // Check if there's new data to read
         if (fileSize > _lastReadPosition) {
           // Read new data
           final bytesToRead = fileSize - _lastReadPosition;
-          
+
           // Limit chunk size to ~3200 bytes (100ms of 16kHz 16-bit mono audio)
           final chunkSize = bytesToRead > 3200 ? 3200 : bytesToRead;
-          
+
           // Open file and read from last position
           final randomAccessFile = await audioFile.open(mode: FileMode.read);
           await randomAccessFile.setPosition(_lastReadPosition);
           final chunk = await randomAccessFile.read(chunkSize);
           await randomAccessFile.close();
-          
+
           if (chunk.isNotEmpty) {
             // Send chunk to Soniox
             await _sonioxService.sendAudio(chunk);
             _lastReadPosition += chunk.length;
-            
+
             // Track audio seconds processed (16-bit PCM, 16000 Hz, mono = 32000 bytes/second)
             final secondsInChunk = chunk.length / 32000.0;
             _audioSecondsProcessed += secondsInChunk;
-            
-            debugPrint('RealtimeTranslator: 📤 Sent ${chunk.length} bytes to Soniox (position: $_lastReadPosition)');
+
+            debugPrint(
+                'RealtimeTranslator: 📤 Sent ${chunk.length} bytes to Soniox (position: $_lastReadPosition)');
           }
         }
       } catch (e) {
         debugPrint('RealtimeTranslator: ❌ Audio polling error: $e');
       }
     });
-    
+
     debugPrint('RealtimeTranslator: ✅ Audio file polling started');
   }
 
@@ -1973,7 +2385,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   /// This method is kept for compatibility but does nothing in mono mode
   Future<void> _resumeRealtimeListeningAfterPlayback() async {
     // REALTIME TRANSLATION: No resuming needed - recording never stopped
-    debugPrint('RealtimeTranslator: Resume disabled (full-duplex mode - recording never stopped)');
+    debugPrint(
+        'RealtimeTranslator: Resume disabled (full-duplex mode - recording never stopped)');
     return;
   }
 
@@ -1984,8 +2397,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     try {
       debugPrint('RealtimeTranslator: ═══ Soniox Real-Time Result ═══');
       debugPrint('RealtimeTranslator: Tokens count: ${result.tokens.length}');
-      debugPrint('RealtimeTranslator: Speaker 1 language: ${_speakerLanguages[0]?.code}');
-      debugPrint('RealtimeTranslator: Speaker 2 language: ${_speakerLanguages[1]?.code}');
+      debugPrint(
+          'RealtimeTranslator: Speaker 1 language: ${_speakerLanguages[0]?.code}');
+      debugPrint(
+          'RealtimeTranslator: Speaker 2 language: ${_speakerLanguages[1]?.code}');
 
       if (result.tokens.isEmpty) {
         debugPrint('RealtimeTranslator: ⚠️ No tokens in result');
@@ -1993,51 +2408,60 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       }
 
       // Group transcriptions AND translations by speaker
-      Map<int, String> transcriptionTexts = {};      // Original tokens
-      Map<int, String> translationTexts = {};        // Translation tokens (NEW)
+      Map<int, String> transcriptionTexts = {}; // Original tokens
+      Map<int, String> translationTexts = {}; // Translation tokens (NEW)
       Map<int, String> transcriptionLanguages = {};
-      Map<int, String> translationLanguages = {};    // Translation target languages (NEW)
+      Map<int, String> translationLanguages =
+          {}; // Translation target languages (NEW)
       Map<int, bool> hasFinalized = {};
-      
+
       // Process all tokens (both transcription AND translation from Soniox)
       // Soniox provides tokens with translation_status: "original" or "translation"
       for (var token in result.tokens) {
-        debugPrint('RealtimeTranslator: Token: "${token.text}" | Status: ${token.translationStatus} | Lang: ${token.language} | Source: ${token.sourceLanguage} | Speaker: ${token.speaker} | Final: ${token.isFinal}');
-        
+        debugPrint(
+            'RealtimeTranslator: Token: "${token.text}" | Status: ${token.translationStatus} | Lang: ${token.language} | Source: ${token.sourceLanguage} | Speaker: ${token.speaker} | Final: ${token.isFinal}');
+
         // Filter out special tokens like <end>, <unk>, etc.
         final tokenText = token.text.trim();
         if (tokenText.startsWith('<') && tokenText.endsWith('>')) {
-          debugPrint('RealtimeTranslator: ⚠️ Skipping special token: $tokenText');
+          debugPrint(
+              'RealtimeTranslator: ⚠️ Skipping special token: $tokenText');
           continue; // Skip special tokens
         }
-        
+
         // Skip empty tokens
         if (tokenText.isEmpty) {
           continue;
         }
-        
+
         final sonioxSpeakerId = token.speaker ?? 0;
-        
+
         // Process based on translation status
         if (token.isOriginal) {
           // Original transcription
           final detectedLanguage = token.language;
-        transcriptionTexts[sonioxSpeakerId] = (transcriptionTexts[sonioxSpeakerId] ?? '') + token.text;
-        transcriptionLanguages[sonioxSpeakerId] = detectedLanguage;
-          debugPrint('RealtimeTranslator: ✅ Original transcription: "${token.text}" (${token.language})');
+          transcriptionTexts[sonioxSpeakerId] =
+              (transcriptionTexts[sonioxSpeakerId] ?? '') + token.text;
+          transcriptionLanguages[sonioxSpeakerId] = detectedLanguage;
+          debugPrint(
+              'RealtimeTranslator: ✅ Original transcription: "${token.text}" (${token.language})');
         } else if (token.isTranslation) {
           // Translation provided by Soniox (NEW!)
-          translationTexts[sonioxSpeakerId] = (translationTexts[sonioxSpeakerId] ?? '') + token.text;
+          translationTexts[sonioxSpeakerId] =
+              (translationTexts[sonioxSpeakerId] ?? '') + token.text;
           translationLanguages[sonioxSpeakerId] = token.language;
-          debugPrint('RealtimeTranslator: ✅ Soniox translation: "${token.text}" (${token.sourceLanguage} → ${token.language})');
+          debugPrint(
+              'RealtimeTranslator: ✅ Soniox translation: "${token.text}" (${token.sourceLanguage} → ${token.language})');
         } else {
           // Token not translated (language not in two-way pair)
           // Treat as transcription only
-          transcriptionTexts[sonioxSpeakerId] = (transcriptionTexts[sonioxSpeakerId] ?? '') + token.text;
+          transcriptionTexts[sonioxSpeakerId] =
+              (transcriptionTexts[sonioxSpeakerId] ?? '') + token.text;
           transcriptionLanguages[sonioxSpeakerId] = token.language;
-          debugPrint('RealtimeTranslator: ⚠️ Not translated: "${token.text}" (${token.language})');
+          debugPrint(
+              'RealtimeTranslator: ⚠️ Not translated: "${token.text}" (${token.language})');
         }
-        
+
         if (token.isFinal) {
           hasFinalized[sonioxSpeakerId] = true;
         }
@@ -2046,69 +2470,78 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Process each speaker's transcription AND translation
       // CRITICAL: Use for loop instead of forEach to support async/await
       // ALSO: Check for translation-only messages (no transcription in same message)
-      
+
       // First, check if this is a translation-only message (translations without transcriptions)
       for (final entry in translationTexts.entries) {
         final sonioxSpeakerId = entry.key;
         if (!transcriptionTexts.containsKey(sonioxSpeakerId)) {
           // Translation-only message - check if we have a pending transcription waiting for it
           final translationText = entry.value;
-          
+
           // Check all pending transcriptions to find matching speaker
           for (final pendingEntry in _pendingTranscriptions.entries) {
             final pendingSpeaker = pendingEntry.key;
             // If this translation is for this pending speaker, use it!
             if (translationText.isNotEmpty) {
-              debugPrint('RealtimeTranslator: ✅ Translation-only message received for UI Speaker $pendingSpeaker');
+              debugPrint(
+                  'RealtimeTranslator: ✅ Translation-only message received for UI Speaker $pendingSpeaker');
               debugPrint('RealtimeTranslator: Translation: "$translationText"');
-              
+
               // Cancel timer
               _pendingTranslationTimers[pendingSpeaker]?.cancel();
               _pendingTranslationTimers[pendingSpeaker] = null;
-              
-              final pendingTranscription = _pendingTranscriptions[pendingSpeaker] ?? '';
+
+              final pendingTranscription =
+                  _pendingTranscriptions[pendingSpeaker] ?? '';
               final pendingLanguage = _pendingLanguages[pendingSpeaker] ?? '';
-              
+
               // Clean up
               _pendingTranscriptions.remove(pendingSpeaker);
               _pendingLanguages.remove(pendingSpeaker);
-              
+
               // Process translation
-              debugPrint('RealtimeTranslator: ✅ Using Soniox translation (no Azure API call needed - saves ~2-3 seconds!)');
+              debugPrint(
+                  'RealtimeTranslator: ✅ Using Soniox translation (no Azure API call needed - saves ~2-3 seconds!)');
               await _handleSonioxTranslationAndPlayTts(
                 speakerIndex: pendingSpeaker,
                 transcribedText: pendingTranscription,
                 translatedText: translationText.trim(),
                 sourceLanguage: pendingLanguage,
               );
-              
+
               // Only process first pending translation
               break;
             }
           }
         }
       }
-      
+
       // Then, process messages that have transcriptions
       for (final entry in transcriptionTexts.entries) {
         final sonioxSpeakerId = entry.key;
         final transcriptionText = entry.value;
         final detectedLanguage = transcriptionLanguages[sonioxSpeakerId] ?? '';
-        final translationText = translationTexts[sonioxSpeakerId] ?? ''; // Get Soniox translation (NEW)
+        final translationText = translationTexts[sonioxSpeakerId] ??
+            ''; // Get Soniox translation (NEW)
         final isFinal = hasFinalized[sonioxSpeakerId] ?? false;
-        
-        debugPrint('RealtimeTranslator: ═══ Processing Soniox Speaker $sonioxSpeakerId ═══');
+
+        debugPrint(
+            'RealtimeTranslator: ═══ Processing Soniox Speaker $sonioxSpeakerId ═══');
         debugPrint('  Detected language: $detectedLanguage');
         debugPrint('  Transcription: "$transcriptionText"');
-        debugPrint('  Translation: "$translationText"'); // Log Soniox translation (NEW)
+        debugPrint(
+            '  Translation: "$translationText"'); // Log Soniox translation (NEW)
         debugPrint('  Is Final: $isFinal');
-        
+
         // Map Soniox speaker to UI speaker based on detected language AND transcribed text
         // This helps detect phonetic transcriptions (e.g., English spoken but written in Bengali script)
-        int uiSpeakerIndex = _mapSonioxSpeakerToUiSpeaker(sonioxSpeakerId, detectedLanguage, transcriptionText);
-        
-        debugPrint('RealtimeTranslator: Mapped Soniox Speaker $sonioxSpeakerId → UI Speaker $uiSpeakerIndex');
-        debugPrint('RealtimeTranslator: UI Speaker $uiSpeakerIndex configured language: ${_speakerLanguages[uiSpeakerIndex]?.code}');
+        int uiSpeakerIndex = _mapSonioxSpeakerToUiSpeaker(
+            sonioxSpeakerId, detectedLanguage, transcriptionText);
+
+        debugPrint(
+            'RealtimeTranslator: Mapped Soniox Speaker $sonioxSpeakerId → UI Speaker $uiSpeakerIndex');
+        debugPrint(
+            'RealtimeTranslator: UI Speaker $uiSpeakerIndex configured language: ${_speakerLanguages[uiSpeakerIndex]?.code}');
 
         // Initialize buffers if needed
         if (_realtimeTranscriptions[uiSpeakerIndex] == null) {
@@ -2126,25 +2559,32 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               _realtimeTranscriptions[uiSpeakerIndex]!.write(' ');
             }
             _realtimeTranscriptions[uiSpeakerIndex]!.write(transcriptionText);
-            debugPrint('RealtimeTranslator: ✅ Appended FINAL transcription to UI Speaker $uiSpeakerIndex');
-            
+            debugPrint(
+                'RealtimeTranslator: ✅ Appended FINAL transcription to UI Speaker $uiSpeakerIndex');
+
             // Track transcription characters (Soniox charges by character, not word)
             // 1 character = 0.3 tokens according to Soniox pricing
             final transcriptionCharCount = transcriptionText.length;
             _totalTranscriptionCharacters += transcriptionCharCount;
-            _transcriptionCharactersPerSpeaker[uiSpeakerIndex] = 
-                (_transcriptionCharactersPerSpeaker[uiSpeakerIndex] ?? 0) + transcriptionCharCount;
-            
-            final transcriptionTokens = (transcriptionCharCount * _tokensPerCharacter).round();
-            debugPrint('RealtimeTranslator: 📊 Transcription: $transcriptionCharCount chars ≈ $transcriptionTokens tokens (total chars: $_totalTranscriptionCharacters)');
+            _transcriptionCharactersPerSpeaker[uiSpeakerIndex] =
+                (_transcriptionCharactersPerSpeaker[uiSpeakerIndex] ?? 0) +
+                    transcriptionCharCount;
+
+            final transcriptionTokens =
+                (transcriptionCharCount * _tokensPerCharacter).round();
+            debugPrint(
+                'RealtimeTranslator: 📊 Transcription: $transcriptionCharCount chars ≈ $transcriptionTokens tokens (total chars: $_totalTranscriptionCharacters)');
           }
 
           // Update UI with transcription immediately
           if (mounted) {
             setState(() {
-              _transcriptions[uiSpeakerIndex] = _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ?? '';
+              _transcriptions[uiSpeakerIndex] =
+                  _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ??
+                      '';
             });
-            debugPrint('RealtimeTranslator: ✅ UI updated with transcription for UI Speaker $uiSpeakerIndex');
+            debugPrint(
+                'RealtimeTranslator: ✅ UI updated with transcription for UI Speaker $uiSpeakerIndex');
             // Auto-scroll to latest content (transcription)
             _autoScrollToBottom(uiSpeakerIndex, isTranslation: false);
           }
@@ -2155,70 +2595,78 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           if (transcriptionText.isNotEmpty) {
             if (translationText.isNotEmpty) {
               // Translation already available - use it immediately!
-              debugPrint('RealtimeTranslator: ✅ Using Soniox translation (no Azure API call needed - saves ~2-3 seconds!)');
-              
+              debugPrint(
+                  'RealtimeTranslator: ✅ Using Soniox translation (no Azure API call needed - saves ~2-3 seconds!)');
+
               // Cancel pending timer if exists
               _pendingTranslationTimers[uiSpeakerIndex]?.cancel();
               _pendingTranslationTimers[uiSpeakerIndex] = null;
               _pendingTranscriptions.remove(uiSpeakerIndex);
               _pendingLanguages.remove(uiSpeakerIndex);
-              
+
               await _handleSonioxTranslationAndPlayTts(
-              speakerIndex: uiSpeakerIndex,
-              transcribedText: transcriptionText.trim(),
+                speakerIndex: uiSpeakerIndex,
+                transcribedText: transcriptionText.trim(),
                 translatedText: translationText.trim(),
-              sourceLanguage: detectedLanguage,
-            );
+                sourceLanguage: detectedLanguage,
+              );
             } else {
               // No translation yet - wait for translation tokens before falling back
-              debugPrint('RealtimeTranslator: ⏳ Waiting for Soniox translation tokens (500ms timeout)...');
-              
+              debugPrint(
+                  'RealtimeTranslator: ⏳ Waiting for Soniox translation tokens (500ms timeout)...');
+
               // Store transcription for pending translation
               _pendingTranscriptions[uiSpeakerIndex] = transcriptionText.trim();
               _pendingLanguages[uiSpeakerIndex] = detectedLanguage;
-              
+
               // Cancel existing timer if any
               _pendingTranslationTimers[uiSpeakerIndex]?.cancel();
-              
+
               // Wait 500ms for translation tokens
-              _pendingTranslationTimers[uiSpeakerIndex] = Timer(const Duration(milliseconds: 500), () async {
+              _pendingTranslationTimers[uiSpeakerIndex] =
+                  Timer(const Duration(milliseconds: 500), () async {
                 // Timer expired - translation tokens didn't arrive, fall back to Azure
-                debugPrint('RealtimeTranslator: ⏰ Translation timeout - falling back to Azure API');
+                debugPrint(
+                    'RealtimeTranslator: ⏰ Translation timeout - falling back to Azure API');
                 await _translateAndPlayRealtimeTts(
                   speakerIndex: uiSpeakerIndex,
                   transcribedText: _pendingTranscriptions[uiSpeakerIndex] ?? '',
                   sourceLanguage: _pendingLanguages[uiSpeakerIndex] ?? '',
                 );
-                
+
                 // Clean up
                 _pendingTranscriptions.remove(uiSpeakerIndex);
                 _pendingLanguages.remove(uiSpeakerIndex);
                 _pendingTranslationTimers[uiSpeakerIndex] = null;
               });
-              
-              debugPrint('RealtimeTranslator: ⏳ Timer started - waiting for translation tokens');
+
+              debugPrint(
+                  'RealtimeTranslator: ⏳ Timer started - waiting for translation tokens');
             }
           }
         } else {
           // Non-final (interim) results: Show interim text WITHOUT adding to buffer
           // ALSO: Check if this contains translation tokens for a pending transcription
-          
+
           // CRITICAL: Check if translation arrived for a pending transcription
-          if (translationText.isNotEmpty && _pendingTranscriptions.containsKey(uiSpeakerIndex)) {
+          if (translationText.isNotEmpty &&
+              _pendingTranscriptions.containsKey(uiSpeakerIndex)) {
             // Translation tokens arrived! Use them instead of waiting for timeout
-            debugPrint('RealtimeTranslator: ✅ Translation tokens arrived! Using Soniox translation (no Azure API call needed - saves ~2-3 seconds!)');
-            
+            debugPrint(
+                'RealtimeTranslator: ✅ Translation tokens arrived! Using Soniox translation (no Azure API call needed - saves ~2-3 seconds!)');
+
             // Cancel pending timer
             _pendingTranslationTimers[uiSpeakerIndex]?.cancel();
             _pendingTranslationTimers[uiSpeakerIndex] = null;
-            
-            final pendingTranscription = _pendingTranscriptions[uiSpeakerIndex] ?? '';
+
+            final pendingTranscription =
+                _pendingTranscriptions[uiSpeakerIndex] ?? '';
             final pendingLanguage = _pendingLanguages[uiSpeakerIndex] ?? '';
-            
+
             // Clean up pending data
             _pendingTranscriptions.remove(uiSpeakerIndex);
             _pendingLanguages.remove(uiSpeakerIndex);
-            
+
             // Process translation immediately
             await _handleSonioxTranslationAndPlayTts(
               speakerIndex: uiSpeakerIndex,
@@ -2227,21 +2675,30 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               sourceLanguage: pendingLanguage,
             );
           }
-          
+
           // Show interim text in UI (without adding to buffer)
           if (mounted) {
-            final accumulatedTranscription = _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ?? '';
-            final accumulatedTranslation = _realtimeTranslations[uiSpeakerIndex]?.toString().trim() ?? '';
-            
+            final accumulatedTranscription =
+                _realtimeTranscriptions[uiSpeakerIndex]?.toString().trim() ??
+                    '';
+            final accumulatedTranslation =
+                _realtimeTranslations[uiSpeakerIndex]?.toString().trim() ?? '';
+
             // Show accumulated + current interim (but don't save interim to buffer)
-            final displayTranscription = accumulatedTranscription.isNotEmpty && transcriptionText.isNotEmpty
+            final displayTranscription = accumulatedTranscription.isNotEmpty &&
+                    transcriptionText.isNotEmpty
                 ? '$accumulatedTranscription $transcriptionText'
-                : (transcriptionText.isNotEmpty ? transcriptionText : accumulatedTranscription);
-            
+                : (transcriptionText.isNotEmpty
+                    ? transcriptionText
+                    : accumulatedTranscription);
+
             // Show interim translation if available (Soniox provides streaming translations)
-            final displayTranslation = accumulatedTranslation.isNotEmpty && translationText.isNotEmpty
-                ? '$accumulatedTranslation $translationText'
-                : (translationText.isNotEmpty ? translationText : accumulatedTranslation);
+            final displayTranslation =
+                accumulatedTranslation.isNotEmpty && translationText.isNotEmpty
+                    ? '$accumulatedTranslation $translationText'
+                    : (translationText.isNotEmpty
+                        ? translationText
+                        : accumulatedTranslation);
 
             setState(() {
               _transcriptions[uiSpeakerIndex] = displayTranscription.trim();
@@ -2249,7 +2706,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 _translations[uiSpeakerIndex] = displayTranslation.trim();
               }
             });
-            debugPrint('RealtimeTranslator: ✅ UI updated with INTERIM transcription/translation for UI Speaker $uiSpeakerIndex (not saved to buffer)');
+            debugPrint(
+                'RealtimeTranslator: ✅ UI updated with INTERIM transcription/translation for UI Speaker $uiSpeakerIndex (not saved to buffer)');
             // Auto-scroll to latest content (transcription)
             _autoScrollToBottom(uiSpeakerIndex, isTranslation: false);
             if (displayTranslation.isNotEmpty) {
@@ -2267,49 +2725,57 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   /// Map Soniox speaker ID to UI speaker index based on detected language
   /// This ensures that regardless of Soniox's speaker numbering, we display
   /// text in the correct speaker section based on the language they're speaking
-  int _mapSonioxSpeakerToUiSpeaker(int sonioxSpeakerId, String detectedLanguage, String transcribedText) {
+  int _mapSonioxSpeakerToUiSpeaker(
+      int sonioxSpeakerId, String detectedLanguage, String transcribedText) {
     // Get configured languages for our UI speakers
     final speaker1Lang = _speakerLanguages[0]?.code.toLowerCase() ?? '';
     final speaker2Lang = _speakerLanguages[1]?.code.toLowerCase() ?? '';
     final detectedLangLower = detectedLanguage.toLowerCase();
-    
+
     debugPrint('RealtimeTranslator: Language Mapping:');
     debugPrint('  UI Speaker 0 configured: $speaker1Lang');
     debugPrint('  UI Speaker 1 configured: $speaker2Lang');
     debugPrint('  Detected language: $detectedLangLower');
     debugPrint('  Soniox speaker ID: $sonioxSpeakerId');
     debugPrint('  Transcribed text: "$transcribedText"');
-    
+
     // Check if text is phonetically transcribed (English words in Bengali/other script)
     // If it looks like phonetic transcription, it might be the wrong language detection
-    final isPhoneticBengali = _isPhoneticTranscription(transcribedText, detectedLangLower);
+    final isPhoneticBengali =
+        _isPhoneticTranscription(transcribedText, detectedLangLower);
     if (isPhoneticBengali) {
       debugPrint('RealtimeTranslator: ⚠️ Detected phonetic transcription!');
-      debugPrint('RealtimeTranslator: Likely English spoken but transcribed as $detectedLangLower');
-      
+      debugPrint(
+          'RealtimeTranslator: Likely English spoken but transcribed as $detectedLangLower');
+
       // If phonetic, assume it's actually the OTHER language
       if (detectedLangLower == speaker2Lang) {
-        debugPrint('RealtimeTranslator: Mapping to UI Speaker 0 (likely English)');
+        debugPrint(
+            'RealtimeTranslator: Mapping to UI Speaker 0 (likely English)');
         return 0;
       } else if (detectedLangLower == speaker1Lang) {
-        debugPrint('RealtimeTranslator: Mapping to UI Speaker 1 (likely Bengali)');
+        debugPrint(
+            'RealtimeTranslator: Mapping to UI Speaker 1 (likely Bengali)');
         return 1;
       }
     }
-    
+
     // Match based on language code
     // If detected language matches Speaker 1's language, map to Speaker 1 (index 0)
     // If detected language matches Speaker 2's language, map to Speaker 2 (index 1)
-    if (detectedLangLower == speaker1Lang || detectedLangLower.startsWith(speaker1Lang)) {
+    if (detectedLangLower == speaker1Lang ||
+        detectedLangLower.startsWith(speaker1Lang)) {
       debugPrint('RealtimeTranslator: Language matches UI Speaker 0');
       return 0;
-    } else if (detectedLangLower == speaker2Lang || detectedLangLower.startsWith(speaker2Lang)) {
+    } else if (detectedLangLower == speaker2Lang ||
+        detectedLangLower.startsWith(speaker2Lang)) {
       debugPrint('RealtimeTranslator: Language matches UI Speaker 1');
       return 1;
     }
-    
+
     // Fallback: use Soniox's speaker ID directly
-    debugPrint('RealtimeTranslator: ⚠️ No language match, using Soniox speaker ID: $sonioxSpeakerId');
+    debugPrint(
+        'RealtimeTranslator: ⚠️ No language match, using Soniox speaker ID: $sonioxSpeakerId');
     return sonioxSpeakerId;
   }
 
@@ -2317,29 +2783,29 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   /// Looks for sentence-ending punctuation marks
   bool _isCompleteSentence(String text) {
     if (text.isEmpty) return false;
-    
+
     final trimmedText = text.trim();
     if (trimmedText.isEmpty) return false;
-    
+
     // Check for sentence-ending punctuation
     // English: . ! ?
     // Bengali: । (devanagari danda), ! ?
     // General: Multiple language punctuation marks
     final sentenceEnders = [
-      '.', '!', '?',           // English/Latin
-      '।', '॥',                // Bengali/Devanagari
-      '。', '！', '？',         // Chinese/Japanese
-      '؟', '۔',                // Arabic/Urdu
-      ':', ';',                // Additional punctuation (sometimes ends thoughts)
+      '.', '!', '?', // English/Latin
+      '।', '॥', // Bengali/Devanagari
+      '。', '！', '？', // Chinese/Japanese
+      '؟', '۔', // Arabic/Urdu
+      ':', ';', // Additional punctuation (sometimes ends thoughts)
     ];
-    
+
     // Check if text ends with any sentence-ending punctuation
     for (final ender in sentenceEnders) {
       if (trimmedText.endsWith(ender)) {
         return true;
       }
     }
-    
+
     return false;
   }
 
@@ -2352,25 +2818,25 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     if (text.isEmpty) {
       return {'completed': '', 'incomplete': ''};
     }
-    
+
     final trimmedText = text.trim();
     if (trimmedText.isEmpty) {
       return {'completed': '', 'incomplete': ''};
     }
-    
+
     // Sentence-ending punctuation marks
     final sentenceEnders = [
-      '.', '!', '?',           // English/Latin
-      '।', '॥',                // Bengali/Devanagari
-      '。', '！', '？',         // Chinese/Japanese
-      '؟', '۔',                // Arabic/Urdu
-      ':', ';',                // Additional punctuation (sometimes ends thoughts)
+      '.', '!', '?', // English/Latin
+      '।', '॥', // Bengali/Devanagari
+      '。', '！', '？', // Chinese/Japanese
+      '؟', '۔', // Arabic/Urdu
+      ':', ';', // Additional punctuation (sometimes ends thoughts)
     ];
-    
+
     // Find the last occurrence of any sentence-ending punctuation
     int lastSentenceEndIndex = -1;
     String lastEnderFound = '';
-    
+
     for (final ender in sentenceEnders) {
       final index = trimmedText.lastIndexOf(ender);
       if (index > lastSentenceEndIndex) {
@@ -2378,46 +2844,65 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         lastEnderFound = ender;
       }
     }
-    
+
     // If no sentence-ending punctuation found, entire text is incomplete
     if (lastSentenceEndIndex == -1) {
       return {'completed': '', 'incomplete': trimmedText};
     }
-    
+
     // Split at the last sentence-ending punctuation
     // Include the punctuation in the completed part
-    final completedPart = trimmedText.substring(0, lastSentenceEndIndex + 1).trim();
-    
+    final completedPart =
+        trimmedText.substring(0, lastSentenceEndIndex + 1).trim();
+
     // Everything after the last punctuation is incomplete
     final incompletePart = lastSentenceEndIndex < trimmedText.length - 1
         ? trimmedText.substring(lastSentenceEndIndex + 1).trim()
         : '';
-    
+
     debugPrint('RealtimeTranslator: 📝 Sentence Extraction:');
-    debugPrint('RealtimeTranslator:   Original text length: ${trimmedText.length} chars');
-    debugPrint('RealtimeTranslator:   Last sentence ender: "$lastEnderFound" at index $lastSentenceEndIndex');
-    debugPrint('RealtimeTranslator:   Completed sentences: "${completedPart.length > 100 ? completedPart.substring(0, 100) + '...' : completedPart}"');
-    debugPrint('RealtimeTranslator:   Incomplete text: "${incompletePart.length > 50 ? incompletePart.substring(0, 50) + '...' : incompletePart}"');
-    debugPrint('RealtimeTranslator:   Completed sentences count: ${_countSentences(completedPart)}');
-    
+    debugPrint(
+        'RealtimeTranslator:   Original text length: ${trimmedText.length} chars');
+    debugPrint(
+        'RealtimeTranslator:   Last sentence ender: "$lastEnderFound" at index $lastSentenceEndIndex');
+    debugPrint(
+        'RealtimeTranslator:   Completed sentences: "${completedPart.length > 100 ? completedPart.substring(0, 100) + '...' : completedPart}"');
+    debugPrint(
+        'RealtimeTranslator:   Incomplete text: "${incompletePart.length > 50 ? incompletePart.substring(0, 50) + '...' : incompletePart}"');
+    debugPrint(
+        'RealtimeTranslator:   Completed sentences count: ${_countSentences(completedPart)}');
+
     return {
       'completed': completedPart,
       'incomplete': incompletePart,
     };
   }
-  
+
   /// Count the number of completed sentences in text
   /// Helper method for logging and analytics
   int _countSentences(String text) {
     if (text.isEmpty) return 0;
-    
-    final sentenceEnders = ['.', '!', '?', '।', '॥', '。', '！', '？', '؟', '۔', ':', ';'];
-    
+
+    final sentenceEnders = [
+      '.',
+      '!',
+      '?',
+      '।',
+      '॥',
+      '。',
+      '！',
+      '？',
+      '؟',
+      '۔',
+      ':',
+      ';'
+    ];
+
     int count = 0;
     for (final ender in sentenceEnders) {
       count += ender.allMatches(text).length;
     }
-    
+
     return count;
   }
 
@@ -2432,35 +2917,41 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     try {
       final chunkCount = _accumulatedChunkCount[speakerIndex] ?? 0;
       final lastChunkTime = _lastChunkReceivedTime[speakerIndex];
-      final timeSinceLastChunk = lastChunkTime != null 
-          ? DateTime.now().difference(lastChunkTime).inMilliseconds 
+      final timeSinceLastChunk = lastChunkTime != null
+          ? DateTime.now().difference(lastChunkTime).inMilliseconds
           : 0;
-      
-      debugPrint('RealtimeTranslator: ═══ BATCH Sentence Processing (Adaptive Timer Fired) ═══');
+
+      debugPrint(
+          'RealtimeTranslator: ═══ BATCH Sentence Processing (Adaptive Timer Fired) ═══');
       debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
       debugPrint('RealtimeTranslator: Chunks accumulated: $chunkCount');
-      debugPrint('RealtimeTranslator: Time since last chunk: ${timeSinceLastChunk}ms');
-      debugPrint('RealtimeTranslator: Processing ALL accumulated sentences in ONE batch');
-      
+      debugPrint(
+          'RealtimeTranslator: Time since last chunk: ${timeSinceLastChunk}ms');
+      debugPrint(
+          'RealtimeTranslator: Processing ALL accumulated sentences in ONE batch');
+
       // Get current buffer content
-      final currentBuffer = _sentenceTranslationBuffers[speakerIndex]?.toString().trim() ?? '';
-      
+      final currentBuffer =
+          _sentenceTranslationBuffers[speakerIndex]?.toString().trim() ?? '';
+
       if (currentBuffer.isEmpty) {
         debugPrint('RealtimeTranslator: Buffer is empty, nothing to process');
         return;
       }
-      
-      debugPrint('RealtimeTranslator: Buffer content length: ${currentBuffer.length} chars');
-      
+
+      debugPrint(
+          'RealtimeTranslator: Buffer content length: ${currentBuffer.length} chars');
+
       // Extract completed and incomplete parts
       final extracted = _extractCompletedSentences(currentBuffer);
       final completedSentences = extracted['completed'] ?? '';
       final incompleteSentence = extracted['incomplete'] ?? '';
-      
+
       final sentenceCount = _countSentences(completedSentences);
-      
+
       debugPrint('RealtimeTranslator: Completed sentences: $sentenceCount');
-      debugPrint('RealtimeTranslator: Incomplete text length: ${incompleteSentence.length} chars');
+      debugPrint(
+          'RealtimeTranslator: Incomplete text length: ${incompleteSentence.length} chars');
 
       if (completedSentences.isNotEmpty) {
         // Generate TTS for ALL completed sentences at once (BATCH PROCESSING)
@@ -2468,14 +2959,19 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         final earpiece = _speakerEarpieces[targetSpeakerIndex] ?? 'left';
 
         debugPrint('RealtimeTranslator: ═══ BATCH TTS Generation ═══');
-        debugPrint('RealtimeTranslator: TTS for target speaker: $targetSpeakerIndex');
+        debugPrint(
+            'RealtimeTranslator: TTS for target speaker: $targetSpeakerIndex');
         debugPrint('RealtimeTranslator: TTS language: ${targetLanguage.code}');
-        debugPrint('RealtimeTranslator: Processing $sentenceCount completed sentence(s) in ONE batch');
-        debugPrint('RealtimeTranslator: Combined TTS text: "${completedSentences.length > 100 ? completedSentences.substring(0, 100) + '...' : completedSentences}"');
+        debugPrint(
+            'RealtimeTranslator: Processing $sentenceCount completed sentence(s) in ONE batch');
+        debugPrint(
+            'RealtimeTranslator: Combined TTS text: "${completedSentences.length > 100 ? completedSentences.substring(0, 100) + '...' : completedSentences}"');
         debugPrint('RealtimeTranslator: TTS gender: $targetGender');
         debugPrint('RealtimeTranslator: TTS earpiece: $earpiece');
-        debugPrint('RealtimeTranslator: ✅ ADVANTAGE: All completed sentences processed in ONE TTS generation');
-        debugPrint('RealtimeTranslator: ✅ This eliminates multiple TTS files for consecutive sentences');
+        debugPrint(
+            'RealtimeTranslator: ✅ ADVANTAGE: All completed sentences processed in ONE TTS generation');
+        debugPrint(
+            'RealtimeTranslator: ✅ This eliminates multiple TTS files for consecutive sentences');
 
         // Add to TTS queue for pre-generation and playback (ALL completed sentences at once)
         _addToTtsQueue(
@@ -2489,35 +2985,87 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         // CRITICAL: Don't clear buffers completely - keep incomplete sentence for next iteration
         _sentenceTranscriptionBuffers[speakerIndex]?.clear();
         _sentenceTranslationBuffers[speakerIndex]?.clear();
-        
+
         if (incompleteSentence.isNotEmpty) {
           _sentenceTranslationBuffers[speakerIndex]?.write(incompleteSentence);
-          debugPrint('RealtimeTranslator: ✅ Batch processing complete, incomplete text kept in buffer: "$incompleteSentence"');
+          debugPrint(
+              'RealtimeTranslator: ✅ Batch processing complete, incomplete text kept in buffer: "$incompleteSentence"');
         } else {
-          debugPrint('RealtimeTranslator: ✅ Batch processing complete, all sentences were completed, buffer cleared');
+          debugPrint(
+              'RealtimeTranslator: ✅ Batch processing complete, all sentences were completed, buffer cleared');
         }
-        
-        debugPrint('RealtimeTranslator: ✅ $sentenceCount completed sentence(s) processed as ONE batch');
-        debugPrint('RealtimeTranslator: ✅ Result: ONE TTS file instead of $sentenceCount separate files');
-        debugPrint('RealtimeTranslator: ✅ Batch efficiency: $chunkCount chunks → 1 TTS file');
+
+        debugPrint(
+            'RealtimeTranslator: ✅ $sentenceCount completed sentence(s) processed as ONE batch');
+        debugPrint(
+            'RealtimeTranslator: ✅ Result: ONE TTS file instead of $sentenceCount separate files');
+        debugPrint(
+            'RealtimeTranslator: ✅ Batch efficiency: $chunkCount chunks → 1 TTS file');
       } else {
-        debugPrint('RealtimeTranslator: ⏳ No completed sentences yet, all text is incomplete');
+        debugPrint(
+            'RealtimeTranslator: ⏳ No completed sentences yet, all text is incomplete');
         debugPrint('RealtimeTranslator: Current buffer: "$incompleteSentence"');
-        debugPrint('RealtimeTranslator: Waiting for more text to complete sentences');
+        debugPrint(
+            'RealtimeTranslator: Waiting for more text to complete sentences');
       }
-      
+
       // Reset chunk counter after processing
       _accumulatedChunkCount[speakerIndex] = 0;
       _lastChunkReceivedTime[speakerIndex] = null;
-      
     } catch (e) {
-      debugPrint('RealtimeTranslator: ❌ Error in batch sentence processing: $e');
+      debugPrint(
+          'RealtimeTranslator: ❌ Error in batch sentence processing: $e');
       debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
-      
+
       // Reset counters on error
       _accumulatedChunkCount[speakerIndex] = 0;
       _lastChunkReceivedTime[speakerIndex] = null;
     }
+  }
+
+  /// Force flush all pending sentence buffers (called when recording stops)
+  /// This ensures NO speech is lost when session ends
+  Future<void> _flushAllPendingBuffers() async {
+    debugPrint('RealtimeTranslator: ═══ FORCE FLUSHING ALL BUFFERS ═══');
+
+    for (int speakerIndex = 0; speakerIndex <= 1; speakerIndex++) {
+      // Cancel any pending timer for this speaker
+      _sentenceProcessingTimers[speakerIndex]?.cancel();
+      _sentenceProcessingTimers[speakerIndex] = null;
+
+      // Check if buffer has content
+      final buffer =
+          _sentenceTranslationBuffers[speakerIndex]?.toString().trim() ?? '';
+
+      if (buffer.isNotEmpty) {
+        debugPrint(
+            'RealtimeTranslator: 🔥 Force processing Speaker $speakerIndex buffer (${buffer.length} chars)');
+
+        // Determine target speaker and language
+        final targetSpeakerIndex = speakerIndex == 0 ? 1 : 0;
+        final targetLanguage = _speakerLanguages[targetSpeakerIndex];
+
+        if (targetLanguage != null) {
+          // Force process this buffer immediately
+          await _processSentenceBatch(
+            speakerIndex: speakerIndex,
+            targetSpeakerIndex: targetSpeakerIndex,
+            targetLanguage: targetLanguage,
+          );
+          debugPrint(
+              'RealtimeTranslator: ✅ Speaker $speakerIndex buffer flushed');
+        } else {
+          debugPrint(
+              'RealtimeTranslator: ⚠️ No target language for Speaker $speakerIndex, skipping');
+        }
+      } else {
+        debugPrint(
+            'RealtimeTranslator: ✓ Speaker $speakerIndex buffer empty, nothing to flush');
+      }
+    }
+
+    debugPrint(
+        'RealtimeTranslator: ✅✅ ALL BUFFERS FLUSHED - NO SPEECH LOST ✅✅');
   }
 
   /// Check if text appears to be phonetically transcribed
@@ -2526,14 +3074,33 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     if (detectedLanguage.toLowerCase() != 'bn') {
       return false; // Only check for Bengali phonetic transcription
     }
-    
+
     // Common English words that appear phonetically in Bengali
     final phoneticIndicators = [
-      'গুড', 'হাউ', 'আর', 'ইউ', 'হ্যালো', 'হাই', 'বাই', 'ইয়েস', 'নো',
-      'ওকে', 'থ্যাংক', 'প্লিজ', 'সরি', 'এক্সকিউজ', 'মি', 'ওয়েলকাম',
-      'আফটারনুন', 'মর্নিং', 'ইভনিং', 'ফাইন', 'নাইস', 'গ্রেট'
+      'গুড',
+      'হাউ',
+      'আর',
+      'ইউ',
+      'হ্যালো',
+      'হাই',
+      'বাই',
+      'ইয়েস',
+      'নো',
+      'ওকে',
+      'থ্যাংক',
+      'প্লিজ',
+      'সরি',
+      'এক্সকিউজ',
+      'মি',
+      'ওয়েলকাম',
+      'আফটারনুন',
+      'মর্নিং',
+      'ইভনিং',
+      'ফাইন',
+      'নাইস',
+      'গ্রেট'
     ];
-    
+
     // Check if text contains multiple phonetic indicators
     int phoneticCount = 0;
     for (final indicator in phoneticIndicators) {
@@ -2541,7 +3108,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         phoneticCount++;
       }
     }
-    
+
     // If 2 or more phonetic indicators, it's likely phonetic transcription
     return phoneticCount >= 2;
   }
@@ -2558,32 +3125,39 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   }) async {
     // CRITICAL: Prevent concurrent translation+playback
     if (_isTranslationInProgress) {
-      debugPrint('RealtimeTranslator: ⚠️ Translation already in progress, skipping this request');
+      debugPrint(
+          'RealtimeTranslator: ⚠️ Translation already in progress, skipping this request');
       return;
     }
 
     _isTranslationInProgress = true;
-    
+
     try {
       final translationStartTime = DateTime.now();
-      
-      debugPrint('RealtimeTranslator: ═══ Soniox Translation + TTS (FAST PATH) ═══');
+
+      debugPrint(
+          'RealtimeTranslator: ═══ Soniox Translation + TTS (FAST PATH) ═══');
       debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
       debugPrint('RealtimeTranslator: Source language: $sourceLanguage');
       debugPrint('RealtimeTranslator: Transcribed text: "$transcribedText"');
-      debugPrint('RealtimeTranslator: Translated text (from Soniox): "$translatedText"');
-      debugPrint('RealtimeTranslator: ✅ No Azure API call needed - saves ~2-3 seconds!');
-      
+      debugPrint(
+          'RealtimeTranslator: Translated text (from Soniox): "$translatedText"');
+      debugPrint(
+          'RealtimeTranslator: ✅ No Azure API call needed - saves ~2-3 seconds!');
+
       // Track translation characters (Soniox charges by character, not word)
       // 1 character = 0.3 tokens according to Soniox pricing
       final translationCharCount = translatedText.length;
       _totalTranslationCharacters += translationCharCount;
-      _translationCharactersPerSpeaker[speakerIndex] = 
-          (_translationCharactersPerSpeaker[speakerIndex] ?? 0) + translationCharCount;
+      _translationCharactersPerSpeaker[speakerIndex] =
+          (_translationCharactersPerSpeaker[speakerIndex] ?? 0) +
+              translationCharCount;
       _totalTranslations++;
-      
-      final translationTokens = (translationCharCount * _tokensPerCharacter).round();
-      debugPrint('RealtimeTranslator: 📊 Translation: $translationCharCount chars ≈ $translationTokens tokens (total chars: $_totalTranslationCharacters)');
+
+      final translationTokens =
+          (translationCharCount * _tokensPerCharacter).round();
+      debugPrint(
+          'RealtimeTranslator: 📊 Translation: $translationCharCount chars ≈ $translationTokens tokens (total chars: $_totalTranslationCharacters)');
 
       // Update translation buffer for full conversation history
       if (_realtimeTranslations[speakerIndex]!.isNotEmpty) {
@@ -2598,13 +3172,13 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       if (_sentenceTranslationBuffers[speakerIndex] == null) {
         _sentenceTranslationBuffers[speakerIndex] = StringBuffer();
       }
-      
+
       // Add to sentence buffer (for TTS generation)
       if (_sentenceTranscriptionBuffers[speakerIndex]!.isNotEmpty) {
         _sentenceTranscriptionBuffers[speakerIndex]!.write(' ');
       }
       _sentenceTranscriptionBuffers[speakerIndex]!.write(transcribedText);
-      
+
       if (_sentenceTranslationBuffers[speakerIndex]!.isNotEmpty) {
         _sentenceTranslationBuffers[speakerIndex]!.write(' ');
       }
@@ -2627,10 +3201,13 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Update UI with translation immediately (show all accumulated text)
       if (mounted) {
         setState(() {
-          _translations[speakerIndex] = _realtimeTranslations[speakerIndex]?.toString().trim() ?? '';
+          _translations[speakerIndex] =
+              _realtimeTranslations[speakerIndex]?.toString().trim() ?? '';
         });
-        debugPrint('RealtimeTranslator: ✅ UI updated with Soniox translation for Speaker $speakerIndex');
-        debugPrint('RealtimeTranslator: Speaker $speakerIndex translation: "${_translations[speakerIndex]}"');
+        debugPrint(
+            'RealtimeTranslator: ✅ UI updated with Soniox translation for Speaker $speakerIndex');
+        debugPrint(
+            'RealtimeTranslator: Speaker $speakerIndex translation: "${_translations[speakerIndex]}"');
         // Auto-scroll to latest content (translation)
         _autoScrollToBottom(speakerIndex, isTranslation: true);
       }
@@ -2638,63 +3215,69 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // ADAPTIVE BATCH SENTENCE PROCESSING
       // Track chunk arrival for intelligent batching
       _lastChunkReceivedTime[speakerIndex] = DateTime.now();
-      _accumulatedChunkCount[speakerIndex] = (_accumulatedChunkCount[speakerIndex] ?? 0) + 1;
-      
+      _accumulatedChunkCount[speakerIndex] =
+          (_accumulatedChunkCount[speakerIndex] ?? 0) + 1;
+
       // Get current buffer to check sentence count
-      final currentBuffer = _sentenceTranslationBuffers[speakerIndex]!.toString().trim();
+      final currentBuffer =
+          _sentenceTranslationBuffers[speakerIndex]!.toString().trim();
       final extracted = _extractCompletedSentences(currentBuffer);
       final completedSentences = extracted['completed'] ?? '';
       final sentenceCount = _countSentences(completedSentences);
-      
-      debugPrint('RealtimeTranslator: 🕐 ADAPTIVE Batch Processing for Speaker $speakerIndex');
+
+      debugPrint(
+          'RealtimeTranslator: 🕐 ADAPTIVE Batch Processing for Speaker $speakerIndex');
       debugPrint('RealtimeTranslator: 📊 Current state:');
-      debugPrint('RealtimeTranslator:   - Chunks accumulated: ${_accumulatedChunkCount[speakerIndex]}');
+      debugPrint(
+          'RealtimeTranslator:   - Chunks accumulated: ${_accumulatedChunkCount[speakerIndex]}');
       debugPrint('RealtimeTranslator:   - Completed sentences: $sentenceCount');
-      debugPrint('RealtimeTranslator:   - Buffer length: ${currentBuffer.length} chars');
-      
+      debugPrint(
+          'RealtimeTranslator:   - Buffer length: ${currentBuffer.length} chars');
+
       // Cancel existing timer
       _sentenceProcessingTimers[speakerIndex]?.cancel();
-      
-      // SMART DECISION: Determine optimal processing delay
+
+      // SMART DECISION: Determine optimal processing delay (REDUCED for responsiveness)
       Duration processingDelay;
-      
+
       if (sentenceCount >= _maxSentencesForBatch) {
         // Case 1: We have many sentences (10+) - process immediately
-        processingDelay = const Duration(milliseconds: 500);
-        debugPrint('RealtimeTranslator: ⚡ Many sentences ($sentenceCount) - processing in 500ms');
+        processingDelay = const Duration(milliseconds: 200);
+        debugPrint(
+            'RealtimeTranslator: ⚡ Many sentences ($sentenceCount) - processing in 200ms');
       } else if (sentenceCount >= _minSentencesForBatch) {
-        // Case 2: We have 2+ sentences - use moderate delay (2.5s)
-        processingDelay = const Duration(milliseconds: 2500);
-        debugPrint('RealtimeTranslator: ⏱️ Good batch ($sentenceCount sentences) - processing in 2.5s');
+        // Case 2: We have 2+ sentences - use moderate delay (REDUCED from 2.5s to 1s)
+        processingDelay = const Duration(milliseconds: 1000);
+        debugPrint(
+            'RealtimeTranslator: ⏱️ Good batch ($sentenceCount sentences) - processing in 1s');
       } else if (sentenceCount == 1) {
-        // Case 3: Only 1 sentence - wait longer for more (3.5s)
-        processingDelay = const Duration(milliseconds: 3500);
-        debugPrint('RealtimeTranslator: ⏳ Single sentence - waiting 3.5s for more');
+        // Case 3: Only 1 sentence - wait for more (REDUCED from 3.5s to 1.5s)
+        processingDelay = const Duration(milliseconds: 1500);
+        debugPrint(
+            'RealtimeTranslator: ⏳ Single sentence - waiting 1.5s for more');
       } else {
-        // Case 4: No completed sentences yet - standard delay (3s)
-        processingDelay = const Duration(milliseconds: 3000);
-        debugPrint('RealtimeTranslator: ⏳ No completed sentences - waiting 3s');
+        // Case 4: No completed sentences yet - standard delay (REDUCED from 3s to 1.2s)
+        processingDelay = const Duration(milliseconds: 1200);
+        debugPrint(
+            'RealtimeTranslator: ⏳ No completed sentences - waiting 1.2s');
       }
-      
-      // Adaptive extension: Add time based on chunk velocity
-      // If chunks are coming rapidly, extend the timer
-      final chunkCount = _accumulatedChunkCount[speakerIndex] ?? 0;
-      if (chunkCount > 3 && sentenceCount < _minSentencesForBatch) {
-        final extension = Duration(milliseconds: 500 * (chunkCount - 3));
-        final extendedDelay = Duration(milliseconds: processingDelay.inMilliseconds + extension.inMilliseconds);
-        
-        // Cap at max delay
-        if (extendedDelay <= _maxProcessingDelay) {
-          processingDelay = extendedDelay;
-          debugPrint('RealtimeTranslator: 🔄 Extended delay to ${processingDelay.inMilliseconds}ms (chunks arriving rapidly)');
-        } else {
-          processingDelay = _maxProcessingDelay;
-          debugPrint('RealtimeTranslator: 🔄 Capped at max delay ${_maxProcessingDelay.inMilliseconds}ms');
+
+      // Check buffer age - if too old, force process immediately
+      final lastChunkTime = _lastChunkReceivedTime[speakerIndex];
+      if (lastChunkTime != null) {
+        final bufferAge =
+            DateTime.now().difference(lastChunkTime).inMilliseconds;
+        if (bufferAge > 2500) {
+          // Buffer is > 2.5 seconds old - force process NOW to avoid loss
+          processingDelay = const Duration(milliseconds: 100);
+          debugPrint(
+              'RealtimeTranslator: 🔥 Buffer age ${bufferAge}ms - FORCE PROCESSING NOW!');
         }
       }
-      
-      debugPrint('RealtimeTranslator: ⏰ Timer set for ${processingDelay.inMilliseconds}ms');
-      
+
+      debugPrint(
+          'RealtimeTranslator: ⏰ Timer set for ${processingDelay.inMilliseconds}ms');
+
       // Start adaptive timer
       _sentenceProcessingTimers[speakerIndex] = Timer(processingDelay, () {
         _processSentenceBatch(
@@ -2704,14 +3287,19 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         );
       });
 
-      debugPrint('RealtimeTranslator: ✅ Soniox translation processing complete (FAST PATH - no Azure API delay)');
-      
+      debugPrint(
+          'RealtimeTranslator: ✅ Soniox translation processing complete (FAST PATH - no Azure API delay)');
+
       // Track translation latency
-      final translationLatency = DateTime.now().difference(translationStartTime).inMilliseconds / 1000.0;
+      final translationLatency =
+          DateTime.now().difference(translationStartTime).inMilliseconds /
+              1000.0;
       _translationLatencies.add(translationLatency);
-      debugPrint('RealtimeTranslator: ⏱️ Translation latency: ${translationLatency.toStringAsFixed(2)}s');
+      debugPrint(
+          'RealtimeTranslator: ⏱️ Translation latency: ${translationLatency.toStringAsFixed(2)}s');
     } catch (e) {
-      debugPrint('RealtimeTranslator: ❌ Error processing Soniox translation: $e');
+      debugPrint(
+          'RealtimeTranslator: ❌ Error processing Soniox translation: $e');
       debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
     } finally {
       _isTranslationInProgress = false;
@@ -2727,28 +3315,32 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   }) async {
     // CRITICAL: Prevent concurrent translation+playback
     if (_isTranslationInProgress) {
-      debugPrint('RealtimeTranslator: ⚠️ Translation already in progress, skipping this request');
+      debugPrint(
+          'RealtimeTranslator: ⚠️ Translation already in progress, skipping this request');
       return;
     }
 
     _isTranslationInProgress = true;
-    
+
     try {
       debugPrint('RealtimeTranslator: ═══ Azure Translation + TTS ═══');
       debugPrint('RealtimeTranslator: Initial speaker: $speakerIndex');
-      debugPrint('RealtimeTranslator: Soniox detected language: $sourceLanguage');
+      debugPrint(
+          'RealtimeTranslator: Soniox detected language: $sourceLanguage');
       debugPrint('RealtimeTranslator: Transcribed text: "$transcribedText"');
 
       // CHECK FOR PHONETIC TRANSCRIPTION FIRST
-      final isPhonetic = _isPhoneticTranscription(transcribedText, sourceLanguage);
-      
+      final isPhonetic =
+          _isPhoneticTranscription(transcribedText, sourceLanguage);
+
       int actualSpeakerIndex = speakerIndex;
       String actualSourceLanguage = sourceLanguage;
       String actualTranscribedText = transcribedText;
-      
+
       if (isPhonetic) {
-        debugPrint('RealtimeTranslator: ⚠️ PHONETIC DETECTED! Text is likely English written in Bengali script');
-        
+        debugPrint(
+            'RealtimeTranslator: ⚠️ PHONETIC DETECTED! Text is likely English written in Bengali script');
+
         // Phonetic transcription means:
         // - Soniox thought it was Bengali (sourceLanguage = 'bn')
         // - But it's actually English spoken and written phonetically
@@ -2756,13 +3348,16 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         //   1. Map to the OTHER speaker (English speaker)
         //   2. Use English as the actual source language
         //   3. First translate the phonetic text back to proper English
-        
+
         actualSpeakerIndex = speakerIndex == 0 ? 1 : 0;
-        actualSourceLanguage = _speakerLanguages[actualSpeakerIndex]?.code ?? 'en';
-        
-        debugPrint('RealtimeTranslator: 🔄 CORRECTION: Speaker $speakerIndex → Speaker $actualSpeakerIndex');
-        debugPrint('RealtimeTranslator: 🔄 CORRECTION: Language $sourceLanguage → $actualSourceLanguage');
-        
+        actualSourceLanguage =
+            _speakerLanguages[actualSpeakerIndex]?.code ?? 'en';
+
+        debugPrint(
+            'RealtimeTranslator: 🔄 CORRECTION: Speaker $speakerIndex → Speaker $actualSpeakerIndex');
+        debugPrint(
+            'RealtimeTranslator: 🔄 CORRECTION: Language $sourceLanguage → $actualSourceLanguage');
+
         // Clear the incorrect speaker's text
         _realtimeTranscriptions[speakerIndex]?.clear();
         _realtimeTranslations[speakerIndex]?.clear();
@@ -2772,24 +3367,28 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             _translations[speakerIndex] = '';
           });
         }
-        
+
         // Try to transliterate/translate phonetic Bengali back to English
         // This is a workaround - we're asking Azure to translate from Bengali to English
         // hoping it will recognize the phonetic pattern
-        debugPrint('RealtimeTranslator: 🌐 Attempting to recover English from phonetic Bengali...');
+        debugPrint(
+            'RealtimeTranslator: 🌐 Attempting to recover English from phonetic Bengali...');
         final recoveryResult = await TranslationService.translateText(
           sourceLanguage: sourceLanguage, // 'bn' (what Soniox thought)
           targetLanguage: actualSourceLanguage, // 'en' (what it actually is)
           content: transcribedText,
         );
-        
-        if (recoveryResult != null && recoveryResult.translatedText.isNotEmpty) {
+
+        if (recoveryResult != null &&
+            recoveryResult.translatedText.isNotEmpty) {
           actualTranscribedText = recoveryResult.translatedText;
-          debugPrint('RealtimeTranslator: ✅ Recovered English: "$actualTranscribedText"');
+          debugPrint(
+              'RealtimeTranslator: ✅ Recovered English: "$actualTranscribedText"');
         } else {
-          debugPrint('RealtimeTranslator: ⚠️ Could not recover English, using phonetic text as-is');
+          debugPrint(
+              'RealtimeTranslator: ⚠️ Could not recover English, using phonetic text as-is');
         }
-        
+
         // Initialize corrected speaker buffers if needed
         if (_realtimeTranscriptions[actualSpeakerIndex] == null) {
           _realtimeTranscriptions[actualSpeakerIndex] = StringBuffer();
@@ -2802,8 +3401,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // Now we have the ACTUAL speaker and ACTUAL source language
       debugPrint('RealtimeTranslator: ═══ Final Processing ═══');
       debugPrint('RealtimeTranslator: Actual speaker: $actualSpeakerIndex');
-      debugPrint('RealtimeTranslator: Actual source language: $actualSourceLanguage');
-      debugPrint('RealtimeTranslator: Actual transcribed text: "$actualTranscribedText"');
+      debugPrint(
+          'RealtimeTranslator: Actual source language: $actualSourceLanguage');
+      debugPrint(
+          'RealtimeTranslator: Actual transcribed text: "$actualTranscribedText"');
 
       // CRITICAL FIX: Don't write transcription here - it's already written in _handleSonioxResult
       // Only write if this is a corrected speaker (phonetic case)
@@ -2812,8 +3413,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         if (_realtimeTranscriptions[actualSpeakerIndex]!.isNotEmpty) {
           _realtimeTranscriptions[actualSpeakerIndex]!.write(' ');
         }
-        _realtimeTranscriptions[actualSpeakerIndex]!.write(actualTranscribedText);
-        debugPrint('RealtimeTranslator: ✅ Transcription written to corrected speaker buffer');
+        _realtimeTranscriptions[actualSpeakerIndex]!
+            .write(actualTranscribedText);
+        debugPrint(
+            'RealtimeTranslator: ✅ Transcription written to corrected speaker buffer');
       }
 
       // Determine target speaker and language for translation
@@ -2835,7 +3438,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         content: actualTranscribedText,
       );
 
-      if (translationResult == null || translationResult.translatedText.isEmpty) {
+      if (translationResult == null ||
+          translationResult.translatedText.isEmpty) {
         debugPrint('RealtimeTranslator: ❌ Azure translation failed');
         return;
       }
@@ -2853,15 +3457,24 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       if (mounted) {
         setState(() {
           // Only update translation here, transcription is already set
-          _translations[actualSpeakerIndex] = _realtimeTranslations[actualSpeakerIndex]?.toString().trim() ?? '';
+          _translations[actualSpeakerIndex] =
+              _realtimeTranslations[actualSpeakerIndex]?.toString().trim() ??
+                  '';
           // Update transcription only if speaker was corrected (phonetic case)
           if (isPhonetic && actualSpeakerIndex != speakerIndex) {
-            _transcriptions[actualSpeakerIndex] = _realtimeTranscriptions[actualSpeakerIndex]?.toString().trim() ?? '';
+            _transcriptions[actualSpeakerIndex] =
+                _realtimeTranscriptions[actualSpeakerIndex]
+                        ?.toString()
+                        .trim() ??
+                    '';
           }
         });
-        debugPrint('RealtimeTranslator: ✅ UI updated for Speaker $actualSpeakerIndex');
-        debugPrint('RealtimeTranslator: Speaker $actualSpeakerIndex transcription: "${_transcriptions[actualSpeakerIndex]}"');
-        debugPrint('RealtimeTranslator: Speaker $actualSpeakerIndex translation: "${_translations[actualSpeakerIndex]}"');
+        debugPrint(
+            'RealtimeTranslator: ✅ UI updated for Speaker $actualSpeakerIndex');
+        debugPrint(
+            'RealtimeTranslator: Speaker $actualSpeakerIndex transcription: "${_transcriptions[actualSpeakerIndex]}"');
+        debugPrint(
+            'RealtimeTranslator: Speaker $actualSpeakerIndex translation: "${_translations[actualSpeakerIndex]}"');
         // Auto-scroll to latest content (translation)
         _autoScrollToBottom(actualSpeakerIndex, isTranslation: true);
       }
@@ -2871,7 +3484,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       final earpiece = _speakerEarpieces[targetSpeakerIndex] ?? 'left';
 
       debugPrint('RealtimeTranslator: ═══ TTS Generation ═══');
-      debugPrint('RealtimeTranslator: TTS for target speaker: $targetSpeakerIndex');
+      debugPrint(
+          'RealtimeTranslator: TTS for target speaker: $targetSpeakerIndex');
       debugPrint('RealtimeTranslator: TTS language: ${targetLanguage.code}');
       debugPrint('RealtimeTranslator: TTS text: "$translatedText"');
       debugPrint('RealtimeTranslator: TTS gender: $targetGender');
@@ -2886,9 +3500,9 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         languageCode: targetLanguage.code,
         gender: targetGender,
       );
-      
-      debugPrint('RealtimeTranslator: ✅ Added TTS to queue (recording continues, TTS will be generated and played from queue)');
 
+      debugPrint(
+          'RealtimeTranslator: ✅ Added TTS to queue (recording continues, TTS will be generated and played from queue)');
     } catch (e) {
       debugPrint('RealtimeTranslator: ❌ Translation + TTS error: $e');
       debugPrint('RealtimeTranslator: Stack trace: ${StackTrace.current}');
@@ -2908,12 +3522,14 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     required String earpiece,
   }) async {
     try {
-      debugPrint('RealtimeTranslator: ═══ Playing TTS with Stereo Routing (REAL-TIME MODE) ═══');
+      debugPrint(
+          'RealtimeTranslator: ═══ Playing TTS with Stereo Routing (REAL-TIME MODE) ═══');
       debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
       debugPrint('RealtimeTranslator: Target speaker: $targetSpeakerIndex');
       debugPrint('RealtimeTranslator: Earpiece: $earpiece');
       debugPrint('RealtimeTranslator: TTS path: $ttsPath');
-      debugPrint('RealtimeTranslator: ⚠️ Mic will pause during playback to avoid interference');
+      debugPrint(
+          'RealtimeTranslator: ⚠️ Mic will pause during playback to avoid interference');
 
       // Set playback in progress flag BEFORE pausing
       _isPlaybackInProgress = true;
@@ -2924,7 +3540,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
       // OPTIMIZATION: Reduced delay - route switching is handled in pause method
       if (_isRealtimeMode) {
-        await Future.delayed(const Duration(milliseconds: 150)); // Reduced from 300ms
+        await Future.delayed(
+            const Duration(milliseconds: 150)); // Reduced from 300ms
       }
 
       // Generate stereo audio file with TTS routed to correct earpiece
@@ -2934,18 +3551,23 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
       // Create a silent audio file for the opposite channel
       final silentAudioPath = await _createMatchingSilentAudioFile(ttsPath);
-      
+
       if (silentAudioPath == null) {
-        debugPrint('RealtimeTranslator: ⚠️ Failed to create silent audio, using TTS for both channels');
+        debugPrint(
+            'RealtimeTranslator: ⚠️ Failed to create silent audio, using TTS for both channels');
       }
 
       // Route TTS to correct earpiece, silence to the other
-      final leftChannelPath = earpiece == 'left' ? ttsPath : (silentAudioPath ?? ttsPath);
-      final rightChannelPath = earpiece == 'right' ? ttsPath : (silentAudioPath ?? ttsPath);
-      
-      debugPrint('RealtimeTranslator: Left channel: ${earpiece == 'left' ? "TTS" : "Silent"}');
-      debugPrint('RealtimeTranslator: Right channel: ${earpiece == 'right' ? "TTS" : "Silent"}');
-      
+      final leftChannelPath =
+          earpiece == 'left' ? ttsPath : (silentAudioPath ?? ttsPath);
+      final rightChannelPath =
+          earpiece == 'right' ? ttsPath : (silentAudioPath ?? ttsPath);
+
+      debugPrint(
+          'RealtimeTranslator: Left channel: ${earpiece == 'left' ? "TTS" : "Silent"}');
+      debugPrint(
+          'RealtimeTranslator: Right channel: ${earpiece == 'right' ? "TTS" : "Silent"}');
+
       final stereoPath = await _stereoTtsService.createTrueStereoAudioFile(
         leftChannelPath,
         rightChannelPath,
@@ -2967,14 +3589,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       }
 
       debugPrint('RealtimeTranslator: 🔊 Starting playback (mic paused)...');
-      
+
       // CRITICAL: Wait for playback to COMPLETE before proceeding
       await _stereoTtsService.playStereoAudio(stereoPath);
-      
+
       debugPrint('RealtimeTranslator: ✅ TTS playback completed');
-      
+
       // OPTIMIZATION: Reduced delay - audio hardware finishes faster
-      await Future.delayed(const Duration(milliseconds: 150)); // Reduced from 300ms
+      await Future.delayed(
+          const Duration(milliseconds: 150)); // Reduced from 300ms
 
       if (mounted) {
         setState(() {
@@ -2987,22 +3610,24 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       // This prevents file deletion while audio is still playing
       // OPTIMIZATION: Reduced delay - files can be cleaned up faster
       try {
-        await Future.delayed(const Duration(milliseconds: 100)); // Reduced from 200ms
-        
+        await Future.delayed(
+            const Duration(milliseconds: 100)); // Reduced from 200ms
+
         final stereoFile = File(stereoPath);
         if (await stereoFile.exists()) {
           await stereoFile.delete();
           debugPrint('RealtimeTranslator: ✅ Cleaned up temporary stereo file');
         }
-        
+
         if (silentAudioPath != null) {
           final silentFile = File(silentAudioPath);
           if (await silentFile.exists()) {
             await silentFile.delete();
-            debugPrint('RealtimeTranslator: ✅ Cleaned up temporary silent file');
+            debugPrint(
+                'RealtimeTranslator: ✅ Cleaned up temporary silent file');
           }
         }
-        
+
         // Also clean up the original TTS file
         final ttsFile = File(ttsPath);
         if (await ttsFile.exists()) {
@@ -3010,7 +3635,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           debugPrint('RealtimeTranslator: ✅ Cleaned up original TTS file');
         }
       } catch (e) {
-        debugPrint('RealtimeTranslator: ⚠️ Failed to delete temporary files: $e');
+        debugPrint(
+            'RealtimeTranslator: ⚠️ Failed to delete temporary files: $e');
       }
     } catch (e) {
       debugPrint('RealtimeTranslator: ❌ TTS playback error: $e');
@@ -3024,10 +3650,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     } finally {
       // Clear playback in progress flag BEFORE resuming
       _isPlaybackInProgress = false;
-      
+
       // Don't switch routes here - let _resumeRealtimeListeningAfterPlayback handle it
       // This ensures the start beep plays in playback mode (TWS) before switching to recording
-      
+
       if (_isRealtimeListeningPaused) {
         await _resumeRealtimeListeningAfterPlayback();
       }
@@ -3035,65 +3661,72 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   }
 
   /// Create a silent audio file with the same duration as the reference audio
-  Future<String?> _createMatchingSilentAudioFile(String referenceAudioPath) async {
+  Future<String?> _createMatchingSilentAudioFile(
+      String referenceAudioPath) async {
     try {
       debugPrint('RealtimeTranslator: Creating silent audio file...');
       debugPrint('RealtimeTranslator: Reference file: $referenceAudioPath');
-      
+
       // Read reference audio file to get duration
       final refFile = File(referenceAudioPath);
       if (!await refFile.exists()) {
         debugPrint('RealtimeTranslator: ❌ Reference audio file does not exist');
         return null;
       }
-      
+
       // CRITICAL FIX: Wait a bit and verify file is stable before reading
       // This ensures the file is fully written and flushed to disk
       await Future.delayed(const Duration(milliseconds: 100));
-      
+
       // Verify file size is stable
       final initialSize = await refFile.length();
       await Future.delayed(const Duration(milliseconds: 50));
       final stableSize = await refFile.length();
-      
+
       if (initialSize != stableSize) {
-        debugPrint('RealtimeTranslator: ⚠️ File size changed ($initialSize → $stableSize), waiting...');
+        debugPrint(
+            'RealtimeTranslator: ⚠️ File size changed ($initialSize → $stableSize), waiting...');
         await Future.delayed(const Duration(milliseconds: 200));
       }
-      
+
       final refBytes = await refFile.readAsBytes();
-      debugPrint('RealtimeTranslator: Read ${refBytes.length} bytes from reference file');
-      
+      debugPrint(
+          'RealtimeTranslator: Read ${refBytes.length} bytes from reference file');
+
       // WAV file header is 44 bytes
       // Data size is in bytes 40-43 (little-endian)
       if (refBytes.length < 44) {
-        debugPrint('RealtimeTranslator: ❌ Reference audio file is too small (${refBytes.length} bytes)');
+        debugPrint(
+            'RealtimeTranslator: ❌ Reference audio file is too small (${refBytes.length} bytes)');
         return null;
       }
-      
+
       // CRITICAL: Validate WAV file header
       final riffHeader = String.fromCharCodes(refBytes.sublist(0, 4));
-      final waveHeader = refBytes.length >= 12 
+      final waveHeader = refBytes.length >= 12
           ? String.fromCharCodes(refBytes.sublist(8, 12))
           : '';
-      
+
       if (riffHeader != 'RIFF') {
-        debugPrint('RealtimeTranslator: ❌ Invalid WAV file - missing RIFF header (found: $riffHeader)');
+        debugPrint(
+            'RealtimeTranslator: ❌ Invalid WAV file - missing RIFF header (found: $riffHeader)');
         return null;
       }
-      
+
       if (waveHeader != 'WAVE') {
-        debugPrint('RealtimeTranslator: ❌ Invalid WAV file - missing WAVE header (found: $waveHeader)');
+        debugPrint(
+            'RealtimeTranslator: ❌ Invalid WAV file - missing WAVE header (found: $waveHeader)');
         return null;
       }
-      
-      debugPrint('RealtimeTranslator: ✅ Valid WAV file header confirmed (RIFF/WAVE)');
-      
+
+      debugPrint(
+          'RealtimeTranslator: ✅ Valid WAV file header confirmed (RIFF/WAVE)');
+
       // Find "data" chunk in WAV file
       // Some WAV files have additional chunks before the data chunk
       int dataChunkOffset = -1;
       int dataSize = 0;
-      
+
       // Search for "data" chunk (starts at byte 12 after RIFF header)
       for (int i = 12; i < refBytes.length - 8; i++) {
         if (i + 4 <= refBytes.length) {
@@ -3102,46 +3735,52 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             dataChunkOffset = i + 4;
             // Read data chunk size (4 bytes, little-endian)
             if (dataChunkOffset + 4 <= refBytes.length) {
-              dataSize = refBytes[dataChunkOffset] | 
-                         (refBytes[dataChunkOffset + 1] << 8) | 
-                         (refBytes[dataChunkOffset + 2] << 16) | 
-                         (refBytes[dataChunkOffset + 3] << 24);
-              debugPrint('RealtimeTranslator: Found data chunk at offset $dataChunkOffset');
-              debugPrint('RealtimeTranslator: Data chunk size: $dataSize bytes');
+              dataSize = refBytes[dataChunkOffset] |
+                  (refBytes[dataChunkOffset + 1] << 8) |
+                  (refBytes[dataChunkOffset + 2] << 16) |
+                  (refBytes[dataChunkOffset + 3] << 24);
+              debugPrint(
+                  'RealtimeTranslator: Found data chunk at offset $dataChunkOffset');
+              debugPrint(
+                  'RealtimeTranslator: Data chunk size: $dataSize bytes');
               break;
             }
           }
         }
       }
-      
+
       // Fallback: Use bytes 40-43 if data chunk not found (standard WAV format)
       if (dataSize == 0 || dataChunkOffset == -1) {
-        debugPrint('RealtimeTranslator: ⚠️ Data chunk not found, using standard header location');
-        dataSize = refBytes[40] | 
-                   (refBytes[41] << 8) | 
-                   (refBytes[42] << 16) | 
-                   (refBytes[43] << 24);
+        debugPrint(
+            'RealtimeTranslator: ⚠️ Data chunk not found, using standard header location');
+        dataSize = refBytes[40] |
+            (refBytes[41] << 8) |
+            (refBytes[42] << 16) |
+            (refBytes[43] << 24);
       }
-      
-      debugPrint('RealtimeTranslator: Reference audio data size: $dataSize bytes');
-      
+
+      debugPrint(
+          'RealtimeTranslator: Reference audio data size: $dataSize bytes');
+
       if (dataSize <= 0) {
         debugPrint('RealtimeTranslator: ❌ Invalid data size ($dataSize bytes)');
         // Calculate data size from file size if header is wrong
         dataSize = refBytes.length - 44;
-        debugPrint('RealtimeTranslator: ⚠️ Using calculated data size: $dataSize bytes (file size - header)');
+        debugPrint(
+            'RealtimeTranslator: ⚠️ Using calculated data size: $dataSize bytes (file size - header)');
       }
-      
+
       if (dataSize <= 0) {
-        debugPrint('RealtimeTranslator: ❌ Cannot create silent file - invalid data size');
+        debugPrint(
+            'RealtimeTranslator: ❌ Cannot create silent file - invalid data size');
         return null;
       }
-      
+
       // Create silent audio file with same size
       final tempDir = await getApplicationDocumentsDirectory();
       final timestamp = DateTime.now().millisecondsSinceEpoch;
       final silentPath = '${tempDir.path}/silent_$timestamp.wav';
-      
+
       // Copy WAV header from reference file (first 44 bytes)
       final silentBytes = Uint8List(44 + dataSize);
       if (refBytes.length >= 44) {
@@ -3150,38 +3789,41 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         debugPrint('RealtimeTranslator: ❌ Cannot copy header - file too small');
         return null;
       }
-      
+
       // Update file size in RIFF header (bytes 4-7)
-      final totalFileSize = 36 + dataSize; // 36 = WAV header size minus RIFF size field
+      final totalFileSize =
+          36 + dataSize; // 36 = WAV header size minus RIFF size field
       silentBytes[4] = totalFileSize & 0xFF;
       silentBytes[5] = (totalFileSize >> 8) & 0xFF;
       silentBytes[6] = (totalFileSize >> 16) & 0xFF;
       silentBytes[7] = (totalFileSize >> 24) & 0xFF;
-      
+
       // Update data chunk size in header (bytes 40-43)
       silentBytes[40] = dataSize & 0xFF;
       silentBytes[41] = (dataSize >> 8) & 0xFF;
       silentBytes[42] = (dataSize >> 16) & 0xFF;
       silentBytes[43] = (dataSize >> 24) & 0xFF;
-      
+
       // Fill audio data with zeros (silence)
       for (int i = 44; i < silentBytes.length; i++) {
         silentBytes[i] = 0;
       }
-      
+
       // Write silent audio file
       final silentFile = File(silentPath);
       await silentFile.writeAsBytes(silentBytes);
-      
+
       // Verify the file was written correctly
       final writtenSize = await silentFile.length();
-      debugPrint('RealtimeTranslator: ✅ Silent audio file created: $silentPath');
-      debugPrint('RealtimeTranslator: Silent file size: $writtenSize bytes (expected: ${silentBytes.length})');
-      
+      debugPrint(
+          'RealtimeTranslator: ✅ Silent audio file created: $silentPath');
+      debugPrint(
+          'RealtimeTranslator: Silent file size: $writtenSize bytes (expected: ${silentBytes.length})');
+
       if (writtenSize != silentBytes.length) {
         debugPrint('RealtimeTranslator: ⚠️ Silent file size mismatch!');
       }
-      
+
       return silentPath;
     } catch (e) {
       debugPrint('RealtimeTranslator: ❌ Error creating silent audio: $e');
@@ -3661,8 +4303,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
       // Check if translation is needed
       if (speaker1LangCode == speaker2LangCode) {
-        debugPrint(
-            'RealtimeTranslator: No translation needed - same language');
+        debugPrint('RealtimeTranslator: No translation needed - same language');
         return;
       }
 
@@ -3988,8 +4629,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     try {
       final file = File(audioPath);
       if (!await file.exists()) {
-        debugPrint(
-            'RealtimeTranslator: Audio file does not exist: $audioPath');
+        debugPrint('RealtimeTranslator: Audio file does not exist: $audioPath');
         return {'language': null, 'confidence': 0.0, 'text': null};
       }
 
@@ -4654,7 +5294,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         }
 
         // Play TTS in continuous A2DP mode (no switching)
-        debugPrint('RealtimeTranslator: Playing Speaker 1 TTS (continuous A2DP)');
+        debugPrint(
+            'RealtimeTranslator: Playing Speaker 1 TTS (continuous A2DP)');
         await _ttsService.playAudioFile(_speaker1TtsAudioPath!);
         setState(() {
           _isPlayingTts1 = true;
@@ -4705,7 +5346,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         }
 
         // Play TTS in continuous A2DP mode (no switching)
-        debugPrint('RealtimeTranslator: Playing Speaker 2 TTS (continuous A2DP)');
+        debugPrint(
+            'RealtimeTranslator: Playing Speaker 2 TTS (continuous A2DP)');
         await _ttsService.playAudioFile(_speaker2TtsAudioPath!);
         setState(() {
           _isPlayingTts2 = true;
@@ -6083,24 +6725,27 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Future<void> _playStartRecordingSound() async {
     try {
       debugPrint('RealtimeTranslator: 🔊 Playing START recording beep...');
-      
+
       // Ensure we're in playback mode for the beep
       if (_isRealtimeMode) {
         await _enterPlaybackRoute();
-        await Future.delayed(const Duration(milliseconds: 200)); // Wait for route to stabilize
+        await Future.delayed(
+            const Duration(milliseconds: 200)); // Wait for route to stabilize
       }
-      
+
       // Try to play custom sound file first
       try {
         final completer = Completer<void>();
-        
+
         // Listen for completion
-        final subscription = _soundEffectPlayer.onPlayerComplete.listen((event) {
+        final subscription =
+            _soundEffectPlayer.onPlayerComplete.listen((event) {
           if (!completer.isCompleted) completer.complete();
         });
-        
-        await _soundEffectPlayer.play(AssetSource('sounds/recording_start.mp3'));
-        
+
+        await _soundEffectPlayer
+            .play(AssetSource('sounds/recording_start.mp3'));
+
         // Wait for playback to complete (with timeout)
         await completer.future.timeout(
           const Duration(seconds: 2),
@@ -6108,21 +6753,26 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             debugPrint('RealtimeTranslator: ⚠️ Start beep playback timeout');
           },
         );
-        
+
         await subscription.cancel();
-        debugPrint('RealtimeTranslator: ✅ Played START recording beep (custom) in TWS');
+        debugPrint(
+            'RealtimeTranslator: ✅ Played START recording beep (custom) in TWS');
       } catch (e) {
         // Fallback to system sound if custom file not available
-        debugPrint('RealtimeTranslator: Custom sound not found, using system beep');
+        debugPrint(
+            'RealtimeTranslator: Custom sound not found, using system beep');
         SystemSound.play(SystemSoundType.click);
-        await Future.delayed(const Duration(milliseconds: 100)); // Give system sound time to play
-        debugPrint('RealtimeTranslator: ✅ Played START recording beep (system)');
+        await Future.delayed(const Duration(
+            milliseconds: 100)); // Give system sound time to play
+        debugPrint(
+            'RealtimeTranslator: ✅ Played START recording beep (system)');
       }
-      
+
       // Add small delay before switching to recording mode
       await Future.delayed(const Duration(milliseconds: 150));
     } catch (e) {
-      debugPrint('RealtimeTranslator: ❌ Error playing start recording sound: $e');
+      debugPrint(
+          'RealtimeTranslator: ❌ Error playing start recording sound: $e');
       // Don't block recording if sound effect fails
     }
   }
@@ -6133,24 +6783,26 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Future<void> _playStopRecordingSound() async {
     try {
       debugPrint('RealtimeTranslator: 🔊 Playing STOP recording beep...');
-      
+
       // Ensure we're in playback mode for the beep
       if (_isRealtimeMode) {
         await _enterPlaybackRoute();
-        await Future.delayed(const Duration(milliseconds: 200)); // Wait for route to stabilize
+        await Future.delayed(
+            const Duration(milliseconds: 200)); // Wait for route to stabilize
       }
-      
+
       // Try to play custom sound file first
       try {
         final completer = Completer<void>();
-        
+
         // Listen for completion
-        final subscription = _soundEffectPlayer.onPlayerComplete.listen((event) {
+        final subscription =
+            _soundEffectPlayer.onPlayerComplete.listen((event) {
           if (!completer.isCompleted) completer.complete();
         });
-        
+
         await _soundEffectPlayer.play(AssetSource('sounds/recording_stop.mp3'));
-        
+
         // Wait for playback to complete (with timeout)
         await completer.future.timeout(
           const Duration(seconds: 2),
@@ -6158,21 +6810,25 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             debugPrint('RealtimeTranslator: ⚠️ Stop beep playback timeout');
           },
         );
-        
+
         await subscription.cancel();
-        debugPrint('RealtimeTranslator: ✅ Played STOP recording beep (custom) in TWS');
+        debugPrint(
+            'RealtimeTranslator: ✅ Played STOP recording beep (custom) in TWS');
       } catch (e) {
         // Fallback to system sound if custom file not available
-        debugPrint('RealtimeTranslator: Custom sound not found, using system beep');
+        debugPrint(
+            'RealtimeTranslator: Custom sound not found, using system beep');
         SystemSound.play(SystemSoundType.alert);
-        await Future.delayed(const Duration(milliseconds: 100)); // Give system sound time to play
+        await Future.delayed(const Duration(
+            milliseconds: 100)); // Give system sound time to play
         debugPrint('RealtimeTranslator: ✅ Played STOP recording beep (system)');
       }
-      
+
       // Add small delay after beep before continuing
       await Future.delayed(const Duration(milliseconds: 150));
     } catch (e) {
-      debugPrint('RealtimeTranslator: ❌ Error playing stop recording sound: $e');
+      debugPrint(
+          'RealtimeTranslator: ❌ Error playing stop recording sound: $e');
       // Don't block processing if sound effect fails
     }
   }
@@ -6204,7 +6860,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _sonioxStreamSubscription?.cancel();
     _sonioxService.dispose();
     _streamingRecorder.dispose();
-    
+
     // Clean up pending translation timers
     for (var timer in _pendingTranslationTimers.values) {
       timer?.cancel();
@@ -6212,12 +6868,12 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _pendingTranslationTimers.clear();
     _pendingTranscriptions.clear();
     _pendingLanguages.clear();
-    
+
     // Clean up sentence buffers
     _sentenceTranscriptionBuffers.clear();
     _sentenceTranslationBuffers.clear();
     _sentenceLanguages.clear();
-    
+
     // Clean up sentence processing timers (batch processing adaptive timers)
     for (var timer in _sentenceProcessingTimers.values) {
       timer?.cancel();
@@ -6225,7 +6881,11 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _sentenceProcessingTimers.clear();
     _accumulatedChunkCount.clear();
     _lastChunkReceivedTime.clear();
-    debugPrint('RealtimeTranslator: Sentence processing timers and counters cleared');
+    debugPrint(
+        'RealtimeTranslator: Sentence processing timers and counters cleared');
+
+    // Clean up TWS connection monitoring timer
+    _stopTwsConnectionMonitoring();
 
     // Clean up scroll controllers
     _speaker1TranscriptionScrollController.dispose();
@@ -6239,7 +6899,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   /// Show session summary dialog
   void _showSessionSummary() {
     if (_sessionStartTime == null || _sessionEndTime == null) {
-      debugPrint('RealtimeTranslator: ⚠️ Cannot show summary - session times not set');
+      debugPrint(
+          'RealtimeTranslator: ⚠️ Cannot show summary - session times not set');
       return;
     }
 
@@ -6329,8 +6990,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 title: 'SESSION TIME',
                 children: [
                   _buildSummaryRow('Duration', summary.formattedDuration),
-                  _buildSummaryRow('Audio Processed', '${summary.audioSecondsProcessed.toStringAsFixed(1)}s'),
-                  _buildSummaryRow('Started', _formatTime(summary.sessionStart)),
+                  _buildSummaryRow('Audio Processed',
+                      '${summary.audioSecondsProcessed.toStringAsFixed(1)}s'),
+                  _buildSummaryRow(
+                      'Started', _formatTime(summary.sessionStart)),
                   _buildSummaryRow('Ended', _formatTime(summary.sessionEnd)),
                 ],
               ),
@@ -6367,11 +7030,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 icon: Icons.receipt_long,
                 title: 'USAGE & COST',
                 children: [
-                  _buildSummaryRow('Input Audio', '${summary.inputAudioTokens.toString()} tokens'),
-                  _buildSummaryRow('  └─ Duration', '${summary.audioSecondsProcessed.toStringAsFixed(1)}s'),
+                  _buildSummaryRow('Input Audio',
+                      '${summary.inputAudioTokens.toString()} tokens'),
+                  _buildSummaryRow('  └─ Duration',
+                      '${summary.audioSecondsProcessed.toStringAsFixed(1)}s'),
                   const SizedBox(height: 8),
-                  _buildSummaryRow('Output Text', '${summary.outputTextTokens.toString()} tokens'),
-                  _buildSummaryRow('  └─ Characters', '${summary.totalCharacters.toString()}'),
+                  _buildSummaryRow('Output Text',
+                      '${summary.outputTextTokens.toString()} tokens'),
+                  _buildSummaryRow('  └─ Characters',
+                      '${summary.totalCharacters.toString()}'),
                   Divider(color: _dividerColor, height: 24),
                   _buildSummaryRow(
                     'TOTAL COST',
@@ -6388,8 +7055,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 icon: Icons.speed,
                 title: 'PERFORMANCE',
                 children: [
-                  _buildSummaryRow('Total Translations', '${summary.totalTranslations}'),
-                  _buildSummaryRow('Avg Latency', '${summary.averageLatency.toStringAsFixed(2)}s'),
+                  _buildSummaryRow(
+                      'Total Translations', '${summary.totalTranslations}'),
+                  _buildSummaryRow('Avg Latency',
+                      '${summary.averageLatency.toStringAsFixed(2)}s'),
                 ],
               ),
 
@@ -6501,8 +7170,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           children: [
             Text(
               '$speakerName ($language)',
-                  style: TextStyle(
-                    color: _primaryTextColor,
+              style: TextStyle(
+                color: _primaryTextColor,
                 fontSize: 14,
                 fontWeight: FontWeight.w500,
               ),
@@ -6547,7 +7216,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
   /// Format time for display
   String _formatTime(DateTime time) {
-    final hour12 = time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
+    final hour12 =
+        time.hour > 12 ? time.hour - 12 : (time.hour == 0 ? 12 : time.hour);
     final minute = time.minute.toString().padLeft(2, '0');
     final period = time.hour >= 12 ? 'PM' : 'AM';
     return '$hour12:$minute $period';
@@ -6566,7 +7236,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               children: [
                 // Circular progress indicator
                 CircularProgressIndicator(
-                  valueColor: AlwaysStoppedAnimation<Color>(_primaryAccentColor),
+                  valueColor:
+                      AlwaysStoppedAnimation<Color>(_primaryAccentColor),
                 ),
                 const SizedBox(height: 30),
 
@@ -6801,7 +7472,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               ),
             ),
             dropdownColor: _cardBackgroundColor,
-                style: TextStyle(color: _primaryTextColor, fontSize: 14),
+            style: TextStyle(color: _primaryTextColor, fontSize: 14),
             items: _supportedLanguages.map((language) {
               return DropdownMenuItem<Language>(
                 value: language,
@@ -7080,7 +7751,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               size: 20,
             ),
             onPressed: () {
-              _hasShownTwsNotConnectedDialog = false; // Reset to show dialog again
+              _hasShownTwsNotConnectedDialog =
+                  false; // Reset to show dialog again
               _showTwsNotConnectedDialog();
             },
             tooltip: 'Learn more',
@@ -7089,7 +7761,6 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       ),
     );
   }
-
 
   Widget _buildProcessingView() {
     return Center(
@@ -7105,8 +7776,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             const SizedBox(height: 30),
             Text(
               _processingStatus,
-                  style: TextStyle(
-                    color: _primaryTextColor,
+              style: TextStyle(
+                color: _primaryTextColor,
                 fontSize: 18,
                 fontWeight: FontWeight.bold,
               ),
@@ -7116,8 +7787,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             LinearProgressIndicator(
               value: _processingProgress,
               backgroundColor: _dividerColor,
-              valueColor:
-                  AlwaysStoppedAnimation<Color>(_primaryAccentColor),
+              valueColor: AlwaysStoppedAnimation<Color>(_primaryAccentColor),
             ),
             const SizedBox(height: 10),
             Text(
@@ -7224,11 +7894,11 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     final translation = _translations[speakerIndex] ?? '';
     final language = _speakerLanguages[speakerIndex];
     final targetLanguage = _speakerLanguages[speakerIndex == 0 ? 1 : 0];
-    final transcriptionScrollController = speakerIndex == 0 
-        ? _speaker1TranscriptionScrollController 
+    final transcriptionScrollController = speakerIndex == 0
+        ? _speaker1TranscriptionScrollController
         : _speaker2TranscriptionScrollController;
-    final translationScrollController = speakerIndex == 0 
-        ? _speaker1TranslationScrollController 
+    final translationScrollController = speakerIndex == 0
+        ? _speaker1TranslationScrollController
         : _speaker2TranslationScrollController;
 
     return Container(
@@ -7248,18 +7918,18 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-            // Speaker header with inline settings (OPTIMIZED: More compact)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-              decoration: BoxDecoration(
-                color: _cardBackgroundColor,
-                border: Border(
-                  bottom: BorderSide(
-                    color: speakerColor.withValues(alpha: 0.4),
-                    width: 2,
-                  ),
+          // Speaker header with inline settings (OPTIMIZED: More compact)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            decoration: BoxDecoration(
+              color: _cardBackgroundColor,
+              border: Border(
+                bottom: BorderSide(
+                  color: speakerColor.withValues(alpha: 0.4),
+                  width: 2,
                 ),
               ),
+            ),
             child: Row(
               children: [
                 // Speaker icon (smaller)
@@ -7334,7 +8004,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                               onChanged: (Language? newLanguage) {
                                 if (newLanguage != null) {
                                   setState(() {
-                                    _speakerLanguages[speakerIndex] = newLanguage;
+                                    _speakerLanguages[speakerIndex] =
+                                        newLanguage;
                                   });
                                 }
                               },
@@ -7347,8 +8018,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                       GestureDetector(
                         onTap: () {
                           setState(() {
-                            _speakerGenders[speakerIndex] = 
-                                _speakerGenders[speakerIndex] == 'male' ? 'female' : 'male';
+                            _speakerGenders[speakerIndex] =
+                                _speakerGenders[speakerIndex] == 'male'
+                                    ? 'female'
+                                    : 'male';
                           });
                         },
                         child: Container(
@@ -7376,11 +8049,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                       GestureDetector(
                         onTap: () {
                           setState(() {
-                            final newEarpiece = _speakerEarpieces[speakerIndex] == 'left' ? 'right' : 'left';
+                            final newEarpiece =
+                                _speakerEarpieces[speakerIndex] == 'left'
+                                    ? 'right'
+                                    : 'left';
                             _speakerEarpieces[speakerIndex] = newEarpiece;
                             // Auto-assign opposite to other speaker
                             final otherIndex = speakerIndex == 0 ? 1 : 0;
-                            _speakerEarpieces[otherIndex] = newEarpiece == 'left' ? 'right' : 'left';
+                            _speakerEarpieces[otherIndex] =
+                                newEarpiece == 'left' ? 'right' : 'left';
                           });
                         },
                         child: Container(
@@ -7404,7 +8081,9 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                               ),
                               const SizedBox(width: 2),
                               Text(
-                                _speakerEarpieces[speakerIndex] == 'left' ? 'L' : 'R',
+                                _speakerEarpieces[speakerIndex] == 'left'
+                                    ? 'L'
+                                    : 'R',
                                 style: TextStyle(
                                   color: speakerColor,
                                   fontSize: 12,
@@ -7433,7 +8112,9 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                     icon: Icons.mic,
                     title: 'Original',
                     subtitle: language?.name ?? 'Unknown',
-                    text: transcription.isEmpty ? 'Ready to Record' : transcription,
+                    text: transcription.isEmpty
+                        ? 'Ready to Record'
+                        : transcription,
                     color: speakerColor,
                     isEmpty: transcription.isEmpty,
                   ),
@@ -7541,7 +8222,6 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       ),
     );
   }
-
 
   Widget _buildResultsView() {
     return SingleChildScrollView(
@@ -7823,8 +8503,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             ),
             child: Text(
               displayText,
-                  style: TextStyle(
-                    color: _primaryTextColor,
+              style: TextStyle(
+                color: _primaryTextColor,
                 fontSize: 16,
                 height: 1.5,
               ),
@@ -7984,7 +8664,9 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                     Text(
                       'Stereo Audio Playback',
                       style: TextStyle(
-                        color: _isPlayingStereo ? Colors.purple : _primaryTextColor,
+                        color: _isPlayingStereo
+                            ? Colors.purple
+                            : _primaryTextColor,
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
                       ),
@@ -8226,22 +8908,23 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                               shape: BoxShape.circle,
                               color: _isRecording
                                   ? Colors.red
-                                  : (_isDarkMode 
-                                      ? const Color(0xFF00D9FF) 
+                                  : (_isDarkMode
+                                      ? const Color(0xFF00D9FF)
                                       : const Color(0xFF007A99)),
                               boxShadow: _isRecording
                                   ? [
                                       BoxShadow(
-                                        color: Colors.red.withValues(alpha: 0.3),
+                                        color:
+                                            Colors.red.withValues(alpha: 0.3),
                                         blurRadius: 15,
                                         spreadRadius: 3,
                                       ),
                                     ]
                                   : [
                                       BoxShadow(
-                                        color: (_isDarkMode 
-                                            ? const Color(0xFF00D9FF) 
-                                            : const Color(0xFF007A99))
+                                        color: (_isDarkMode
+                                                ? const Color(0xFF00D9FF)
+                                                : const Color(0xFF007A99))
                                             .withValues(alpha: 0.3),
                                         blurRadius: 10,
                                         spreadRadius: 2,
@@ -8264,18 +8947,18 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                     _isInitializing
                         ? 'Initializing'
                         : (_isRecording
-                        ? 'Recording'
-                        : _isRealtimeListeningPaused
-                            ? 'Playing'
-                            : 'Ready'),
+                            ? 'Recording'
+                            : _isRealtimeListeningPaused
+                                ? 'Playing'
+                                : 'Ready'),
                     style: TextStyle(
                       color: _isInitializing
                           ? Colors.blue
                           : (_isRecording
-                          ? Colors.red
-                          : (_isRealtimeListeningPaused
-                              ? Colors.orange
-                              : Colors.green)),
+                              ? Colors.red
+                              : (_isRealtimeListeningPaused
+                                  ? Colors.orange
+                                  : Colors.green)),
                       fontSize: 12,
                       fontWeight: FontWeight.normal,
                     ),

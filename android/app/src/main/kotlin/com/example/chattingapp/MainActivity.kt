@@ -144,41 +144,79 @@ class MainActivity : FlutterActivity() {
                         
                         // Use native player for guaranteed A2DP routing
                         val success = player.playAudioFile(filePath) {
-                            // Playback completed - Flutter will receive callback via method channel
-                            Log.d(TAG, "✅ Native audio playback completed (callback invoked)")
+                            Log.d(TAG, "✅ Native playback completed (callback)")
                         }
                         
-                        if (success) {
-                            Log.d(TAG, "✅ Native playback initiated successfully")
-                            result.success(true)
-                        } else {
-                            Log.e(TAG, "❌ Native playback failed to start")
-                            Log.e(TAG, "   Check logcat for NativeAudioPlayer errors above")
-                            result.error("PLAYBACK_ERROR", "Failed to start playback - check logs for details", null)
-                        }
+                        result.success(success)
                     } catch (e: Exception) {
-                        Log.e(TAG, "❌ Error playing audio file: ${e.message}", e)
+                        Log.e(TAG, "❌ Error playing native audio: ${e.message}")
                         result.error("PLAYBACK_ERROR", e.message, null)
                     }
                 }
-                "stopNativeAudio" -> {
+                "playAudioFileNativeOnChannel" -> {
                     try {
-                        nativeAudioPlayer?.stop()
+                        val filePath = call.argument<String>("filePath")
+                        val channel = call.argument<String>("channel")
+                        
+                        if (filePath == null || channel == null) {
+                            result.error("INVALID_ARGUMENT", "filePath and channel are required", null)
+                            return@setMethodCallHandler
+                        }
+                        
+                        Log.d(TAG, "═══ Playing Audio File via Dual-Channel Native Player ═══")
+                        Log.d(TAG, "File: $filePath")
+                        Log.d(TAG, "Channel: $channel")
+                        
+                        val player = nativeAudioPlayer
+                        if (player == null) {
+                            Log.e(TAG, "❌ Native audio player is null")
+                            result.error("PLAYBACK_ERROR", "Native audio player not initialized", null)
+                            return@setMethodCallHandler
+                        }
+                        
+                        // Use dual-channel player
+                        val success = player.playAudioFileOnChannel(filePath, channel) {
+                            Log.d(TAG, "✅ Dual-channel playback completed on $channel (callback)")
+                        }
+                        
+                        result.success(success)
+                    } catch (e: Exception) {
+                        Log.e(TAG, "❌ Error playing dual-channel audio: ${e.message}")
+                        result.error("PLAYBACK_ERROR", e.message, null)
+                    }
+                }
+                "stopNativePlayback" -> {
+                    try {
+                        val channel = call.argument<String>("channel")
+                        val player = nativeAudioPlayer
+                        
+                        if (player == null) {
+                            result.error("PLAYBACK_ERROR", "Native audio player not initialized", null)
+                            return@setMethodCallHandler
+                        }
+                        
+                        if (channel != null) {
+                            player.stopChannel(channel)
+                            Log.d(TAG, "✅ Stopped playback on $channel channel")
+                        } else {
+                            player.stop()
+                            Log.d(TAG, "✅ Stopped all playback channels")
+                        }
+                        
                         result.success(true)
                     } catch (e: Exception) {
-                        Log.e(TAG, "❌ Error stopping audio: ${e.message}", e)
-                        result.error("STOP_ERROR", e.message, null)
+                        Log.e(TAG, "❌ Error stopping playback: ${e.message}")
+                        result.error("PLAYBACK_ERROR", e.message, null)
                     }
                 }
-                "isNativeAudioPlaying" -> {
-                    try {
-                        val isPlaying = nativeAudioPlayer?.isCurrentlyPlaying() ?: false
-                        result.success(isPlaying)
-                    } catch (e: Exception) {
-                        Log.e(TAG, "❌ Error checking playback status: ${e.message}", e)
-                        result.error("STATUS_ERROR", e.message, null)
-                    }
-                }
+                else -> result.notImplemented()
+            }
+        }
+        
+        // Audio routing utility channel (for checking routing status)
+        val audioRoutingUtilChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "audio_routing_util")
+        audioRoutingUtilChannel.setMethodCallHandler { call, result ->
+            when (call.method) {
                 "checkAudioRouting" -> {
                     try {
                         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
