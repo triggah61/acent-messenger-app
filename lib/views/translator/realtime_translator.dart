@@ -9,6 +9,9 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/services.dart';
 import 'package:noise_meter/noise_meter.dart';
 
+import 'package:provider/provider.dart';
+import 'package:geolocator/geolocator.dart';
+import '../../providers/auth_provider.dart';
 import '../../services/config_service.dart';
 // Audio route is handled via a platform channel call to avoid build-time issues
 import '../../services/permission_service.dart';
@@ -21,6 +24,7 @@ import '../../services/google_stt_provider.dart';
 import '../../services/soniox_realtime_service.dart';
 import '../../services/streaming_audio_recorder_service.dart';
 import '../../services/bluetooth_service.dart';
+import '../../services/geolocation_service.dart';
 import '../../models/translation_session_summary.dart';
 
 /// TTS Queue Item for Realtime Translation
@@ -1709,22 +1713,13 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         }
       });
       final languages = await _configService.getSupportedLanguages();
-      final defaultEnglish = languages.firstWhere(
-        (lang) => lang.code == 'en',
-        orElse: () => languages.first,
-      );
 
-      final defaultBengali = languages.firstWhere(
-        (lang) => lang.code == 'bn',
-        orElse: () => languages.first,
-      );
+      // SMART LANGUAGE SELECTION
+      // Speaker 1: Use logged-in user's language preference
+      // Speaker 2: Use language based on current geolocation
+      await _initializeSmartLanguageSelection(languages);
 
       setState(() {
-        _supportedLanguages = languages;
-        _speakerLanguages = {
-          0: defaultEnglish,
-          1: defaultBengali,
-        };
         _speakerGenders = {
           0: 'male', // Default to male
           1: 'female', // Default to female
@@ -1744,6 +1739,125 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     } catch (e) {
       debugPrint('RealtimeTranslator: Initialization error: $e');
       _showErrorDialog('Failed to initialize translator: $e');
+    }
+  }
+
+  /// Initialize smart language selection based on user profile and geolocation
+  /// Speaker 1: User's preferred language (from profile)
+  /// Speaker 2: Language based on current geolocation (country → language mapping)
+  Future<void> _initializeSmartLanguageSelection(
+      List<Language> languages) async {
+    try {
+      debugPrint('RealtimeTranslator: ═══ SMART LANGUAGE SELECTION ═══');
+
+      // Default fallback languages
+      Language speaker1Language = languages.firstWhere(
+        (lang) => lang.code == 'en',
+        orElse: () => languages.first,
+      );
+
+      Language speaker2Language = languages.firstWhere(
+        (lang) => lang.code == 'en',
+        orElse: () => languages.first,
+      );
+
+      // SPEAKER 1: Get user's language from profile
+      try {
+        final authProvider = Provider.of<AuthProvider>(context, listen: false);
+        final userProfile = authProvider.profile;
+
+        if (userProfile != null &&
+            userProfile.language != null &&
+            userProfile.language!.isNotEmpty) {
+          final userLanguageCode = userProfile.language!.toLowerCase();
+          debugPrint(
+              'RealtimeTranslator: User profile language: $userLanguageCode');
+
+          final userLanguage = languages.firstWhere(
+            (lang) => lang.code.toLowerCase() == userLanguageCode,
+            orElse: () => speaker1Language,
+          );
+
+          speaker1Language = userLanguage;
+          debugPrint(
+              'RealtimeTranslator: ✅ Speaker 1 language set from user profile: ${userLanguage.name} (${userLanguage.code})');
+        } else {
+          debugPrint(
+              'RealtimeTranslator: ⚠️ User profile has no language preference, using default: ${speaker1Language.name}');
+        }
+      } catch (e) {
+        debugPrint('RealtimeTranslator: ❌ Error getting user language: $e');
+        debugPrint(
+            'RealtimeTranslator: Using default for Speaker 1: ${speaker1Language.name}');
+      }
+
+      // SPEAKER 2: Get language based on geolocation
+      try {
+        debugPrint(
+            'RealtimeTranslator: Getting Speaker 2 language from geolocation...');
+        final geolocationService = GeolocationService.instance;
+        final locationResult =
+            await geolocationService.getLanguageFromLocation();
+
+        debugPrint(
+            'RealtimeTranslator: Geolocation language code: ${locationResult.languageCode}');
+        debugPrint(
+            'RealtimeTranslator: Location status: ${locationResult.status}');
+
+        final locationLanguage = languages.firstWhere(
+          (lang) =>
+              lang.code.toLowerCase() ==
+              locationResult.languageCode.toLowerCase(),
+          orElse: () => speaker2Language,
+        );
+
+        speaker2Language = locationLanguage;
+
+        // Show dialog if location is unavailable
+        if (locationResult.status != LocationStatus.success) {
+          _showLocationUnavailableDialog(locationResult);
+        } else {
+          debugPrint(
+              'RealtimeTranslator: ✅ Speaker 2 language set from geolocation: ${locationLanguage.name} (${locationLanguage.code})');
+        }
+      } catch (e) {
+        debugPrint(
+            'RealtimeTranslator: ❌ Error getting geolocation language: $e');
+        debugPrint(
+            'RealtimeTranslator: Using default for Speaker 2: ${speaker2Language.name}');
+      }
+
+      // Update state with selected languages
+      setState(() {
+        _supportedLanguages = languages;
+        _speakerLanguages = {
+          0: speaker1Language,
+          1: speaker2Language,
+        };
+      });
+
+      debugPrint('RealtimeTranslator: ═══ SMART SELECTION COMPLETE ═══');
+      debugPrint(
+          'RealtimeTranslator: Speaker 1 (User): ${speaker1Language.name} (${speaker1Language.code})');
+      debugPrint(
+          'RealtimeTranslator: Speaker 2 (Location): ${speaker2Language.name} (${speaker2Language.code})');
+    } catch (e) {
+      debugPrint('RealtimeTranslator: ❌ Error in smart language selection: $e');
+      debugPrint('RealtimeTranslator: Falling back to default languages');
+
+      // Fallback to English for both speakers
+      final defaultLanguage = languages.firstWhere(
+        (lang) => lang.code == 'en',
+        orElse: () => languages.first,
+      );
+
+      setState(() {
+        _supportedLanguages = languages;
+        _speakerLanguages = {
+          0: defaultLanguage,
+          1: defaultLanguage,
+        };
+      });
     }
   }
 
@@ -6113,6 +6227,149 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               style: TextStyle(color: _primaryAccentColor),
             ),
           ),
+        ],
+      ),
+    );
+  }
+
+  /// Show dialog when location is unavailable (services disabled or permission denied)
+  void _showLocationUnavailableDialog(LocationResult locationResult) {
+    String title = 'Location Unavailable';
+    String message = '';
+    String actionButtonText = '';
+    VoidCallback? actionCallback;
+
+    switch (locationResult.status) {
+      case LocationStatus.serviceDisabled:
+        title = '📍 Location Services Disabled';
+        message =
+            'To auto-detect your current location language, please enable Location/GPS in your device settings.\n\nFor now, Speaker 2 is set to English. You can manually change it anytime.';
+        actionButtonText = 'Open Settings';
+        actionCallback = () async {
+          Navigator.of(context).pop();
+          await Geolocator.openLocationSettings();
+        };
+        break;
+
+      case LocationStatus.permissionDenied:
+        title = '🔒 Location Permission Denied';
+        message =
+            'To auto-detect your current location language, please allow location access when prompted.\n\nFor now, Speaker 2 is set to English. You can manually change it anytime.';
+        actionButtonText = 'Request Permission';
+        actionCallback = () async {
+          Navigator.of(context).pop();
+          await Geolocator.requestPermission();
+          // Optionally refresh language selection after permission granted
+        };
+        break;
+
+      case LocationStatus.permissionDeniedForever:
+        title = '⚠️ Location Permission Required';
+        message =
+            'Location permission is permanently denied. To enable auto-detection, please:\n\n1. Go to Settings\n2. Find Q Messenger\n3. Enable Location permission\n\nFor now, Speaker 2 is set to English. You can manually change it anytime.';
+        actionButtonText = 'App Settings';
+        actionCallback = () async {
+          Navigator.of(context).pop();
+          await Geolocator.openAppSettings();
+        };
+        break;
+
+      case LocationStatus.error:
+        title = '❌ Location Error';
+        message =
+            'Could not detect location: ${locationResult.message}\n\nFor now, Speaker 2 is set to English. You can manually change it anytime.';
+        actionButtonText = 'OK';
+        actionCallback = () {
+          Navigator.of(context).pop();
+        };
+        break;
+
+      case LocationStatus.success:
+        // Should not reach here
+        return;
+    }
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardBackgroundColor,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(
+          title,
+          style: TextStyle(
+            color: _primaryTextColor,
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              message,
+              style: TextStyle(
+                color: _secondaryTextColor,
+                fontSize: 14,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.blue.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(
+                  color: Colors.blue.withValues(alpha: 0.3),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.info_outline,
+                    color: Colors.blue,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'You can manually change Speaker 2 language anytime from the dropdown.',
+                      style: TextStyle(
+                        color: _secondaryTextColor,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              'Maybe Later',
+              style: TextStyle(color: _secondaryTextColor),
+            ),
+          ),
+          if (actionCallback != null)
+            ElevatedButton(
+              onPressed: actionCallback,
+              style: ElevatedButton.styleFrom(
+                backgroundColor: _primaryAccentColor,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: Text(
+                actionButtonText,
+                style: const TextStyle(color: Colors.white),
+              ),
+            ),
         ],
       ),
     );

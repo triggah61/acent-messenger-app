@@ -62,6 +62,9 @@ dependencies:
   image_picker: ^1.0.4
   permission_handler: ^11.3.0
   timeago: ^3.7.1
+  # Geolocation packages for smart language selection
+  geolocator: ^10.1.0
+  geocoding: ^2.1.1
   pusher_channels_flutter: ^2.2.1
   flutter_contacts: ^1.1.7+1
   qr_flutter: ^4.1.0
