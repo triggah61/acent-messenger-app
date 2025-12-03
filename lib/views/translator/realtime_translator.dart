@@ -25,7 +25,10 @@ import '../../services/soniox_realtime_service.dart';
 import '../../services/streaming_audio_recorder_service.dart';
 import '../../services/bluetooth_service.dart';
 import '../../services/geolocation_service.dart';
+import '../../services/translation_session_service.dart';
 import '../../models/translation_session_summary.dart';
+import '../../models/subscription_plan.dart';
+import '../../widgets/subscription_modal.dart';
 
 /// TTS Queue Item for Realtime Translation
 /// PRODUCTION-READY: Pre-generation architecture with stereo channel routing
@@ -135,6 +138,27 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   Map<int, int> _translationCharactersPerSpeaker = {0: 0, 1: 0};
   List<double> _translationLatencies = [];
   int _totalTranslations = 0;
+
+  // Translation Session Tracking (NEW)
+  final TranslationSessionService _sessionService =
+      TranslationSessionService.instance;
+  String? _currentSessionId; // Current active session ID
+  int _sessionSequenceNumber =
+      0; // Sequence number for translations in this session
+
+  // Deduplication: Track saved sentences to prevent duplicates
+  // Key: "speakerIndex|transcriptionText|translationText" (normalized)
+  final Set<String> _savedSentences =
+      {}; // Track what's been saved to prevent duplicates
+
+  // Credit/Balance Tracking
+  double _balanceBeforeSession = 0.0; // Balance at session start
+  double _currentBalance = 0.0; // Current balance (updated during session)
+  double _inputCreditPerSec = 0.5; // Fee rate from backend (default 0.5)
+  double _outputCreditPerChar = 0.01; // Fee rate from backend (default 0.01)
+  double _estimatedCost = 0.0; // Estimated cost so far
+  Timer? _balanceCheckTimer; // Timer to check balance periodically during session
+  static const Duration _balanceCheckInterval = Duration(seconds: 5); // Check every 5 seconds
 
   // Soniox real-time pricing (https://soniox.com/pricing)
   // Input audio: 1 hour = 30,000 tokens → 1 second = 8.333 tokens
@@ -2132,6 +2156,27 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         return;
       }
 
+      // Check user balance before starting session
+      debugPrint('RealtimeTranslator: Checking user balance...');
+      final authProvider = Provider.of<AuthProvider>(context, listen: false);
+      await authProvider.fetchProfile(); // Refresh balance
+      final profile = authProvider.profile;
+      final currentBalance = profile?.totalBalance ?? 0.0;
+      
+      if (currentBalance <= 0) {
+        debugPrint('RealtimeTranslator: ❌ Insufficient balance: $currentBalance');
+        setState(() {
+          _isInitializing = false;
+        });
+        _pulseController.stop();
+        _showInsufficientBalanceDialog();
+        return;
+      }
+      
+      _balanceBeforeSession = currentBalance;
+      _currentBalance = currentBalance;
+      debugPrint('RealtimeTranslator: ✅ Balance check passed: $_currentBalance credits');
+
       // Reset session metrics for new session
       _resetSessionMetrics();
       _sessionStartTime = DateTime.now();
@@ -2266,6 +2311,9 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           'RealtimeTranslator: Starting audio file polling for streaming...');
       _startAudioFilePolling();
 
+      // Start translation session tracking
+      _startTranslationSession();
+
       debugPrint(
           'RealtimeTranslator: ✅ Real-time session started successfully');
       debugPrint('RealtimeTranslator: Audio chunks will be streamed to Soniox');
@@ -2335,6 +2383,9 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       _waveController.stop();
 
       debugPrint('RealtimeTranslator: ✅ Real-time session stopped');
+
+      // Stop translation session tracking and save to database
+      await _stopTranslationSession();
 
       // Show session summary
       _showSessionSummary();
@@ -3068,6 +3119,56 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           'RealtimeTranslator: Incomplete text length: ${incompleteSentence.length} chars');
 
       if (completedSentences.isNotEmpty) {
+        // CRITICAL: Save each sentence individually before processing TTS
+        // This ensures no sentences are lost during batch processing
+        final completedTranscription =
+            _sentenceTranscriptionBuffers[speakerIndex]?.toString().trim() ??
+                '';
+        final transcriptionSentences =
+            _splitIntoIndividualSentences(completedTranscription);
+        final translationSentences =
+            _splitIntoIndividualSentences(completedSentences);
+        final sourceLanguage = _sentenceLanguages[speakerIndex] ?? 'en';
+
+        debugPrint(
+            'RealtimeTranslator: 📝 BATCH SAVE: Saving ${translationSentences.length} sentences to database');
+
+        // Save each COMPLETE sentence individually (deduplication handled in _saveTranslationToSession)
+        // Only save sentences that end with punctuation (complete sentences)
+        final completeTranslationSentences =
+            translationSentences.where((s) => _hasCompleteSentence(s)).toList();
+        final completeTranscriptionSentences = transcriptionSentences
+            .where((s) => _hasCompleteSentence(s))
+            .toList();
+
+        debugPrint(
+            'RealtimeTranslator: 📝 BATCH SAVE: ${completeTranslationSentences.length} complete sentence(s) to save');
+
+        for (int i = 0; i < completeTranslationSentences.length; i++) {
+          final translationSentence = completeTranslationSentences[i].trim();
+          final transcriptionSentence =
+              i < completeTranscriptionSentences.length
+                  ? completeTranscriptionSentences[i].trim()
+                  : (completedTranscription.isNotEmpty
+                      ? completedTranscription
+                      : translationSentence);
+
+          if (translationSentence.isNotEmpty) {
+            debugPrint(
+                'RealtimeTranslator: 💾 Batch saving sentence ${i + 1}/${completeTranslationSentences.length}: "${translationSentence.length > 50 ? translationSentence.substring(0, 50) + '...' : translationSentence}"');
+            await _saveTranslationToSession(
+              speakerIndex: speakerIndex,
+              transcriptionText: transcriptionSentence.isNotEmpty
+                  ? transcriptionSentence
+                  : completedTranscription,
+              translationText: translationSentence,
+              sourceLanguage: sourceLanguage,
+              targetLanguage: targetLanguage.code,
+              latencyMs: 0,
+            );
+          }
+        }
+
         // Generate TTS for ALL completed sentences at once (BATCH PROCESSING)
         final targetGender = _speakerGenders[targetSpeakerIndex] ?? 'male';
         final earpiece = _speakerEarpieces[targetSpeakerIndex] ?? 'left';
@@ -3411,6 +3512,15 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       _translationLatencies.add(translationLatency);
       debugPrint(
           'RealtimeTranslator: ⏱️ Translation latency: ${translationLatency.toStringAsFixed(2)}s');
+
+      // NOTE: DO NOT save translation here - it will be saved in batch processing
+      // when complete sentences are formed. This prevents:
+      // 1. Saving incomplete chunks
+      // 2. Creating duplicates
+      // 3. Saving partial sentences
+      // Translations are accumulated in buffers and saved only when complete sentences are formed
+      debugPrint(
+          'RealtimeTranslator: 📝 Translation accumulated in buffer (will be saved when sentence is complete)');
     } catch (e) {
       debugPrint(
           'RealtimeTranslator: ❌ Error processing Soniox translation: $e');
@@ -6225,6 +6335,112 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             child: Text(
               'OK',
               style: TextStyle(color: _primaryAccentColor),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Show insufficient balance dialog with option to top up
+  void _showInsufficientBalanceDialog() {
+    final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    final profile = authProvider.profile;
+    final totalBalance = profile?.totalBalance ?? 0.0;
+    final planId = profile?.currentPlanId ?? 'free';
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: _cardBackgroundColor,
+        title: Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Insufficient Credits',
+                style: TextStyle(
+                  color: _primaryTextColor,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'You don\'t have sufficient credits to start a translation session.',
+              style: TextStyle(
+                color: _secondaryTextColor,
+                fontSize: 16,
+              ),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.orange.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.account_balance_wallet, color: Colors.orange, size: 20),
+                  const SizedBox(width: 8),
+                  Text(
+                    'Current Balance: ${totalBalance.toStringAsFixed(0)} credits',
+                    style: TextStyle(
+                      color: _primaryTextColor,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Please top up your account to continue using translation services.',
+              style: TextStyle(
+                color: _secondaryTextColor,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(
+              'Cancel',
+              style: TextStyle(color: _secondaryTextColor),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              // Show subscription modal with topup tab
+              final userSubscription = UserSubscription(
+                planId: planId,
+                creditBalance: totalBalance,
+              );
+              SubscriptionModal.show(context, userSubscription);
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.blue,
+              foregroundColor: Colors.white,
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.add_card, size: 18),
+                const SizedBox(width: 6),
+                Text('Top Up'),
+              ],
             ),
           ),
         ],
@@ -9302,6 +9518,44 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                       ],
                     ),
                   ),
+                  // Real-time balance display during session
+                  if (_isRecording && _currentSessionId != null) ...[
+                    const SizedBox(height: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: _currentBalance > 5
+                            ? Colors.blue.withOpacity(0.1)
+                            : Colors.orange.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(
+                          color: _currentBalance > 5
+                              ? Colors.blue.withOpacity(0.3)
+                              : Colors.orange.withOpacity(0.5),
+                          width: 1,
+                        ),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.account_balance_wallet,
+                            size: 16,
+                            color: _currentBalance > 5 ? Colors.blue : Colors.orange,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Balance: ${_currentBalance.toStringAsFixed(0)}',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: _currentBalance > 5 ? Colors.blue : Colors.orange,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ],
@@ -9309,6 +9563,517 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         ),
       ),
     );
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // TRANSLATION SESSION TRACKING METHODS
+  // ═══════════════════════════════════════════════════════════════
+
+  /// Start translation session tracking
+  Future<void> _startTranslationSession() async {
+    try {
+      debugPrint('');
+      debugPrint('███████████████████████████████████████████████████');
+      debugPrint('RealtimeTranslator: 🎬 INITIATING SESSION TRACKING');
+      debugPrint('███████████████████████████████████████████████████');
+
+      final speaker1Lang = _speakerLanguages[0]?.code ?? 'en';
+      final speaker2Lang = _speakerLanguages[1]?.code ?? 'bn';
+      final speaker1Earpiece = _speakerEarpieces[0] ?? 'left';
+      final speaker2Earpiece = _speakerEarpieces[1] ?? 'right';
+      final speaker1Gender = _speakerGenders[0] ?? 'male';
+      final speaker2Gender = _speakerGenders[1] ?? 'female';
+
+      debugPrint('RealtimeTranslator: 📋 Session config:');
+      debugPrint(
+          '  - Speaker 1: $speaker1Lang ($speaker1Gender, $speaker1Earpiece)');
+      debugPrint(
+          '  - Speaker 2: $speaker2Lang ($speaker2Gender, $speaker2Earpiece)');
+      debugPrint('  - TWS Connected: $_isTwsConnected');
+      debugPrint('  - Mode: realtime');
+      debugPrint('');
+      debugPrint('RealtimeTranslator: ⏳ Calling startSession API...');
+
+      final sessionResult = await _sessionService.startSession(
+        speaker1Language: speaker1Lang,
+        speaker2Language: speaker2Lang,
+        speaker1Earpiece: speaker1Earpiece,
+        speaker2Earpiece: speaker2Earpiece,
+        speaker1Gender: speaker1Gender,
+        speaker2Gender: speaker2Gender,
+        mode: 'realtime',
+        twsConnected: _isTwsConnected,
+        twsDeviceName: null,
+        metadata: {
+          'clientPlatform': 'android',
+          'appVersion': '1.0.0',
+        },
+      );
+
+      debugPrint('');
+      if (sessionResult != null && sessionResult['sessionId'] != null) {
+        _currentSessionId = sessionResult['sessionId'] as String;
+        _sessionSequenceNumber = 0;
+        
+        // Store fee rates from backend
+        final appliedFeeRates = sessionResult['appliedFeeRates'] as Map<String, dynamic>? ?? {};
+        _inputCreditPerSec = (appliedFeeRates['inputCreditPerSec'] as num?)?.toDouble() ?? 0.5;
+        _outputCreditPerChar = (appliedFeeRates['outputCreditPerChar'] as num?)?.toDouble() ?? 0.01;
+        
+        // Store balance before session
+        _balanceBeforeSession = (sessionResult['balanceBeforeSession'] as num?)?.toDouble() ?? _balanceBeforeSession;
+        _currentBalance = _balanceBeforeSession;
+        _estimatedCost = 0.0;
+        
+        debugPrint('RealtimeTranslator: ✅✅✅ SESSION TRACKING ACTIVATED');
+        debugPrint('RealtimeTranslator: Session ID: $_currentSessionId');
+        debugPrint('RealtimeTranslator: Fee rates - Input: $_inputCreditPerSec/sec, Output: $_outputCreditPerChar/char');
+        debugPrint('RealtimeTranslator: Balance before: $_balanceBeforeSession');
+        debugPrint('RealtimeTranslator: Now all translations will be saved!');
+        
+        // Start balance monitoring timer
+        _startBalanceMonitoring();
+      } else {
+        debugPrint('RealtimeTranslator: ❌❌❌ SESSION TRACKING FAILED');
+        debugPrint('RealtimeTranslator: API returned null session ID');
+        debugPrint('RealtimeTranslator: Translations will NOT be saved!');
+      }
+      debugPrint('███████████████████████████████████████████████████');
+      debugPrint('');
+    } catch (e, stackTrace) {
+      debugPrint('');
+      debugPrint(
+          'RealtimeTranslator: ❌❌❌ EXCEPTION in _startTranslationSession');
+      debugPrint('RealtimeTranslator: Error: $e');
+      debugPrint('RealtimeTranslator: Stack: $stackTrace');
+      debugPrint('███████████████████████████████████████████████████');
+      debugPrint('');
+    }
+  }
+
+  /// Stop translation session and save final metrics
+  Future<void> _stopTranslationSession() async {
+    if (_currentSessionId == null) {
+      debugPrint('RealtimeTranslator: ⚠️ No active session to stop');
+      return;
+    }
+
+    try {
+      debugPrint('RealtimeTranslator: ═══ Stopping Translation Session ═══');
+      debugPrint('RealtimeTranslator: Session ID: $_currentSessionId');
+
+      // Calculate average latency
+      final avgLatency = _translationLatencies.isNotEmpty
+          ? _translationLatencies.reduce((a, b) => a + b) /
+              _translationLatencies.length
+          : 0.0;
+
+      final result = await _sessionService.stopSession(
+        sessionId: _currentSessionId!,
+        totalAudioDurationSec: _audioSecondsProcessed,
+        totalInputTokens: _totalInputAudioTokens,
+        totalTranscriptionCharacters: _totalTranscriptionCharacters,
+        totalTranslationCharacters: _totalTranslationCharacters,
+        totalOutputTokens: _totalOutputTextTokens,
+        speaker1TranscriptionCharacters:
+            _transcriptionCharactersPerSpeaker[0] ?? 0,
+        speaker1TranslationCharacters: _translationCharactersPerSpeaker[0] ?? 0,
+        speaker2TranscriptionCharacters:
+            _transcriptionCharactersPerSpeaker[1] ?? 0,
+        speaker2TranslationCharacters: _translationCharactersPerSpeaker[1] ?? 0,
+        totalTranslations: _totalTranslations,
+        averageLatencyMs: (avgLatency * 1000),
+      );
+
+      if (result != null) {
+        debugPrint('RealtimeTranslator: ✅ Session stopped successfully');
+        debugPrint(
+            'RealtimeTranslator: Total cost: ${result['totalCost']} credits');
+        debugPrint(
+            'RealtimeTranslator: Input cost: ${result['inputCost']} credits');
+        debugPrint(
+            'RealtimeTranslator: Output cost: ${result['outputCost']} credits');
+      } else {
+        debugPrint('RealtimeTranslator: ⚠️ Failed to stop session properly');
+      }
+
+      // Stop balance monitoring
+      _stopBalanceMonitoring();
+      
+      // Reset session tracking
+      _currentSessionId = null;
+      _sessionSequenceNumber = 0;
+      _savedSentences.clear(); // Clear saved sentences tracking
+      _estimatedCost = 0.0;
+    } catch (e) {
+      debugPrint(
+          'RealtimeTranslator: ❌ Error stopping translation session: $e');
+    }
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // BALANCE MONITORING AND COST CALCULATION METHODS
+  // ═══════════════════════════════════════════════════════════════
+
+  /// Start periodic balance monitoring during active session
+  void _startBalanceMonitoring() {
+    _stopBalanceMonitoring(); // Stop any existing timer
+    
+    _balanceCheckTimer = Timer.periodic(_balanceCheckInterval, (timer) {
+      if (!_isRecording || _currentSessionId == null) {
+        timer.cancel();
+        return;
+      }
+      
+      _checkBalanceAndCalculateCost();
+    });
+    
+    debugPrint('RealtimeTranslator: ✅ Balance monitoring started');
+  }
+
+  /// Stop balance monitoring timer
+  void _stopBalanceMonitoring() {
+    _balanceCheckTimer?.cancel();
+    _balanceCheckTimer = null;
+    debugPrint('RealtimeTranslator: ⏹️ Balance monitoring stopped');
+  }
+
+  /// Calculate current cost and check if balance is running low
+  void _checkBalanceAndCalculateCost() {
+    if (!mounted || _currentSessionId == null) return;
+    
+    // Calculate estimated cost based on current usage
+    final inputCost = _audioSecondsProcessed * _inputCreditPerSec;
+    final totalOutputChars = _totalTranscriptionCharacters + _totalTranslationCharacters;
+    final outputCost = totalOutputChars * _outputCreditPerChar;
+    _estimatedCost = inputCost + outputCost;
+    
+    // Calculate remaining balance
+    final remainingBalance = _balanceBeforeSession - _estimatedCost;
+    _currentBalance = remainingBalance > 0 ? remainingBalance : 0.0;
+    
+    // Update UI with current balance
+    if (mounted) {
+      setState(() {
+        // This will trigger UI update with new balance
+      });
+    }
+    
+    debugPrint('RealtimeTranslator: 💰 Cost update - Estimated: ${_estimatedCost.toStringAsFixed(2)}, Remaining: ${_currentBalance.toStringAsFixed(2)}');
+    
+    // Auto-stop if balance is too low (less than 1 credit or less than estimated cost for next 5 seconds)
+    final estimatedCostFor5Sec = (_inputCreditPerSec * 5) + (100 * _outputCreditPerChar); // Rough estimate
+    if (_currentBalance <= 0 || _currentBalance < estimatedCostFor5Sec) {
+      debugPrint('RealtimeTranslator: ⚠️ Balance running low! Remaining: $_currentBalance');
+      
+      // Auto-stop session
+      if (_currentBalance <= 0) {
+        _autoStopDueToInsufficientBalance();
+      }
+    }
+  }
+
+  /// Auto-stop session due to insufficient balance
+  Future<void> _autoStopDueToInsufficientBalance() async {
+    debugPrint('RealtimeTranslator: 🛑 Auto-stopping session due to insufficient balance');
+    
+    if (!mounted) return;
+    
+    // Stop recording
+    await _stopRealtimeSession();
+    
+    // Show notification
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              Icon(Icons.warning_amber_rounded, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  'Session stopped: Insufficient credits. Remaining balance: ${_currentBalance.toStringAsFixed(0)} credits',
+                  style: TextStyle(fontSize: 14),
+                ),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.orange,
+          duration: Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Top Up',
+            textColor: Colors.white,
+            onPressed: () {
+              final authProvider = Provider.of<AuthProvider>(context, listen: false);
+              final profile = authProvider.profile;
+              final totalBalance = profile?.totalBalance ?? 0.0;
+              final planId = profile?.currentPlanId ?? 'free';
+              final userSubscription = UserSubscription(
+                planId: planId,
+                creditBalance: totalBalance,
+              );
+              SubscriptionModal.show(context, userSubscription);
+            },
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Calculate current estimated cost based on usage
+  double _calculateCurrentCost() {
+    final inputCost = _audioSecondsProcessed * _inputCreditPerSec;
+    final totalOutputChars = _totalTranscriptionCharacters + _totalTranslationCharacters;
+    final outputCost = totalOutputChars * _outputCreditPerChar;
+    return inputCost + outputCost;
+  }
+
+  /// Check if text contains at least one complete sentence
+  bool _hasCompleteSentence(String text) {
+    if (text.isEmpty) return false;
+
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+
+    final sentenceEnders = [
+      '.', '!', '?', // English/Latin
+      '।', '॥', // Bengali/Devanagari
+      '。', '！', '？', // Chinese/Japanese
+      '؟', '۔', // Arabic/Urdu
+    ];
+
+    // Check if text ends with any sentence ender
+    for (final ender in sentenceEnders) {
+      if (trimmed.endsWith(ender)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /// Split text into individual sentences
+  /// Returns list of sentences with their punctuation
+  List<String> _splitIntoIndividualSentences(String text) {
+    if (text.isEmpty) return [];
+
+    final sentenceEnders = [
+      '.', '!', '?', // English/Latin
+      '।', '॥', // Bengali/Devanagari
+      '。', '！', '？', // Chinese/Japanese
+      '؟', '۔', // Arabic/Urdu
+      ':', ';', // Additional punctuation
+    ];
+
+    final sentences = <String>[];
+    final buffer = StringBuffer();
+
+    for (int i = 0; i < text.length; i++) {
+      final char = text[i];
+      buffer.write(char);
+
+      // Check if this character is a sentence ender
+      bool isSentenceEnder = false;
+      for (final ender in sentenceEnders) {
+        if (char == ender) {
+          isSentenceEnder = true;
+          break;
+        }
+      }
+
+      if (isSentenceEnder) {
+        final sentence = buffer.toString().trim();
+        if (sentence.isNotEmpty) {
+          sentences.add(sentence);
+        }
+        buffer.clear();
+      }
+    }
+
+    // Add any remaining text (incomplete sentence)
+    final remaining = buffer.toString().trim();
+    if (remaining.isNotEmpty) {
+      sentences.add(remaining);
+    }
+
+    return sentences;
+  }
+
+  /// Save individual translation to session
+  /// ONLY saves COMPLETE sentences (not chunks)
+  /// Includes deduplication to prevent duplicates
+  Future<void> _saveTranslationToSession({
+    required int speakerIndex,
+    required String transcriptionText,
+    required String translationText,
+    required String sourceLanguage,
+    required String targetLanguage,
+    double latencyMs = 0,
+  }) async {
+    if (_currentSessionId == null) {
+      debugPrint(
+          'RealtimeTranslator: ⚠️⚠️ Cannot save translation - NO ACTIVE SESSION');
+      debugPrint('RealtimeTranslator: _currentSessionId is NULL');
+      return;
+    }
+
+    try {
+      // CRITICAL: Only save if text contains at least one complete sentence
+      // This prevents saving incomplete chunks
+      final hasCompleteSentence = _hasCompleteSentence(transcriptionText) ||
+          _hasCompleteSentence(translationText);
+
+      if (!hasCompleteSentence) {
+        debugPrint(
+            'RealtimeTranslator: ⏳ Skipping save - no complete sentence detected (incomplete chunk)');
+        debugPrint(
+            'RealtimeTranslator: Text: "${transcriptionText.length > 50 ? transcriptionText.substring(0, 50) + '...' : transcriptionText}"');
+        return; // Don't save incomplete chunks
+      }
+
+      // Split into individual sentences to ensure each sentence is saved
+      final transcriptionSentences =
+          _splitIntoIndividualSentences(transcriptionText.trim());
+      final translationSentences =
+          _splitIntoIndividualSentences(translationText.trim());
+
+      // Only process sentences that are complete (end with punctuation)
+      final completeTranscriptionSentences =
+          transcriptionSentences.where((s) => _hasCompleteSentence(s)).toList();
+      final completeTranslationSentences =
+          translationSentences.where((s) => _hasCompleteSentence(s)).toList();
+
+      if (completeTranscriptionSentences.isEmpty &&
+          completeTranslationSentences.isEmpty) {
+        debugPrint('RealtimeTranslator: ⏳ No complete sentences to save');
+        return;
+      }
+
+      debugPrint(
+          'RealtimeTranslator: 📝 Saving ${completeTranslationSentences.length} complete sentence(s)');
+
+      // Match sentences by index (transcription and translation should align)
+      final maxSentences = completeTranscriptionSentences.length >
+              completeTranslationSentences.length
+          ? completeTranscriptionSentences.length
+          : completeTranslationSentences.length;
+
+      for (int i = 0; i < maxSentences; i++) {
+        final transcriptionSentence = i < completeTranscriptionSentences.length
+            ? completeTranscriptionSentences[i].trim()
+            : (i == 0 && transcriptionText.trim().isNotEmpty
+                ? transcriptionText.trim()
+                : '');
+        final translationSentence = i < completeTranslationSentences.length
+            ? completeTranslationSentences[i].trim()
+            : (i == 0 && translationText.trim().isNotEmpty
+                ? translationText.trim()
+                : '');
+
+        // Only save if we have meaningful content in at least one field
+        if (translationSentence.isNotEmpty ||
+            transcriptionSentence.isNotEmpty) {
+          await _saveSingleTranslationToSession(
+            speakerIndex: speakerIndex,
+            transcriptionText: transcriptionSentence.isNotEmpty
+                ? transcriptionSentence
+                : translationSentence, // Use translation as fallback
+            translationText: translationSentence.isNotEmpty
+                ? translationSentence
+                : transcriptionSentence, // Use transcription as fallback
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage,
+            latencyMs: latencyMs,
+          );
+        }
+      }
+    } catch (e, stackTrace) {
+      debugPrint('RealtimeTranslator: ❌ Exception saving translation: $e');
+      debugPrint('RealtimeTranslator: Stack: $stackTrace');
+    }
+  }
+
+  /// Save a single translation record to session (internal helper)
+  /// Includes deduplication to prevent saving the same sentence twice
+  Future<void> _saveSingleTranslationToSession({
+    required int speakerIndex,
+    required String transcriptionText,
+    required String translationText,
+    required String sourceLanguage,
+    required String targetLanguage,
+    double latencyMs = 0,
+  }) async {
+    if (_currentSessionId == null) {
+      return;
+    }
+
+    try {
+      // DEDUPLICATION: Create a unique key for this sentence
+      // Normalize text (trim, lowercase) to catch duplicates with different formatting
+      final normalizedTranscription = transcriptionText.trim().toLowerCase();
+      final normalizedTranslation = translationText.trim().toLowerCase();
+      final dedupeKey =
+          '$speakerIndex|$normalizedTranscription|$normalizedTranslation';
+
+      // Check if this sentence has already been saved
+      if (_savedSentences.contains(dedupeKey)) {
+        debugPrint('RealtimeTranslator: ⚠️ DUPLICATE DETECTED - Skipping save');
+        debugPrint(
+            'RealtimeTranslator: Transcription: "${transcriptionText.length > 50 ? transcriptionText.substring(0, 50) + '...' : transcriptionText}"');
+        debugPrint(
+            'RealtimeTranslator: Translation: "${translationText.length > 50 ? translationText.substring(0, 50) + '...' : translationText}"');
+        return; // Skip duplicate
+      }
+
+      // Mark as saved BEFORE API call (prevents race conditions)
+      _savedSentences.add(dedupeKey);
+      _sessionSequenceNumber++;
+
+      debugPrint(
+          'RealtimeTranslator: 💾 Saving translation #$_sessionSequenceNumber to session');
+      debugPrint('RealtimeTranslator: Session ID: $_currentSessionId');
+      debugPrint('RealtimeTranslator: Speaker: $speakerIndex');
+      debugPrint(
+          'RealtimeTranslator: Transcription: "${transcriptionText.length > 50 ? transcriptionText.substring(0, 50) + '...' : transcriptionText}"');
+      debugPrint(
+          'RealtimeTranslator: Translation: "${translationText.length > 50 ? translationText.substring(0, 50) + '...' : translationText}"');
+
+      final targetSpeakerIndex = speakerIndex == 0 ? 1 : 0;
+      final targetGender = _speakerGenders[targetSpeakerIndex] ?? 'male';
+      final earpiece = _speakerEarpieces[targetSpeakerIndex] ?? 'left';
+
+      final success = await _sessionService.addTranslation(
+        sessionId: _currentSessionId!,
+        speakerIndex: speakerIndex,
+        transcriptionText: transcriptionText.trim(),
+        translationText: translationText.trim(),
+        sourceLanguage: sourceLanguage,
+        targetLanguage: targetLanguage,
+        speakerName: 'Speaker ${speakerIndex + 1}',
+        latencyMs: latencyMs,
+        translationService: 'soniox',
+        tts: {
+          'generated': true,
+          'audioChannel': earpiece,
+          'gender': targetGender,
+        },
+        sequenceNumber: _sessionSequenceNumber,
+        isFinal: true,
+      );
+
+      if (success) {
+        debugPrint(
+            'RealtimeTranslator: ✅ Translation #$_sessionSequenceNumber saved successfully');
+      } else {
+        // Remove from saved set if API call failed (allow retry)
+        _savedSentences.remove(dedupeKey);
+        debugPrint(
+            'RealtimeTranslator: ❌ Failed to save translation #$_sessionSequenceNumber');
+      }
+    } catch (e, stackTrace) {
+      debugPrint('RealtimeTranslator: ❌ Exception saving translation: $e');
+      debugPrint('RealtimeTranslator: Stack: $stackTrace');
+    }
   }
 }
 
