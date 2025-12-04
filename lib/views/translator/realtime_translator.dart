@@ -26,7 +26,6 @@ import '../../services/streaming_audio_recorder_service.dart';
 import '../../services/bluetooth_service.dart';
 import '../../services/geolocation_service.dart';
 import '../../services/translation_session_service.dart';
-import '../../models/translation_session_summary.dart';
 import '../../models/subscription_plan.dart';
 import '../../widgets/subscription_modal.dart';
 
@@ -159,6 +158,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   double _estimatedCost = 0.0; // Estimated cost so far
   Timer? _balanceCheckTimer; // Timer to check balance periodically during session
   static const Duration _balanceCheckInterval = Duration(seconds: 5); // Check every 5 seconds
+  bool _isStoppingDueToBalance = false; // Flag to prevent multiple stop calls
+  
+  // Session stop result for summary display
+  Map<String, dynamic>? _sessionStopResult; // Stores the result from stopSession API
 
   // Soniox real-time pricing (https://soniox.com/pricing)
   // Input audio: 1 hour = 30,000 tokens → 1 second = 8.333 tokens
@@ -2422,8 +2425,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _totalTranslationCharacters = 0;
     _transcriptionCharactersPerSpeaker = {0: 0, 1: 0};
     _translationCharactersPerSpeaker = {0: 0, 1: 0};
-    _translationLatencies = [];
-    _totalTranslations = 0;
+      _translationLatencies = [];
+      _totalTranslations = 0;
+      _estimatedCost = 0.0;
+      _isStoppingDueToBalance = false; // Reset flag for new session
 
     debugPrint('RealtimeTranslator: ✅ Session metrics reset');
   }
@@ -2500,6 +2505,12 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           return;
         }
 
+        // Check if session is stopping due to balance - prevent further processing
+        if (_isStoppingDueToBalance) {
+          debugPrint('RealtimeTranslator: ⚠️ Session stopping due to balance - skipping audio processing');
+          return;
+        }
+
         // Get current file size
         final fileSize = await audioFile.length();
 
@@ -2528,6 +2539,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
 
             debugPrint(
                 'RealtimeTranslator: 📤 Sent ${chunk.length} bytes to Soniox (position: $_lastReadPosition)');
+            
+            // REAL-TIME: Check balance immediately after audio processing
+            // This ensures we stop BEFORE exceeding available balance
+            _checkBalanceRealtime();
           }
         }
       } catch (e) {
@@ -2630,6 +2645,12 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         if (token.isFinal) {
           hasFinalized[sonioxSpeakerId] = true;
         }
+      }
+
+      // Check if session is stopping due to balance - prevent further processing
+      if (_isStoppingDueToBalance) {
+        debugPrint('RealtimeTranslator: ⚠️ Session stopping due to balance - skipping result processing');
+        return;
       }
 
       // Process each speaker's transcription AND translation
@@ -2739,6 +2760,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                 (transcriptionCharCount * _tokensPerCharacter).round();
             debugPrint(
                 'RealtimeTranslator: 📊 Transcription: $transcriptionCharCount chars ≈ $transcriptionTokens tokens (total chars: $_totalTranscriptionCharacters)');
+            
+            // REAL-TIME: Check balance immediately after transcription characters added
+            // This ensures we stop BEFORE exceeding available balance
+            _checkBalanceRealtime();
           }
 
           // Update UI with transcription immediately
@@ -3338,6 +3363,12 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     required String translatedText,
     required String sourceLanguage,
   }) async {
+    // Check if session is stopping due to balance - prevent further processing
+    if (_isStoppingDueToBalance) {
+      debugPrint('RealtimeTranslator: ⚠️ Session stopping due to balance - skipping translation processing');
+      return;
+    }
+
     // CRITICAL: Prevent concurrent translation+playback
     if (_isTranslationInProgress) {
       debugPrint(
@@ -3373,6 +3404,10 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           (translationCharCount * _tokensPerCharacter).round();
       debugPrint(
           'RealtimeTranslator: 📊 Translation: $translationCharCount chars ≈ $translationTokens tokens (total chars: $_totalTranslationCharacters)');
+      
+      // REAL-TIME: Check balance immediately after translation characters added
+      // This ensures we stop BEFORE exceeding available balance
+      _checkBalanceRealtime();
 
       // Update translation buffer for full conversation history
       if (_realtimeTranslations[speakerIndex]!.isNotEmpty) {
@@ -7377,39 +7412,42 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       return;
     }
 
-    final totalDuration = _sessionEndTime!.difference(_sessionStartTime!);
-    final totalCost = _calculateSessionCost();
-
-    final summary = TranslationSessionSummary(
-      sessionStart: _sessionStartTime!,
-      sessionEnd: _sessionEndTime!,
-      totalDuration: totalDuration,
-      audioSecondsProcessed: _audioSecondsProcessed,
-      inputAudioTokens: _totalInputAudioTokens,
-      outputTextTokens: _totalOutputTextTokens,
-      transcriptionCharacters: _totalTranscriptionCharacters,
-      translationCharacters: _totalTranslationCharacters,
-      charactersPerSpeaker: _transcriptionCharactersPerSpeaker,
-      translationCharactersPerSpeaker: _translationCharactersPerSpeaker,
-      languagesUsed: {
-        0: _speakerLanguages[0]?.name ?? 'Unknown',
-        1: _speakerLanguages[1]?.name ?? 'Unknown',
-      },
-      totalCost: totalCost,
-      totalTranslations: _totalTranslations,
-      translationLatencies: _translationLatencies,
-    );
-
     showDialog(
       context: context,
-      builder: (context) => _buildSummaryDialog(summary),
+      builder: (context) => _buildSummaryDialog(),
     );
   }
 
-  /// Build session summary dialog
-  Widget _buildSummaryDialog(TranslationSessionSummary summary) {
-    final speaker0Percentage = summary.speakerSplitPercentage[0] ?? 0.0;
-    final speaker1Percentage = summary.speakerSplitPercentage[1] ?? 0.0;
+  /// Build session summary dialog (simplified with credit deduction focus)
+  Widget _buildSummaryDialog() {
+    if (_sessionStartTime == null || _sessionEndTime == null) {
+      return Dialog(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Text('Unable to show summary'),
+        ),
+      );
+    }
+
+    final totalDuration = _sessionEndTime!.difference(_sessionStartTime!);
+    final durationMinutes = totalDuration.inMinutes;
+    final durationSeconds = totalDuration.inSeconds % 60;
+    final formattedDuration = '${durationMinutes}m ${durationSeconds}s';
+
+    // Get credit deduction info from session stop result
+    final totalCost = _sessionStopResult != null
+        ? (_sessionStopResult!['totalCost'] as num?)?.toDouble() ?? 0.0
+        : _estimatedCost;
+    final inputCost = _sessionStopResult != null
+        ? (_sessionStopResult!['inputCost'] as num?)?.toDouble() ?? 0.0
+        : (_audioSecondsProcessed * _inputCreditPerSec);
+    final outputCost = _sessionStopResult != null
+        ? (_sessionStopResult!['outputCost'] as num?)?.toDouble() ?? 0.0
+        : ((_totalTranscriptionCharacters + _totalTranslationCharacters) * _outputCreditPerChar);
+    final balanceAfter = _sessionStopResult != null
+        ? (_sessionStopResult!['balanceAfterSession'] as num?)?.toDouble()
+        : _currentBalance;
+    final balanceBefore = _balanceBeforeSession;
 
     return Dialog(
       backgroundColor: _cardBackgroundColor,
@@ -7457,82 +7495,181 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
               ),
               const SizedBox(height: 24),
 
-              // Session Time
-              _buildSummarySection(
-                icon: Icons.access_time,
-                title: 'SESSION TIME',
+              // Session Duration
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _secondaryCardBackgroundColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _dividerColor),
+                ),
+                child: Row(
                 children: [
-                  _buildSummaryRow('Duration', summary.formattedDuration),
-                  _buildSummaryRow('Audio Processed',
-                      '${summary.audioSecondsProcessed.toStringAsFixed(1)}s'),
-                  _buildSummaryRow(
-                      'Started', _formatTime(summary.sessionStart)),
-                  _buildSummaryRow('Ended', _formatTime(summary.sessionEnd)),
+                    Icon(Icons.access_time, color: _primaryAccentColor, size: 24),
+                    const SizedBox(width: 12),
+                    Text(
+                      'Duration: $formattedDuration',
+                      style: TextStyle(
+                        color: _primaryTextColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
                 ],
+                ),
               ),
 
               const SizedBox(height: 20),
 
-              // Conversation Stats
-              _buildSummarySection(
-                icon: Icons.forum,
-                title: 'CONVERSATION',
-                children: [
-                  _buildSpeakerRow(
-                    speakerName: _getSpeakerDisplayName(0),
-                    language: summary.languagesUsed[0] ?? 'Unknown',
-                    characters: summary.charactersPerSpeaker[0] ?? 0,
-                    percentage: speaker0Percentage,
-                    color: _speakerColors[0],
+              // Credit Deduction Section (Main Focus)
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      Colors.blue.withValues(alpha: 0.1),
+                      Colors.purple.withValues(alpha: 0.1),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
-                  const SizedBox(height: 12),
-                  _buildSpeakerRow(
-                    speakerName: _getSpeakerDisplayName(1),
-                    language: summary.languagesUsed[1] ?? 'Unknown',
-                    characters: summary.charactersPerSpeaker[1] ?? 0,
-                    percentage: speaker1Percentage,
-                    color: _speakerColors[1],
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _primaryAccentColor.withValues(alpha: 0.3),
+                    width: 2,
+                  ),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                    Row(
+                      children: [
+                        Icon(Icons.account_balance_wallet, color: _primaryAccentColor, size: 24),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Credit Deduction',
+                          style: TextStyle(
+                            color: _primaryTextColor,
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
                   ),
                 ],
               ),
-
               const SizedBox(height: 20),
 
-              // Usage & Cost
-              _buildSummarySection(
-                icon: Icons.receipt_long,
-                title: 'USAGE & COST',
+                    // Balance Before
+                    _buildCreditRow(
+                      label: 'Balance Before',
+                      value: balanceBefore.toStringAsFixed(0),
+                      icon: Icons.account_balance,
+                      color: Colors.blue,
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    // Credits Deducted (with breakdown)
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(
+                          color: Colors.orange.withValues(alpha: 0.3),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _buildSummaryRow('Input Audio',
-                      '${summary.inputAudioTokens.toString()} tokens'),
-                  _buildSummaryRow('  └─ Duration',
-                      '${summary.audioSecondsProcessed.toStringAsFixed(1)}s'),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.remove_circle, color: Colors.orange, size: 20),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    'Credits Deducted',
+                                    style: TextStyle(
+                                      color: _primaryTextColor,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              Text(
+                                '${totalCost.toStringAsFixed(2)}',
+                                style: TextStyle(
+                                  color: Colors.orange,
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
                   const SizedBox(height: 8),
-                  _buildSummaryRow('Output Text',
-                      '${summary.outputTextTokens.toString()} tokens'),
-                  _buildSummaryRow('  └─ Characters',
-                      '${summary.totalCharacters.toString()}'),
-                  Divider(color: _dividerColor, height: 24),
-                  _buildSummaryRow(
-                    'TOTAL COST',
-                    summary.formattedCost,
-                    isTotal: true,
+                          Padding(
+                            padding: const EdgeInsets.only(left: 28),
+                            child: Column(
+                              children: [
+                                _buildCreditBreakdownRow('Input (Audio)', inputCost.toStringAsFixed(2)),
+                                const SizedBox(height: 4),
+                                _buildCreditBreakdownRow('Output (Text)', outputCost.toStringAsFixed(2)),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    
+                    // Balance After
+                    _buildCreditRow(
+                      label: 'Balance After',
+                      value: (balanceAfter ?? 0.0).toStringAsFixed(0),
+                      icon: Icons.account_balance_wallet,
+                      color: Colors.green,
                   ),
                 ],
+                ),
               ),
 
               const SizedBox(height: 20),
 
-              // Performance
-              _buildSummarySection(
-                icon: Icons.speed,
-                title: 'PERFORMANCE',
+              // Total Translations (Simple stat)
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: _secondaryCardBackgroundColor,
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _dividerColor),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _buildSummaryRow(
-                      'Total Translations', '${summary.totalTranslations}'),
-                  _buildSummaryRow('Avg Latency',
-                      '${summary.averageLatency.toStringAsFixed(2)}s'),
+                    Row(
+                      children: [
+                        Icon(Icons.translate, color: _primaryAccentColor, size: 20),
+                        const SizedBox(width: 12),
+                        Text(
+                          'Total Translations',
+                          style: TextStyle(
+                            color: _secondaryTextColor,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                    Text(
+                      '${_totalTranslations}',
+                      style: TextStyle(
+                        color: _primaryTextColor,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
                 ],
+                ),
               ),
 
               const SizedBox(height: 24),
@@ -7558,6 +7695,65 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
           ),
         ),
       ),
+    );
+  }
+
+  /// Build credit row for summary
+  Widget _buildCreditRow({
+    required String label,
+    required String value,
+    required IconData icon,
+    required Color color,
+  }) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Row(
+          children: [
+            Icon(icon, color: color, size: 20),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                color: _secondaryTextColor,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
+        Text(
+          '$value credits',
+          style: TextStyle(
+            color: color,
+            fontSize: 16,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// Build credit breakdown row
+  Widget _buildCreditBreakdownRow(String label, String value) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: _secondaryTextColor,
+            fontSize: 12,
+          ),
+        ),
+        Text(
+          '$value credits',
+          style: TextStyle(
+            color: Colors.orange,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 
@@ -9550,9 +9746,9 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                               color: _currentBalance > 5 ? Colors.blue : Colors.orange,
-                            ),
-                          ),
-                        ],
+                    ),
+                  ),
+                ],
                       ),
                     ),
                   ],
@@ -9624,14 +9820,17 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
         _balanceBeforeSession = (sessionResult['balanceBeforeSession'] as num?)?.toDouble() ?? _balanceBeforeSession;
         _currentBalance = _balanceBeforeSession;
         _estimatedCost = 0.0;
+        _isStoppingDueToBalance = false; // Reset flag for new session
         
         debugPrint('RealtimeTranslator: ✅✅✅ SESSION TRACKING ACTIVATED');
         debugPrint('RealtimeTranslator: Session ID: $_currentSessionId');
         debugPrint('RealtimeTranslator: Fee rates - Input: $_inputCreditPerSec/sec, Output: $_outputCreditPerChar/char');
         debugPrint('RealtimeTranslator: Balance before: $_balanceBeforeSession');
         debugPrint('RealtimeTranslator: Now all translations will be saved!');
+        debugPrint('RealtimeTranslator: ⚠️ Session will auto-stop if cost exceeds balance!');
         
-        // Start balance monitoring timer
+        // Start balance monitoring timer (backup check every 5 seconds)
+        // Real-time checks happen immediately after each cost increment
         _startBalanceMonitoring();
       } else {
         debugPrint('RealtimeTranslator: ❌❌❌ SESSION TRACKING FAILED');
@@ -9693,18 +9892,61 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
             'RealtimeTranslator: Input cost: ${result['inputCost']} credits');
         debugPrint(
             'RealtimeTranslator: Output cost: ${result['outputCost']} credits');
+        
+        // Store session stop result for summary display
+        _sessionStopResult = result;
+        
+        // Update balance from response
+        final balanceAfter = (result['balanceAfterSession'] as num?)?.toDouble();
+        if (balanceAfter != null) {
+          _currentBalance = balanceAfter;
+          debugPrint(
+              'RealtimeTranslator: Balance after session: $balanceAfter credits');
+        }
+        
+        // Refresh user profile to get updated balance (ensures UI reflects latest balance)
+        if (mounted) {
+          try {
+            final authProvider = Provider.of<AuthProvider>(context, listen: false);
+            await authProvider.fetchProfile();
+            debugPrint('RealtimeTranslator: ✅ Profile refreshed with latest balance');
+            
+            // Update local balance from refreshed profile
+            final profile = authProvider.profile;
+            if (profile != null) {
+              final updatedBalance = profile.totalBalance;
+              _currentBalance = updatedBalance;
+              debugPrint('RealtimeTranslator: ✅ Updated local balance: $updatedBalance credits');
+            }
+          } catch (e) {
+            debugPrint('RealtimeTranslator: ⚠️ Error refreshing profile: $e');
+          }
+        }
       } else {
         debugPrint('RealtimeTranslator: ⚠️ Failed to stop session properly');
+        _sessionStopResult = null;
+        
+        // Still try to refresh profile even if session stop failed
+        if (mounted) {
+          try {
+            final authProvider = Provider.of<AuthProvider>(context, listen: false);
+            await authProvider.fetchProfile();
+            debugPrint('RealtimeTranslator: ✅ Profile refreshed after failed session stop');
+          } catch (e) {
+            debugPrint('RealtimeTranslator: ⚠️ Error refreshing profile: $e');
+          }
+        }
       }
 
       // Stop balance monitoring
       _stopBalanceMonitoring();
-      
+
       // Reset session tracking
       _currentSessionId = null;
       _sessionSequenceNumber = 0;
       _savedSentences.clear(); // Clear saved sentences tracking
       _estimatedCost = 0.0;
+      _isStoppingDueToBalance = false; // Reset flag
     } catch (e) {
       debugPrint(
           'RealtimeTranslator: ❌ Error stopping translation session: $e');
@@ -9738,11 +9980,17 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     debugPrint('RealtimeTranslator: ⏹️ Balance monitoring stopped');
   }
 
-  /// Calculate current cost and check if balance is running low
-  void _checkBalanceAndCalculateCost() {
-    if (!mounted || _currentSessionId == null) return;
+  /// REAL-TIME balance check - called immediately after each cost increment
+  /// Uses EXACT backend formula to calculate cost and stops session BEFORE exceeding balance
+  void _checkBalanceRealtime() {
+    if (!mounted || _currentSessionId == null || _isStoppingDueToBalance) {
+      return;
+    }
     
-    // Calculate estimated cost based on current usage
+    // Calculate cost using EXACT backend formula:
+    // Input cost = audioSecondsProcessed * inputCreditPerSec
+    // Output cost = (transcriptionChars + translationChars) * outputCreditPerChar
+    // Total cost = Input cost + Output cost
     final inputCost = _audioSecondsProcessed * _inputCreditPerSec;
     final totalOutputChars = _totalTranscriptionCharacters + _totalTranslationCharacters;
     final outputCost = totalOutputChars * _outputCreditPerChar;
@@ -9759,27 +10007,41 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
       });
     }
     
-    debugPrint('RealtimeTranslator: 💰 Cost update - Estimated: ${_estimatedCost.toStringAsFixed(2)}, Remaining: ${_currentBalance.toStringAsFixed(2)}');
+    debugPrint('RealtimeTranslator: 💰 Real-time cost - Estimated: ${_estimatedCost.toStringAsFixed(2)}, Remaining: ${_currentBalance.toStringAsFixed(2)}, Balance before: $_balanceBeforeSession');
     
-    // Auto-stop if balance is too low (less than 1 credit or less than estimated cost for next 5 seconds)
-    final estimatedCostFor5Sec = (_inputCreditPerSec * 5) + (100 * _outputCreditPerChar); // Rough estimate
-    if (_currentBalance <= 0 || _currentBalance < estimatedCostFor5Sec) {
-      debugPrint('RealtimeTranslator: ⚠️ Balance running low! Remaining: $_currentBalance');
+    // CRITICAL: Stop session IMMEDIATELY if we would exceed available balance
+    // Use exact backend formula to ensure we NEVER exceed the available balance
+    if (_estimatedCost >= _balanceBeforeSession) {
+      debugPrint('RealtimeTranslator: 🛑 STOPPING SESSION - Cost exceeds balance!');
+      debugPrint('RealtimeTranslator:   - Balance before: $_balanceBeforeSession');
+      debugPrint('RealtimeTranslator:   - Current cost: ${_estimatedCost.toStringAsFixed(2)}');
+      debugPrint('RealtimeTranslator:   - Condition: Cost >= Balance');
       
-      // Auto-stop session
-      if (_currentBalance <= 0) {
-        _autoStopDueToInsufficientBalance();
-      }
+      // Auto-stop session immediately to prevent exceeding balance
+      _autoStopDueToInsufficientBalance();
+      return; // Exit early to prevent further processing
     }
+  }
+
+  /// Periodic balance check (backup - called every 5 seconds)
+  /// This is a safety net in case real-time checks miss something
+  void _checkBalanceAndCalculateCost() {
+    _checkBalanceRealtime();
   }
 
   /// Auto-stop session due to insufficient balance
   Future<void> _autoStopDueToInsufficientBalance() async {
+    // Prevent multiple stop calls
+    if (_isStoppingDueToBalance || !mounted) {
+      debugPrint('RealtimeTranslator: ⚠️ Auto-stop already in progress or not mounted');
+      return;
+    }
+    
+    _isStoppingDueToBalance = true;
     debugPrint('RealtimeTranslator: 🛑 Auto-stopping session due to insufficient balance');
+    debugPrint('RealtimeTranslator: Final cost: ${_estimatedCost.toStringAsFixed(2)}, Balance before: $_balanceBeforeSession, Remaining: ${_currentBalance.toStringAsFixed(2)}');
     
-    if (!mounted) return;
-    
-    // Stop recording
+    // Stop recording immediately
     await _stopRealtimeSession();
     
     // Show notification

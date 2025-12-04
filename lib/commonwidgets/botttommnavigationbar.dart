@@ -70,49 +70,49 @@ class BottomNavBarScreenState extends State<BottomNavBarScreen> {
           final planId = profile?.currentPlanId ?? 'free';
           
           return AnimatedContainer(
-            duration: const Duration(milliseconds: 300),
-            curve: Curves.easeInOut,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Colors.blueAccent, Colors.purpleAccent],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(30),
-                topRight: Radius.circular(30),
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black26,
-                  blurRadius: 10,
-                  offset: Offset(0, -3),
-                ),
-              ],
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeInOut,
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.blueAccent, Colors.purpleAccent],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.only(
+            topLeft: Radius.circular(30),
+            topRight: Radius.circular(30),
+          ),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black26,
+              blurRadius: 10,
+              offset: Offset(0, -3),
             ),
-            child: BottomNavigationBar(
-              items: [
-                _buildBottomNavBarItem(Icons.chat, 'Chats'), // Chats Screen
-                _buildBottomNavBarItem(Icons.group, 'Groups'), // Groups Screen
-                _buildBottomNavBarItem(
-                    Icons.contacts, 'Contacts'), // Contacts Screen
-                // _buildBottomNavBarItem(Icons.call, 'Calls'),         // Calls Screen
-                _buildBottomNavBarItem(
-                    Icons.translate, 'Translator'), // Translator Screen
-                // _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen
-                _buildBottomNavBarItem(
-                    Icons.settings, 'Settings'), // Settings Screen
+          ],
+        ),
+        child: BottomNavigationBar(
+          items: [
+            _buildBottomNavBarItem(Icons.chat, 'Chats'), // Chats Screen
+            _buildBottomNavBarItem(Icons.group, 'Groups'), // Groups Screen
+            _buildBottomNavBarItem(
+                Icons.contacts, 'Contacts'), // Contacts Screen
+            // _buildBottomNavBarItem(Icons.call, 'Calls'),         // Calls Screen
+            _buildBottomNavBarItem(
+                Icons.translate, 'Translator'), // Translator Screen
+            // _buildBottomNavBarItem(Icons.search, 'Search'),      // Search Screen
+            _buildBottomNavBarItem(
+                Icons.settings, 'Settings'), // Settings Screen
                 _buildSubscriptionNavBarItem(totalBalance, planId), // Subscription/Credits
-              ],
-              currentIndex: _selectedIndex,
-              selectedItemColor: Colors.white,
-              unselectedItemColor: Colors.white70,
-              showUnselectedLabels: true,
-              onTap: _onItemTapped,
-              type: BottomNavigationBarType.fixed,
-              backgroundColor:
-                  Colors.transparent, // Transparent background to apply gradient
-            ),
+          ],
+          currentIndex: _selectedIndex,
+          selectedItemColor: Colors.white,
+          unselectedItemColor: Colors.white70,
+          showUnselectedLabels: true,
+          onTap: _onItemTapped,
+          type: BottomNavigationBarType.fixed,
+          backgroundColor:
+              Colors.transparent, // Transparent background to apply gradient
+        ),
           );
         },
       ),
