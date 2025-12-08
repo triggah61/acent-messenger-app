@@ -167,7 +167,7 @@ class FCMService {
       const messagesChannel = AndroidNotificationChannel(
         'acent_messages',
         'Acent Messages',
-        description: 'Notification channel for Acent Messenger',
+        description: 'Notification channel for Q-Messenger',
         importance: Importance.high,
       );
 
@@ -443,7 +443,7 @@ class FCMService {
       styleInformation: const BigTextStyleInformation(
         '',
         contentTitle: 'Incoming Call',
-        summaryText: 'Acent Messenger',
+        summaryText: 'Q-Messenger',
         htmlFormatContentTitle: true,
         htmlFormatSummaryText: true,
       ),
@@ -490,7 +490,7 @@ class FCMService {
     const androidDetails = AndroidNotificationDetails(
       'acent_messages',
       'Acent Messages',
-      channelDescription: 'Notification channel for Acent Messenger',
+      channelDescription: 'Notification channel for Q-Messenger',
       importance: Importance.high,
       priority: Priority.high,
       icon: '@mipmap/ic_launcher',
@@ -716,7 +716,7 @@ class FCMService {
         },
         body: jsonEncode({
           'title': 'Test Notification',
-          'body': 'This is a test notification from Acent Messenger',
+          'body': 'This is a test notification from Q-Messenger',
           'data': {'type': 'test'},
         }),
       );

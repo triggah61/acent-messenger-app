@@ -94,6 +94,8 @@ dependencies:
   web_socket_channel: ^2.4.0
   # Text-to-speech for translation audio playback
   flutter_tts: ^3.8.3
+  # Google Play Billing for in-app purchases
+  in_app_purchase: ^3.2.0
   # Translation uses Azure Translator API via backend (no local dependencies needed)
   # Audio processing for stereo merging (using native Flutter)
   # No additional dependencies needed - using existing audioplayers

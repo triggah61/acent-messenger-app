@@ -2425,8 +2425,8 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
     _totalTranslationCharacters = 0;
     _transcriptionCharactersPerSpeaker = {0: 0, 1: 0};
     _translationCharactersPerSpeaker = {0: 0, 1: 0};
-      _translationLatencies = [];
-      _totalTranslations = 0;
+    _translationLatencies = [];
+    _totalTranslations = 0;
       _estimatedCost = 0.0;
       _isStoppingDueToBalance = false; // Reset flag for new session
 

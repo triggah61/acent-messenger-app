@@ -5,9 +5,13 @@ import 'package:provider/provider.dart';
 import 'package:flutter_html/flutter_html.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:async';
+import 'package:in_app_purchase/in_app_purchase.dart';
 import '../models/subscription_plan.dart';
 import '../services/auth_service.dart';
 import '../services/subscription_service.dart';
+import '../services/topup_service.dart';
+import '../services/google_play_billing_service.dart';
 import '../constants/config.dart';
 
 /// Subscription Modal Widget
@@ -46,8 +50,6 @@ class SubscriptionModal extends StatefulWidget {
 class _SubscriptionModalState extends State<SubscriptionModal> {
   int _selectedTabIndex = 0; // 0 = Plans, 1 = Top Up
   bool _isAnnual = false; // false = Monthly, true = Annual
-  final TextEditingController _topUpAmountController = TextEditingController();
-  double _topUpAmount = 0.0;
 
   // API-related state
   List<SubscriptionPlan> _plans = [];
@@ -55,6 +57,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   String? _errorMessage;
   bool _isSubscribing = false;
   late SubscriptionService _subscriptionService;
+  late TopUpService _topUpService;
+  late GooglePlayBillingService _billingService;
   
   // Profile and balance state
   double _totalBalance = 0.0;
@@ -63,14 +67,27 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   String? _currentPlanId;
   bool _isLoadingBalance = true;
 
+  // Top-up state
+  final TextEditingController _topUpAmountController = TextEditingController();
+  double _topUpAmount = 0.0;
+  bool _isToppingUp = false;
+
+  // Billing service state
+  bool _isBillingAvailable = false;
+
   @override
   void initState() {
     super.initState();
     _topUpAmountController.addListener(_onTopUpAmountChanged);
     
-    // Initialize subscription service
+    // Initialize services
     final authService = Provider.of<AuthService>(context, listen: false);
     _subscriptionService = SubscriptionService(authService);
+    _topUpService = TopUpService(authService);
+    _billingService = GooglePlayBillingService();
+    
+    // Initialize billing service
+    _initializeBilling();
     
     // Fetch plans and balance from API
     _fetchPlans();
@@ -81,6 +98,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   void dispose() {
     _topUpAmountController.removeListener(_onTopUpAmountChanged);
     _topUpAmountController.dispose();
+    _billingService.dispose();
     super.dispose();
   }
 
@@ -89,6 +107,25 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     setState(() {
       _topUpAmount = value;
     });
+  }
+
+  /// Initialize Google Play Billing service
+  Future<void> _initializeBilling() async {
+    try {
+      final isAvailable = await _billingService.initialize();
+      if (mounted) {
+        setState(() {
+          _isBillingAvailable = isAvailable;
+        });
+      }
+    } catch (e) {
+      print('SubscriptionModal: Failed to initialize billing: $e');
+      if (mounted) {
+        setState(() {
+          _isBillingAvailable = false;
+        });
+      }
+    }
   }
 
   /// Fetch subscription plans from API
@@ -169,7 +206,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     }
   }
 
-  /// Subscribe to a plan
+  /// Subscribe to a plan using Google Play Billing
   Future<void> _subscribeToPlan(SubscriptionPlan plan) async {
     // Handle custom plans
     if (plan.isCustom) {
@@ -191,13 +228,126 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       return;
     }
 
+    // Check if billing is available
+    if (!_isBillingAvailable) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('In-app purchases are not available. Please check your device settings.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
     setState(() {
       _isSubscribing = true;
     });
 
     try {
       final intervalType = _isAnnual ? 'year' : 'month';
-      final result = await _subscriptionService.subscribeToPlan(
+      
+      // Get Google Play product ID from plan
+      // Note: Product IDs should be stored in plan but not exposed in API response
+      // For now, we'll construct them or fetch from backend
+      // You'll need to get these from the plan's Google Play product IDs
+      
+      // Get product ID based on environment and interval
+      final bool useSandbox = Config.useGooglePlaySandbox;
+      String? productId;
+      
+      if (useSandbox) {
+        productId = _isAnnual 
+          ? plan.googlePlaySandboxAnnualSubscriptionId 
+          : plan.googlePlaySandboxMonthlySubscriptionId;
+      } else {
+        productId = _isAnnual 
+          ? plan.googlePlayAnnualSubscriptionId 
+          : plan.googlePlayMonthlySubscriptionId;
+      }
+
+      if (productId == null || productId.isEmpty) {
+        throw Exception('Google Play product ID not configured for this plan. Please contact support or try again later.');
+      }
+
+      // Query product details
+      final productDetailsResponse = await _billingService.getProductDetails(
+        {productId},
+        isSubscription: true,
+      );
+
+      if (productDetailsResponse.productDetails.isEmpty) {
+        throw Exception('Product not found in Google Play Store');
+      }
+
+      final productDetails = productDetailsResponse.productDetails.first;
+
+      // Show purchase confirmation dialog
+      final confirmPurchase = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Subscribe to ${plan.name}'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Plan: ${plan.name}'),
+              const SizedBox(height: 8),
+              Text('Interval: ${_isAnnual ? 'Annual' : 'Monthly'}'),
+              const SizedBox(height: 8),
+              Text('Price: ${productDetails.price}'),
+              const SizedBox(height: 8),
+              Text('Credits: ${_isAnnual ? plan.annualCredits : plan.monthlyCredits}'),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Subscribe'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmPurchase != true) {
+        setState(() {
+          _isSubscribing = false;
+        });
+        return;
+      }
+
+      // Initiate purchase
+      await _billingService.purchaseSubscription(productDetails);
+
+      // Wait for purchase completion
+      final purchaseDetails = await _billingService.waitForPurchase(
+        productId,
+        timeout: const Duration(seconds: 120),
+      );
+
+      if (purchaseDetails == null) {
+        throw Exception('Purchase was cancelled or timed out');
+      }
+
+      if (purchaseDetails.status != PurchaseStatus.purchased) {
+        throw Exception('Purchase failed: ${purchaseDetails.error?.message ?? 'Unknown error'}');
+      }
+
+      // Get purchase token
+      final purchaseToken = _billingService.getPurchaseToken(purchaseDetails);
+      if (purchaseToken == null) {
+        throw Exception('Failed to get purchase token');
+      }
+
+      // Verify purchase with backend
+      final result = await _subscriptionService.verifyGooglePlaySubscription(
+        purchaseToken: purchaseToken,
+        subscriptionId: productId,
         planId: plan.id,
         intervalType: intervalType,
       );
@@ -219,14 +369,18 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           if (mounted) {
             Navigator.of(context).pop();
           }
+        } else {
+          throw Exception(result['message'] ?? 'Subscription verification failed');
         }
       }
     } catch (e) {
+      print('SubscriptionModal: Subscription error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(e.toString().replaceAll('Exception: ', '')),
             backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
           ),
         );
       }
@@ -1348,18 +1502,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: _topUpAmount > 0
-                  ? () {
-                      // TODO: Handle top-up
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(
-                            'Top up \$${_topUpAmount.toStringAsFixed(2)} for ${credits.toStringAsFixed(0)} credits',
-                          ),
-                          backgroundColor: Colors.green,
-                        ),
-                      );
-                    }
+              onPressed: (_topUpAmount > 0 && !_isToppingUp)
+                  ? () => _purchaseTopUp(_topUpAmount)
                   : null,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
@@ -1370,7 +1514,16 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 ),
                 elevation: 4,
               ),
-              child: Text(
+              child: _isToppingUp
+                  ? const SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : Text(
                 'Top Up Balance',
                 style: GoogleFonts.montserrat(
                   fontSize: 16,
@@ -1382,6 +1535,208 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         ],
       ),
     );
+  }
+
+  /// Purchase top-up via Google Play with custom amount
+  Future<void> _purchaseTopUp(double usdAmount) async {
+    if (!_isBillingAvailable) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('In-app purchases are not available. Please check your device settings.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    if (usdAmount <= 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Please enter a valid amount'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() {
+      _isToppingUp = true;
+    });
+
+    try {
+      // Use a single consumable product for all top-ups
+      // This product ID should be configured in Google Play Console
+      final bool useSandbox = Config.useGooglePlaySandbox;
+      final String productId = useSandbox
+          ? Config.googlePlayTopUpSandboxProductId
+          : Config.googlePlayTopUpProductId;
+
+      // Query product details
+      ProductDetailsResponse productDetailsResponse;
+      try {
+        productDetailsResponse = await _billingService.getProductDetails(
+          {productId},
+          isSubscription: false,
+        );
+      } catch (e) {
+        print('SubscriptionModal: Error querying product: $e');
+        throw Exception('Unable to connect to Google Play Store. Please check your internet connection and try again.');
+      }
+
+      if (productDetailsResponse.productDetails.isEmpty) {
+        // Reset loading state first
+        if (mounted) {
+          setState(() {
+            _isToppingUp = false;
+          });
+        }
+        
+        // Provide helpful error message
+        final errorMsg = 'Top-up product is not configured yet.\n\n'
+            'Product ID: $productId\n\n'
+            'This product needs to be created in Google Play Console before top-ups can be used.\n\n'
+            'Please contact support or try again later.';
+        
+        if (mounted) {
+          await showDialog(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Top-Up Unavailable'),
+              content: SingleChildScrollView(
+                child: Text(errorMsg),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('OK'),
+                ),
+              ],
+            ),
+          );
+        }
+        return;
+      }
+
+      final productDetails = productDetailsResponse.productDetails.first;
+      final credits = CreditConverter.usdToCredits(usdAmount);
+
+      // Show purchase confirmation
+      final confirmPurchase = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Confirm Top-Up'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Amount: \$${usdAmount.toStringAsFixed(2)}'),
+              const SizedBox(height: 8),
+              Text('Credits: ${credits.toStringAsFixed(0)}'),
+              const SizedBox(height: 8),
+              Text('Product: ${productDetails.price}'),
+              const SizedBox(height: 12),
+              Text(
+                'Note: The actual amount charged will be based on the Google Play product price. Credits will be granted based on your entered amount.',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey[600],
+                  fontStyle: FontStyle.italic,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Purchase'),
+            ),
+          ],
+        ),
+      );
+
+      if (confirmPurchase != true) {
+        setState(() {
+          _isToppingUp = false;
+        });
+        return;
+      }
+
+      // Initiate purchase
+      await _billingService.purchaseProduct(productDetails);
+
+      // Wait for purchase completion
+      final purchaseDetails = await _billingService.waitForPurchase(
+        productId,
+        timeout: const Duration(seconds: 120),
+      );
+
+      if (purchaseDetails == null) {
+        throw Exception('Purchase was cancelled or timed out');
+      }
+
+      if (purchaseDetails.status != PurchaseStatus.purchased) {
+        throw Exception('Purchase failed: ${purchaseDetails.error?.message ?? 'Unknown error'}');
+      }
+
+      // Get purchase token
+      final purchaseToken = _billingService.getPurchaseToken(purchaseDetails);
+      if (purchaseToken == null) {
+        throw Exception('Failed to get purchase token');
+      }
+
+      // Verify purchase with backend (pass the custom amount)
+      final result = await _topUpService.verifyGooglePlayTopUp(
+        purchaseToken: purchaseToken,
+        productId: productId,
+        usdAmount: usdAmount,
+      );
+
+      if (mounted) {
+        if (result['success'] == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(result['message'] ?? 'Top-up successful!'),
+              backgroundColor: Colors.green,
+            ),
+          );
+
+          // Refresh balance
+          await _fetchBalance();
+          await Future.delayed(const Duration(seconds: 1));
+
+          if (mounted) {
+            Navigator.of(context).pop();
+          }
+        } else {
+          throw Exception(result['message'] ?? 'Top-up verification failed');
+        }
+      }
+    } catch (e) {
+      print('SubscriptionModal: Top-up error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(e.toString().replaceAll('Exception: ', '')),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isToppingUp = false;
+        });
+      }
+    }
   }
 
   IconData _getPlanIcon(String planId) {
@@ -1413,4 +1768,6 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     return Icons.workspace_premium;
   }
 }
+
+
 

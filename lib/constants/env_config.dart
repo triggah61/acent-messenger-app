@@ -75,6 +75,16 @@ class EnvConfig {
       int.tryParse(dotenv.env['TOKEN_REFRESH_THRESHOLD_SECONDS'] ?? '300') ??
       300;
 
+  // Google Play Billing Configuration
+  static bool get useGooglePlaySandbox =>
+      (dotenv.env['GOOGLE_PLAY_USE_SANDBOX'] ?? 'true').toLowerCase() == 'true';
+  static String get googlePlayPackageName =>
+      dotenv.env['GOOGLE_PLAY_PACKAGE_NAME'] ?? 'com.qmessenger.app';
+  static String get googlePlayTopUpProductId =>
+      dotenv.env['GOOGLE_PLAY_TOPUP_PRODUCT_ID'] ?? 'com.qmessenger.app.topup';
+  static String get googlePlayTopUpSandboxProductId =>
+      dotenv.env['GOOGLE_PLAY_TOPUP_SANDBOX_PRODUCT_ID'] ?? 'com.qmessenger.app.topup.test';
+
   // Helper method to get full photo URL
   static String getPhotoUrl(String? photoPath) {
     if (photoPath == null || photoPath.isEmpty) {

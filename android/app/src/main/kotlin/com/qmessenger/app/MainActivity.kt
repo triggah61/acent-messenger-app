@@ -1,4 +1,4 @@
-package com.example.acent_messenger
+package com.qmessenger.app
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine

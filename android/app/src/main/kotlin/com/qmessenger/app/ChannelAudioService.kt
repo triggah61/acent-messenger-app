@@ -1,4 +1,4 @@
-package com.example.acent_messenger
+package com.qmessenger.app
 
 import android.media.AudioAttributes
 import android.media.AudioFormat

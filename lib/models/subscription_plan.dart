@@ -16,6 +16,11 @@ class SubscriptionPlan {
   final bool isCustom; // Whether this is a custom plan
   final String? contactFormLink; // Contact form link for custom plans
   final String? actionButtonText; // Custom action button text
+  // Google Play Billing product IDs (not exposed to client, used internally)
+  final String? googlePlayMonthlySubscriptionId;
+  final String? googlePlayAnnualSubscriptionId;
+  final String? googlePlaySandboxMonthlySubscriptionId;
+  final String? googlePlaySandboxAnnualSubscriptionId;
 
   const SubscriptionPlan({
     required this.id,
@@ -31,6 +36,10 @@ class SubscriptionPlan {
     this.isCustom = false,
     this.contactFormLink,
     this.actionButtonText,
+    this.googlePlayMonthlySubscriptionId,
+    this.googlePlayAnnualSubscriptionId,
+    this.googlePlaySandboxMonthlySubscriptionId,
+    this.googlePlaySandboxAnnualSubscriptionId,
   });
 
   /// Get monthly equivalent price for annual plan
@@ -116,6 +125,10 @@ class SubscriptionPlan {
       isCustom: json['isCustom'] == true || json['isCustom'] == 'true',
       contactFormLink: json['contactFormLink']?.toString(),
       actionButtonText: json['actionButtonText']?.toString(),
+      googlePlayMonthlySubscriptionId: json['googlePlayMonthlySubscriptionId']?.toString(),
+      googlePlayAnnualSubscriptionId: json['googlePlayAnnualSubscriptionId']?.toString(),
+      googlePlaySandboxMonthlySubscriptionId: json['googlePlaySandboxMonthlySubscriptionId']?.toString(),
+      googlePlaySandboxAnnualSubscriptionId: json['googlePlaySandboxAnnualSubscriptionId']?.toString(),
     );
   }
 

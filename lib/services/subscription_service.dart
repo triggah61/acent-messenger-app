@@ -129,6 +129,57 @@ class SubscriptionService {
     }
   }
 
+  /// Verify Google Play subscription purchase
+  Future<Map<String, dynamic>> verifyGooglePlaySubscription({
+    required String purchaseToken,
+    required String subscriptionId,
+    required String planId,
+    required String intervalType, // 'month' or 'year'
+  }) async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('No authentication token available');
+      }
+
+      final response = await http.post(
+        Uri.parse('${Config.baseApiUrl}/user/subscriptions/verify-google-play'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          'purchaseToken': purchaseToken,
+          'subscriptionId': subscriptionId,
+          'planId': planId,
+          'intervalType': intervalType,
+        }),
+      );
+
+      print('SubscriptionService: Verify Google Play response status: ${response.statusCode}');
+      print('SubscriptionService: Verify Google Play response body: ${response.body}');
+
+      if (response.statusCode == 200 || response.statusCode == 201) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == 'success') {
+          return {
+            'success': true,
+            'data': data['data'],
+            'message': data['message'] ?? 'Successfully subscribed',
+          };
+        } else {
+          throw Exception(data['message'] ?? 'Failed to verify subscription');
+        }
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to verify subscription purchase');
+      }
+    } catch (e) {
+      print('SubscriptionService: Error verifying subscription: $e');
+      rethrow;
+    }
+  }
+
   /// Get user's subscription history
   Future<List<Map<String, dynamic>>> getSubscriptionHistory({String? status}) async {
     try {

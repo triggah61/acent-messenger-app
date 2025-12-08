@@ -1,4 +1,4 @@
-package com.example.acent_messenger
+package com.qmessenger.app
 
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
