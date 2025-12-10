@@ -39,6 +39,10 @@
     
     <!-- Audio focus and ringtone -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY"/>
+    
+    <!-- Google Play Billing permission for in-app purchases -->
+    <uses-permission android:name="com.android.vending.BILLING"/>
+    
     <application
         android:label="Q Messenger"
         android:name="${applicationName}"

@@ -111,19 +111,24 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
   /// Initialize Google Play Billing service
   Future<void> _initializeBilling() async {
+    print('🔵 [Billing] Initializing Google Play Billing service...');
     try {
       final isAvailable = await _billingService.initialize();
+      print('🔵 [Billing] Initialization result: $isAvailable');
       if (mounted) {
         setState(() {
           _isBillingAvailable = isAvailable;
         });
+        print('✅ [Billing] Billing availability set to: $_isBillingAvailable');
       }
-    } catch (e) {
-      print('SubscriptionModal: Failed to initialize billing: $e');
+    } catch (e, stackTrace) {
+      print('❌ [Billing] Failed to initialize billing: $e');
+      print('❌ [Billing] Stack trace: $stackTrace');
       if (mounted) {
         setState(() {
           _isBillingAvailable = false;
         });
+        print('⚠️ [Billing] Billing availability set to: false');
       }
     }
   }
@@ -1502,8 +1507,14 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: (_topUpAmount > 0 && !_isToppingUp)
-                  ? () => _purchaseTopUp(_topUpAmount)
+              onPressed: (_topUpAmount > 0 && !_isToppingUp && _isBillingAvailable)
+                  ? () {
+                      print('🔵 [UI] Top Up button pressed');
+                      print('   - Amount: \$$_topUpAmount');
+                      print('   - Is topping up: $_isToppingUp');
+                      print('   - Billing available: $_isBillingAvailable');
+                      _purchaseTopUp(_topUpAmount);
+                    }
                   : null,
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
@@ -1539,30 +1550,41 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
   /// Purchase top-up via Google Play with custom amount
   Future<void> _purchaseTopUp(double usdAmount) async {
+    print('🔵 [TopUp] _purchaseTopUp called with amount: \$$usdAmount');
+    print('🔵 [TopUp] Billing available: $_isBillingAvailable');
+    print('🔵 [TopUp] Current state - isToppingUp: $_isToppingUp');
+    
+    // Check billing availability
     if (!_isBillingAvailable) {
+      print('❌ [TopUp] Billing not available');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('In-app purchases are not available. Please check your device settings.'),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
           ),
         );
       }
       return;
     }
 
+    // Validate amount
     if (usdAmount <= 0) {
+      print('❌ [TopUp] Invalid amount: $usdAmount');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text('Please enter a valid amount'),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
           ),
         );
       }
       return;
     }
 
+    print('✅ [TopUp] Validation passed, setting loading state');
     setState(() {
       _isToppingUp = true;
     });
@@ -1574,20 +1596,38 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       final String productId = useSandbox
           ? Config.googlePlayTopUpSandboxProductId
           : Config.googlePlayTopUpProductId;
+      
+      print('🔵 [TopUp] Configuration:');
+      print('   - Sandbox mode: $useSandbox');
+      print('   - Product ID: $productId');
+      print('   - Package name: ${Config.googlePlayPackageName}');
 
       // Query product details
+      print('🔵 [TopUp] Querying product details for: $productId');
       ProductDetailsResponse productDetailsResponse;
       try {
         productDetailsResponse = await _billingService.getProductDetails(
           {productId},
           isSubscription: false,
         );
-      } catch (e) {
-        print('SubscriptionModal: Error querying product: $e');
+        print('✅ [TopUp] Product query successful');
+        print('   - Found ${productDetailsResponse.productDetails.length} product(s)');
+        if (productDetailsResponse.error != null) {
+          print('⚠️ [TopUp] Product query error: ${productDetailsResponse.error}');
+        }
+      } catch (e, stackTrace) {
+        print('❌ [TopUp] Error querying product: $e');
+        print('❌ [TopUp] Stack trace: $stackTrace');
+        if (mounted) {
+          setState(() {
+            _isToppingUp = false;
+          });
+        }
         throw Exception('Unable to connect to Google Play Store. Please check your internet connection and try again.');
       }
 
       if (productDetailsResponse.productDetails.isEmpty) {
+        print('❌ [TopUp] No products found for ID: $productId');
         // Reset loading state first
         if (mounted) {
           setState(() {
@@ -1623,8 +1663,16 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
       final productDetails = productDetailsResponse.productDetails.first;
       final credits = CreditConverter.usdToCredits(usdAmount);
+      
+      print('✅ [TopUp] Product details retrieved:');
+      print('   - Product ID: ${productDetails.id}');
+      print('   - Price: ${productDetails.price}');
+      print('   - Title: ${productDetails.title}');
+      print('   - Description: ${productDetails.description}');
+      print('   - Credits to grant: $credits');
 
       // Show purchase confirmation
+      print('🔵 [TopUp] Showing purchase confirmation dialog');
       final confirmPurchase = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
@@ -1663,6 +1711,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       );
 
       if (confirmPurchase != true) {
+        print('⚠️ [TopUp] Purchase cancelled by user');
         setState(() {
           _isToppingUp = false;
         });
@@ -1670,20 +1719,69 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       }
 
       // Initiate purchase
-      await _billingService.purchaseProduct(productDetails);
+      print('🔵 [TopUp] Initiating purchase...');
+      try {
+        await _billingService.purchaseProduct(productDetails);
+        print('✅ [TopUp] Purchase initiated successfully');
+      } catch (e, stackTrace) {
+        print('❌ [TopUp] Failed to initiate purchase: $e');
+        print('❌ [TopUp] Stack trace: $stackTrace');
+        throw Exception('Failed to start purchase: ${e.toString()}');
+      }
 
       // Wait for purchase completion
-      final purchaseDetails = await _billingService.waitForPurchase(
-        productId,
-        timeout: const Duration(seconds: 120),
-      );
+      print('🔵 [TopUp] Waiting for purchase completion (timeout: 120s)...');
+      PurchaseDetails? purchaseDetails;
+      try {
+        purchaseDetails = await _billingService.waitForPurchase(
+          productId,
+          timeout: const Duration(seconds: 120),
+        );
+        print('✅ [TopUp] Purchase details received');
+      } catch (e, stackTrace) {
+        print('❌ [TopUp] Error waiting for purchase: $e');
+        print('❌ [TopUp] Stack trace: $stackTrace');
+        
+        // Provide more helpful error messages
+        String errorMessage = e.toString();
+        if (errorMessage.contains('item_unavailable') || 
+            errorMessage.contains('not available') ||
+            errorMessage.contains('could not be found')) {
+          errorMessage = 'The product is not available for purchase.\n\n'
+              'Common causes:\n'
+              '• App not installed from Google Play test track\n'
+              '• Product not active in Google Play Console\n'
+              '• Test account not properly set up\n'
+              '• Wait 1-2 hours after product creation\n\n'
+              'Product ID: $productId\n\n'
+              'See TROUBLESHOOTING_PURCHASE_ERROR.md for detailed steps.';
+        }
+        
+        throw Exception(errorMessage);
+      }
 
       if (purchaseDetails == null) {
+        print('❌ [TopUp] Purchase details is null - cancelled or timed out');
         throw Exception('Purchase was cancelled or timed out');
       }
 
+      print('🔵 [TopUp] Purchase status: ${purchaseDetails.status}');
       if (purchaseDetails.status != PurchaseStatus.purchased) {
-        throw Exception('Purchase failed: ${purchaseDetails.error?.message ?? 'Unknown error'}');
+        print('❌ [TopUp] Purchase not successful. Status: ${purchaseDetails.status}');
+        if (purchaseDetails.error != null) {
+          print('❌ [TopUp] Error details: ${purchaseDetails.error}');
+        }
+        
+        String errorMsg = purchaseDetails.error?.message ?? 'Unknown error';
+        if (errorMsg.contains('item_unavailable') || errorMsg.contains('not available') || errorMsg.contains('could not be found')) {
+          errorMsg = 'The product is not available for purchase. Please ensure:\n'
+              '1. App is installed from Google Play test track\n'
+              '2. Product is active in Google Play Console\n'
+              '3. Test account is properly configured\n'
+              '4. Wait 1-2 hours after product creation';
+        }
+        
+        throw Exception('Purchase failed: $errorMsg');
       }
 
       // Get purchase token
@@ -1693,14 +1791,30 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       }
 
       // Verify purchase with backend (pass the custom amount)
-      final result = await _topUpService.verifyGooglePlayTopUp(
-        purchaseToken: purchaseToken,
-        productId: productId,
-        usdAmount: usdAmount,
-      );
+      print('🔵 [TopUp] Verifying purchase with backend...');
+      print('   - Purchase token: ${purchaseToken.substring(0, 20)}...');
+      print('   - Product ID: $productId');
+      print('   - USD Amount: \$$usdAmount');
+      
+      Map<String, dynamic> result;
+      try {
+        result = await _topUpService.verifyGooglePlayTopUp(
+          purchaseToken: purchaseToken,
+          productId: productId,
+          usdAmount: usdAmount,
+        );
+        print('✅ [TopUp] Backend verification response received');
+        print('   - Success: ${result['success']}');
+        print('   - Message: ${result['message']}');
+      } catch (e, stackTrace) {
+        print('❌ [TopUp] Backend verification error: $e');
+        print('❌ [TopUp] Stack trace: $stackTrace');
+        throw Exception('Backend verification failed: ${e.toString()}');
+      }
 
       if (mounted) {
         if (result['success'] == true) {
+          print('✅ [TopUp] Top-up successful!');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(result['message'] ?? 'Top-up successful!'),
@@ -1719,18 +1833,27 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           throw Exception(result['message'] ?? 'Top-up verification failed');
         }
       }
-    } catch (e) {
-      print('SubscriptionModal: Top-up error: $e');
+    } catch (e, stackTrace) {
+      print('❌ [TopUp] Top-up error caught: $e');
+      print('❌ [TopUp] Error type: ${e.runtimeType}');
+      print('❌ [TopUp] Stack trace: $stackTrace');
+      
+      String errorMessage = e.toString().replaceAll('Exception: ', '');
+      if (errorMessage.isEmpty) {
+        errorMessage = 'An unexpected error occurred. Please try again.';
+      }
+      
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString().replaceAll('Exception: ', '')),
+            content: Text(errorMessage),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
           ),
         );
       }
     } finally {
+      print('🔵 [TopUp] Cleaning up - resetting loading state');
       if (mounted) {
         setState(() {
           _isToppingUp = false;
