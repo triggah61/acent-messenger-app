@@ -10,6 +10,7 @@ class SubscriptionPlan {
   final int monthlyCredits; // Credits per month
   final int annualCredits; // Credits per year (total)
   final List<String> features; // List of features available in this plan (deprecated - use description HTML)
+  final List<String> benefits; // List of benefits to display with checkmarks
   final String description; // HTML description from rich text editor
   final String? subtitle; // Subtitle to show under the plan name
   final Color color; // Color theme for the plan
@@ -30,6 +31,7 @@ class SubscriptionPlan {
     required this.monthlyCredits,
     required this.annualCredits,
     required this.features,
+    required this.benefits,
     required this.description,
     required this.color,
     this.subtitle,
@@ -111,6 +113,15 @@ class SubscriptionPlan {
     
     print('SubscriptionPlan.fromJson: Successfully parsed plan ID: $planId');
 
+    // Parse benefits array
+    List<String> parseBenefits(dynamic benefitsJson) {
+      if (benefitsJson == null) return [];
+      if (benefitsJson is List) {
+        return benefitsJson.map((e) => e.toString()).where((e) => e.isNotEmpty).toList();
+      }
+      return [];
+    }
+
     return SubscriptionPlan(
       id: planId,
       name: json['name']?.toString() ?? 'Unknown Plan',
@@ -119,6 +130,7 @@ class SubscriptionPlan {
       monthlyCredits: (json['monthlyCredit'] as num?)?.toInt() ?? 0,
       annualCredits: annualCredits,
       features: [], // Features are now in the HTML description
+      benefits: parseBenefits(json['benefits']),
       description: json['description']?.toString() ?? '',
       subtitle: json['subtitle']?.toString(),
       color: parseColor(json['color']?.toString()),
@@ -165,6 +177,11 @@ class SubscriptionPlans {
       'Limited translation minutes',
       'Standard support',
     ],
+    benefits: [
+      'Basic translation features',
+      'Limited translation minutes',
+      'Standard support',
+    ],
     description: 'Perfect for occasional use',
     color: Color(0xFF9E9E9E), // Grey
     isCustom: false,
@@ -183,6 +200,12 @@ class SubscriptionPlans {
       'Priority support',
       'Advanced translation options',
     ],
+    benefits: [
+      'All basic features',
+      'Extended translation minutes',
+      'Priority support',
+      'Advanced translation options',
+    ],
     description: 'Best for regular users',
     color: Color(0xFF2196F3), // Blue
     isCustom: false,
@@ -196,6 +219,14 @@ class SubscriptionPlans {
     monthlyCredits: 2500, // Example: 2500 credits per month
     annualCredits: 30000, // Example: 30000 credits per year
     features: [
+      'All standard features',
+      'Unlimited translation minutes',
+      '24/7 priority support',
+      'Advanced translation options',
+      'Premium features access',
+      'Early access to new features',
+    ],
+    benefits: [
       'All standard features',
       'Unlimited translation minutes',
       '24/7 priority support',

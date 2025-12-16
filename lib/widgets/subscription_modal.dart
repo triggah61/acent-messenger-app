@@ -8,6 +8,7 @@ import 'dart:convert';
 import 'dart:async';
 import 'package:in_app_purchase/in_app_purchase.dart';
 import '../models/subscription_plan.dart';
+import '../models/credit_package.dart';
 import '../services/auth_service.dart';
 import '../services/subscription_service.dart';
 import '../services/topup_service.dart';
@@ -68,9 +69,10 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   bool _isLoadingBalance = true;
 
   // Top-up state
-  final TextEditingController _topUpAmountController = TextEditingController();
-  double _topUpAmount = 0.0;
+  List<CreditPackage> _packages = [];
+  bool _isLoadingPackages = true;
   bool _isToppingUp = false;
+  String? _toppingUpPackageId;
 
   // Billing service state
   bool _isBillingAvailable = false;
@@ -78,7 +80,6 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   @override
   void initState() {
     super.initState();
-    _topUpAmountController.addListener(_onTopUpAmountChanged);
     
     // Initialize services
     final authService = Provider.of<AuthService>(context, listen: false);
@@ -89,24 +90,16 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     // Initialize billing service
     _initializeBilling();
     
-    // Fetch plans and balance from API
+    // Fetch plans, packages, and balance from API
     _fetchPlans();
+    _fetchPackages();
     _fetchBalance();
   }
 
   @override
   void dispose() {
-    _topUpAmountController.removeListener(_onTopUpAmountChanged);
-    _topUpAmountController.dispose();
     _billingService.dispose();
     super.dispose();
-  }
-
-  void _onTopUpAmountChanged() {
-    final value = double.tryParse(_topUpAmountController.text) ?? 0.0;
-    setState(() {
-      _topUpAmount = value;
-    });
   }
 
   /// Initialize Google Play Billing service
@@ -162,6 +155,31 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     }
   }
 
+  /// Fetch credit packages from API
+  Future<void> _fetchPackages() async {
+    setState(() {
+      _isLoadingPackages = true;
+    });
+
+    try {
+      print('SubscriptionModal: Fetching credit packages...');
+      final packagesData = await _topUpService.getTopUpPackages();
+      final packages =
+          packagesData.map((pkg) => CreditPackage.fromJson(pkg)).toList();
+      print('SubscriptionModal: Received ${packages.length} packages');
+      setState(() {
+        _packages = packages;
+        _isLoadingPackages = false;
+      });
+    } catch (e, stackTrace) {
+      print('SubscriptionModal: Error fetching packages: $e');
+      print('SubscriptionModal: Stack trace: $stackTrace');
+      setState(() {
+        _isLoadingPackages = false;
+      });
+    }
+  }
+
   /// Fetch user balance from profile API
   Future<void> _fetchBalance() async {
     setState(() {
@@ -191,10 +209,18 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         if (data['data'] != null) {
           final profileData = data['data'];
           setState(() {
-            _totalBalance = (profileData['balance']?['totalBalance'] as num?)?.toDouble() ?? 0.0;
-            _topUpBalance = (profileData['balance']?['topUpBalance'] as num?)?.toDouble() ?? 0.0;
-            _subscriptionBalance = (profileData['balance']?['subscriptionBalance'] as num?)?.toDouble() ?? 0.0;
-            _currentPlanId = profileData['subscription']?['currentPlan']?['_id']?.toString();
+            _totalBalance =
+                (profileData['balance']?['totalBalance'] as num?)?.toDouble() ??
+                    0.0;
+            _topUpBalance =
+                (profileData['balance']?['topUpBalance'] as num?)?.toDouble() ??
+                    0.0;
+            _subscriptionBalance =
+                (profileData['balance']?['subscriptionBalance'] as num?)
+                        ?.toDouble() ??
+                    0.0;
+            _currentPlanId =
+                profileData['subscription']?['currentPlan']?['_id']?.toString();
             _isLoadingBalance = false;
           });
         }
@@ -213,16 +239,21 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
   /// Subscribe to a plan using Google Play Billing
   Future<void> _subscribeToPlan(SubscriptionPlan plan) async {
+    print('🔵 [Subscription] _subscribeToPlan called for plan: ${plan.name} (${plan.id})');
+    
     // Handle custom plans
     if (plan.isCustom) {
+      print('🔵 [Subscription] Custom plan detected, opening contact form...');
       if (plan.contactFormLink != null && plan.contactFormLink!.isNotEmpty) {
         final uri = Uri.parse(plan.contactFormLink!);
         if (await canLaunchUrl(uri)) {
           await launchUrl(uri, mode: LaunchMode.externalApplication);
+          print('✅ [Subscription] Contact form opened successfully');
         } else {
+          print('❌ [Subscription] Failed to open contact form link');
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
+              const SnackBar(
                 content: Text('Could not open contact form link'),
                 backgroundColor: Colors.red,
               ),
@@ -235,11 +266,14 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
     // Check if billing is available
     if (!_isBillingAvailable) {
+      print('❌ [Subscription] Billing not available');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('In-app purchases are not available. Please check your device settings.'),
+            content: Text(
+                '🚫 In-app purchases are not available. Please install the app from Play Store.'),
             backgroundColor: Colors.red,
+            duration: Duration(seconds: 5),
           ),
         );
       }
@@ -249,33 +283,71 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     setState(() {
       _isSubscribing = true;
     });
+    print('✅ [Subscription] Starting subscription process...');
 
     try {
       final intervalType = _isAnnual ? 'year' : 'month';
-      
-      // Get Google Play product ID from plan
-      // Note: Product IDs should be stored in plan but not exposed in API response
-      // For now, we'll construct them or fetch from backend
-      // You'll need to get these from the plan's Google Play product IDs
+      print('🔵 [Subscription] Interval type: $intervalType');
       
       // Get product ID based on environment and interval
       final bool useSandbox = Config.useGooglePlaySandbox;
       String? productId;
       
+      // Try to get the appropriate product ID
       if (useSandbox) {
         productId = _isAnnual 
           ? plan.googlePlaySandboxAnnualSubscriptionId 
           : plan.googlePlaySandboxMonthlySubscriptionId;
+        print('🔵 [Subscription] Using SANDBOX product ID: $productId');
+        
+        // Fallback to production ID if sandbox is not available
+        if (productId == null || productId.isEmpty) {
+          print('⚠️ [Subscription] Sandbox product ID not found, trying production...');
+          productId = _isAnnual 
+            ? plan.googlePlayAnnualSubscriptionId 
+            : plan.googlePlayMonthlySubscriptionId;
+          print('🔵 [Subscription] Fallback to PRODUCTION product ID: $productId');
+        }
       } else {
         productId = _isAnnual 
           ? plan.googlePlayAnnualSubscriptionId 
           : plan.googlePlayMonthlySubscriptionId;
+        print('🔵 [Subscription] Using PRODUCTION product ID: $productId');
+        
+        // Fallback to sandbox ID if production is not available (for testing)
+        if (productId == null || productId.isEmpty) {
+          print('⚠️ [Subscription] Production product ID not found, trying sandbox...');
+          productId = _isAnnual 
+            ? plan.googlePlaySandboxAnnualSubscriptionId 
+            : plan.googlePlaySandboxMonthlySubscriptionId;
+          print('🔵 [Subscription] Fallback to SANDBOX product ID: $productId');
+        }
       }
+
+      // Log all available product IDs for debugging
+      print('🔵 [Subscription] Available product IDs:');
+      print('   - Monthly Production: ${plan.googlePlayMonthlySubscriptionId ?? "null"}');
+      print('   - Monthly Sandbox: ${plan.googlePlaySandboxMonthlySubscriptionId ?? "null"}');
+      print('   - Annual Production: ${plan.googlePlayAnnualSubscriptionId ?? "null"}');
+      print('   - Annual Sandbox: ${plan.googlePlaySandboxAnnualSubscriptionId ?? "null"}');
 
       if (productId == null || productId.isEmpty) {
-        throw Exception('Google Play product ID not configured for this plan. Please contact support or try again later.');
+        print('❌ [Subscription] Product ID not configured for this plan');
+        print('❌ [Subscription] Plan details:');
+        print('   - Name: ${plan.name}');
+        print('   - ID: ${plan.id}');
+        print('   - Is Custom: ${plan.isCustom}');
+        throw Exception(
+            'This subscription plan is not yet available for purchase.\n\n'
+            'The plan needs to be synced with Google Play Console first.\n\n'
+            'Please ask an administrator to:\n'
+            '1. Go to Admin Panel > Subscription Plans\n'
+            '2. Find this plan and click "Sync with Google Play"\n'
+            '3. Wait for sync to complete\n\n'
+            'Then try again.');
       }
 
+      print('🔵 [Subscription] Querying product details from Google Play...');
       // Query product details
       final productDetailsResponse = await _billingService.getProductDetails(
         {productId},
@@ -283,27 +355,82 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       );
 
       if (productDetailsResponse.productDetails.isEmpty) {
-        throw Exception('Product not found in Google Play Store');
+        print('❌ [Subscription] Product not found in Google Play Store');
+        print('❌ [Subscription] Product ID queried: $productId');
+        print('❌ [Subscription] Not found IDs: ${productDetailsResponse.notFoundIDs}');
+        
+        // Run diagnostics to help identify the issue
+        print('🔍 [Subscription] Running diagnostics...');
+        await _billingService.runDiagnostics({productId});
+        
+        throw Exception(
+            'Subscription "$productId" not found in Google Play Store.\n\n'
+            'This usually happens when:\n'
+            '• App is not installed from Play Store\n'
+            '• Subscription is not yet active\n'
+            '• Changes are still propagating (wait 15-60 mins)\n\n'
+            'Please ensure you:\n'
+            '1. Install app from Internal Testing link\n'
+            '2. Use a license tester account\n'
+            '3. Wait for subscription to activate');
       }
 
       final productDetails = productDetailsResponse.productDetails.first;
+      print('✅ [Subscription] Product details retrieved:');
+      print('   - ID: ${productDetails.id}');
+      print('   - Title: ${productDetails.title}');
+      print('   - Price: ${productDetails.price}');
 
       // Show purchase confirmation dialog
+      print('🔵 [Subscription] Showing confirmation dialog...');
       final confirmPurchase = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text('Subscribe to ${plan.name}'),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          title: Text(
+            '🎉 Subscribe to ${plan.name}',
+            style: GoogleFonts.montserrat(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Plan: ${plan.name}'),
-              const SizedBox(height: 8),
-              Text('Interval: ${_isAnnual ? 'Annual' : 'Monthly'}'),
-              const SizedBox(height: 8),
-              Text('Price: ${productDetails.price}'),
-              const SizedBox(height: 8),
-              Text('Credits: ${_isAnnual ? plan.annualCredits : plan.monthlyCredits}'),
+              _buildConfirmationRow(
+                  Icons.card_membership, 'Plan', plan.name),
+              _buildConfirmationRow(Icons.schedule, 'Billing',
+                  _isAnnual ? 'Annual' : 'Monthly'),
+              _buildConfirmationRow(
+                  Icons.attach_money, 'Price', productDetails.price),
+              _buildConfirmationRow(Icons.stars, 'Credits',
+                  '${_isAnnual ? plan.annualCredits : plan.monthlyCredits}'),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.blue[50],
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.info_outline,
+                        size: 20, color: Colors.blue[700]),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Your subscription will auto-renew unless cancelled',
+                        style: GoogleFonts.montserrat(
+                          fontSize: 12,
+                          color: Colors.blue[900],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ],
           ),
           actions: [
@@ -313,22 +440,78 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Subscribe'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: plan.color,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+              child: const Text('Continue to Payment'),
             ),
           ],
         ),
       );
 
       if (confirmPurchase != true) {
+        print('ℹ️ [Subscription] User cancelled confirmation dialog');
         setState(() {
           _isSubscribing = false;
         });
         return;
       }
 
+      print('🔵 [Subscription] Initiating purchase with Google Play...');
+      print('   - Test mode: ${_billingService.isTestMode}');
+      
+      // Handle TEST MODE differently
+      if (_billingService.isTestMode) {
+        print('🧪 [Subscription] TEST MODE - Simulating purchase...');
+        
+        // Simulate the purchase
+        await _billingService.purchaseSubscription(productDetails);
+        final mockToken = await _billingService.simulateTestPurchase(productId);
+        
+        print('🧪 [Subscription] TEST MODE - Purchase simulated successfully');
+        print('   - Mock token: $mockToken');
+        print('   ⚠️ NOTE: This is a TEST purchase - no real charge was made');
+        print('   ⚠️ NOTE: Skipping backend verification in test mode');
+        
+        // In test mode, show success without backend verification
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.science, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      '🧪 TEST MODE: Subscription simulated for ${plan.name}!\n'
+                      'No real charge was made.',
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.orange,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+          Navigator.of(context).pop();
+        }
+        
+        if (mounted) {
+          setState(() {
+            _isSubscribing = false;
+          });
+        }
+        return;
+      }
+      
+      // PRODUCTION MODE - Real purchase flow
       // Initiate purchase
       await _billingService.purchaseSubscription(productDetails);
 
+      print('⏳ [Subscription] Waiting for purchase completion (120s timeout)...');
       // Wait for purchase completion
       final purchaseDetails = await _billingService.waitForPurchase(
         productId,
@@ -336,19 +519,28 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       );
 
       if (purchaseDetails == null) {
-        throw Exception('Purchase was cancelled or timed out');
+        print('❌ [Subscription] Purchase cancelled or timed out');
+        throw Exception('Purchase was cancelled or timed out. No charges were made.');
       }
 
       if (purchaseDetails.status != PurchaseStatus.purchased) {
-        throw Exception('Purchase failed: ${purchaseDetails.error?.message ?? 'Unknown error'}');
+        final errorMsg = purchaseDetails.error?.message ?? 'Unknown error';
+        print('❌ [Subscription] Purchase failed: $errorMsg');
+        throw Exception('Purchase failed: $errorMsg');
       }
+
+      print('✅ [Subscription] Purchase completed successfully');
 
       // Get purchase token
       final purchaseToken = _billingService.getPurchaseToken(purchaseDetails);
       if (purchaseToken == null) {
-        throw Exception('Failed to get purchase token');
+        print('❌ [Subscription] Failed to get purchase token');
+        throw Exception(
+            'Failed to process purchase. Please contact support with your order ID.');
       }
+      print('✅ [Subscription] Purchase token retrieved');
 
+      print('🔵 [Subscription] Verifying purchase with backend...');
       // Verify purchase with backend
       final result = await _subscriptionService.verifyGooglePlaySubscription(
         purchaseToken: purchaseToken,
@@ -357,35 +549,67 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         intervalType: intervalType,
       );
 
+      print('✅ [Subscription] Backend verification completed');
+
       if (mounted) {
         if (result['success'] == true) {
+          print('🎉 [Subscription] Subscription activated successfully!');
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
-              content: Text(result['message'] ?? 'Successfully subscribed!'),
+              content: Row(
+                children: [
+                  const Icon(Icons.check_circle, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      result['message'] ??
+                          '🎉 Successfully subscribed to ${plan.name}!',
+                    ),
+                  ),
+                ],
+              ),
               backgroundColor: Colors.green,
+              duration: const Duration(seconds: 3),
             ),
           );
           
+          print('🔵 [Subscription] Refreshing plans and balance...');
           // Refresh plans and balance
           await _fetchPlans();
           await _fetchBalance();
           await Future.delayed(const Duration(seconds: 1));
           
           if (mounted) {
+            print('✅ [Subscription] Closing modal...');
             Navigator.of(context).pop();
           }
         } else {
-          throw Exception(result['message'] ?? 'Subscription verification failed');
+          print('❌ [Subscription] Backend verification failed');
+          throw Exception(
+              result['message'] ?? 'Subscription verification failed. Please contact support.');
         }
       }
     } catch (e) {
-      print('SubscriptionModal: Subscription error: $e');
+      print('❌ [Subscription] Error: $e');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString().replaceAll('Exception: ', '')),
+            content: Row(
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(e.toString().replaceAll('Exception: ', '')),
+                ),
+              ],
+            ),
             backgroundColor: Colors.red,
             duration: const Duration(seconds: 5),
+            action: SnackBarAction(
+              label: 'Retry',
+              textColor: Colors.white,
+              onPressed: () => _subscribeToPlan(plan),
+            ),
           ),
         );
       }
@@ -395,7 +619,42 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           _isSubscribing = false;
         });
       }
+      print('✅ [Subscription] Subscription process completed');
     }
+  }
+
+  Widget _buildConfirmationRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8.0),
+      child: Row(
+        children: [
+          Icon(icon, size: 20, color: Colors.grey[600]),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  label,
+                  style: GoogleFonts.montserrat(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                ),
+                Text(
+                  value,
+                  style: GoogleFonts.montserrat(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.black87,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -451,9 +710,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
           // Content
           Expanded(
-            child: _selectedTabIndex == 0
-                ? _buildPlansTab()
-                : _buildTopUpTab(),
+            child: _selectedTabIndex == 0 ? _buildPlansTab() : _buildTopUpTab(),
           ),
         ],
       ),
@@ -672,7 +929,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 icon: const Icon(Icons.refresh),
                 label: const Text('Retry'),
                 style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 ),
               ),
             ],
@@ -756,13 +1014,15 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     final validPlans = _plans.where((plan) => plan.id.isNotEmpty).toList();
     print('SubscriptionModal: Valid plans count: ${validPlans.length}');
     for (var plan in validPlans) {
-      print('SubscriptionModal: Building card for plan: ${plan.name} (${plan.id})');
+      print(
+          'SubscriptionModal: Building card for plan: ${plan.name} (${plan.id})');
       try {
         final card = _buildPlanCard(plan);
         children.add(card);
         print('SubscriptionModal: Successfully added card for ${plan.name}');
       } catch (e, stackTrace) {
-        print('SubscriptionModal: Error building plan card for plan ${plan.id}: $e');
+        print(
+            'SubscriptionModal: Error building plan card for plan ${plan.id}: $e');
         print('SubscriptionModal: Stack trace: $stackTrace');
         // Skip this plan if it fails to build
       }
@@ -790,7 +1050,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       );
     }
 
-    print('SubscriptionModal: Returning ListView with ${children.length} children');
+    print(
+        'SubscriptionModal: Returning ListView with ${children.length} children');
     // Use ListView but ensure padding is properly set
     // The scrollController from DraggableScrollableSheet should work fine
     return ListView(
@@ -841,7 +1102,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                     'Monthly',
                     style: GoogleFonts.montserrat(
                       fontSize: 14,
-                      fontWeight: !_isAnnual ? FontWeight.w600 : FontWeight.w500,
+                      fontWeight:
+                          !_isAnnual ? FontWeight.w600 : FontWeight.w500,
                       color: !_isAnnual ? Colors.blueAccent : Colors.grey[600],
                     ),
                   ),
@@ -900,7 +1162,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       print('Warning: Plan ${plan.id} has empty name, using default');
     }
     
-    final isCurrentPlan = plan.id == _currentPlanId || plan.id == widget.currentSubscription.planId;
+    final isCurrentPlan = plan.id == _currentPlanId ||
+        plan.id == widget.currentSubscription.planId;
     final isFree = plan.monthlyPrice == 0 && !plan.isCustom;
 
     return Container(
@@ -909,9 +1172,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isCurrentPlan
-              ? plan.color
-              : Colors.grey[300]!,
+          color: isCurrentPlan ? plan.color : Colors.grey[300]!,
           width: isCurrentPlan ? 2 : 1,
         ),
         boxShadow: [
@@ -986,7 +1247,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                           ],
                         ],
                       ),
-                      if (plan.subtitle != null && plan.subtitle!.isNotEmpty) ...[
+                      if (plan.subtitle != null &&
+                          plan.subtitle!.isNotEmpty) ...[
                         const SizedBox(height: 4),
                         Text(
                           plan.subtitle!,
@@ -1060,7 +1322,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                   // Discount Badge for Annual
                   if (!isFree && _isAnnual && plan.discountPercentage > 0) ...[
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
                         color: Colors.green[50],
                         borderRadius: BorderRadius.circular(20),
@@ -1155,6 +1418,51 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 const SizedBox(height: 20),
                 const Divider(),
                 const SizedBox(height: 16),
+                // Benefits (with colored tick icons)
+                if (plan.benefits.isNotEmpty) ...[
+                  Text(
+                    'What\'s Included:',
+                    style: GoogleFonts.montserrat(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.black87,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  ...plan.benefits.map((benefit) => Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: plan.color.withOpacity(0.15),
+                                shape: BoxShape.circle,
+                              ),
+                              child: Icon(
+                                Icons.check,
+                                size: 16,
+                                color: plan.color,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                benefit,
+                                style: GoogleFonts.montserrat(
+                                  fontSize: 14,
+                                  color: Colors.black87,
+                                  height: 1.5,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )),
+                  const SizedBox(height: 8),
+                ],
                 // Features (HTML Description)
                 if (plan.description.isNotEmpty) ...[
                   Text(
@@ -1229,9 +1537,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                         ? null
                         : () => _subscribeToPlan(plan),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: isCurrentPlan
-                          ? Colors.grey[300]
-                          : plan.color,
+                      backgroundColor:
+                          isCurrentPlan ? Colors.grey[300] : plan.color,
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
@@ -1245,17 +1552,18 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                             width: 20,
                             child: CircularProgressIndicator(
                               strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
                             ),
                           )
                         : Text(
                             isCurrentPlan
                                 ? 'Current Plan'
                                 : plan.isCustom
-                                    ? plan.actionButtonText ?? 'Contact Us'
+                                    ? (plan.actionButtonText ?? 'Contact Us')
                                     : isFree
-                                        ? 'Downgrade to Free'
-                                        : 'Subscribe to ${plan.name}',
+                                        ? (plan.actionButtonText ?? 'Downgrade to Free')
+                                        : (plan.actionButtonText ?? 'Subscribe to ${plan.name}'),
                             style: GoogleFonts.montserrat(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
@@ -1272,8 +1580,6 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   }
 
   Widget _buildTopUpTab() {
-    final credits = CreditConverter.usdToCredits(_topUpAmount);
-
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -1289,7 +1595,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           ),
           const SizedBox(height: 8),
           Text(
-            'Add credits to your account anytime',
+            'Choose a package to add credits to your account',
             style: GoogleFonts.montserrat(
               fontSize: 14,
               color: Colors.grey[600],
@@ -1345,153 +1651,177 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
           const SizedBox(height: 32),
 
-          // USD Input
-          Text(
-            'Amount (USD)',
-            style: GoogleFonts.montserrat(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(
-            controller: _topUpAmountController,
-            keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            decoration: InputDecoration(
-              hintText: 'Enter amount in USD',
-              prefixIcon: const Icon(Icons.attach_money),
-              prefixText: '\$ ',
-              prefixStyle: GoogleFonts.montserrat(
-                fontSize: 18,
-                fontWeight: FontWeight.w600,
-                color: Colors.black87,
+          // Packages Grid
+          if (_isLoadingPackages)
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.all(40.0),
+                child: CircularProgressIndicator(),
               ),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey[300]!),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(color: Colors.grey[300]!),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Colors.blueAccent, width: 2),
-              ),
-              filled: true,
-              fillColor: Colors.grey[50],
-            ),
-            style: GoogleFonts.montserrat(
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          // Quick Amount Buttons
-          Text(
-            'Quick Amount',
-            style: GoogleFonts.montserrat(
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: [10, 25, 50, 100].map((amount) {
-              return GestureDetector(
-                onTap: () {
-                  _topUpAmountController.text = amount.toStringAsFixed(0);
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 20,
-                    vertical: 12,
-                  ),
-                  decoration: BoxDecoration(
-                    color: Colors.grey[100],
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: Colors.grey[300]!,
+            )
+          else if (_packages.isEmpty)
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(40.0),
+                child: Column(
+                  children: [
+                    Icon(
+                      Icons.inbox_outlined,
+                      size: 64,
+                      color: Colors.grey[400],
                     ),
+                    const SizedBox(height: 16),
+          Text(
+                      'No packages available',
+            style: GoogleFonts.montserrat(
+              fontSize: 16,
+                        color: Colors.grey[600],
+            ),
+          ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Please check back later or contact support',
+                      style: GoogleFonts.montserrat(
+                        fontSize: 14,
+                        color: Colors.grey[500],
+              ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else
+            GridView.builder(
+              shrinkWrap: true,
+              physics: const NeverScrollableScrollPhysics(),
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 2,
+                crossAxisSpacing: 16,
+                mainAxisSpacing: 16,
+                childAspectRatio: 0.85,
+              ),
+              itemCount: _packages.length,
+              itemBuilder: (context, index) {
+                final package = _packages[index];
+                final isToppingUp =
+                    _isToppingUp && _toppingUpPackageId == package.id;
+
+                return _buildPackageCard(package, isToppingUp);
+              },
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPackageCard(CreditPackage package, bool isToppingUp) {
+    return Card(
+      elevation: 2,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(
+          color: package.isPopular ? Colors.orange[300]! : Colors.grey[300]!,
+          width: package.isPopular ? 2 : 1,
+            ),
+          ),
+      child: InkWell(
+        onTap: isToppingUp || !_isBillingAvailable
+            ? null
+            : () => _purchaseTopUp(package),
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Popular Badge
+              if (package.isPopular)
+                Container(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.orange[100],
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Text(
-                    '\$$amount',
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.star,
+                        size: 12,
+                        color: Colors.orange[700],
+                  ),
+                      const SizedBox(width: 4),
+                      Text(
+                        'Popular',
                     style: GoogleFonts.montserrat(
-                      fontSize: 14,
+                          fontSize: 10,
                       fontWeight: FontWeight.w600,
+                          color: Colors.orange[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else
+                const SizedBox(height: 20),
+
+              const Spacer(),
+
+              // Package Name
+              Text(
+                package.name,
+                style: GoogleFonts.montserrat(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
                       color: Colors.black87,
                     ),
-                  ),
-                ),
-              );
-            }).toList(),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
           ),
 
-          const SizedBox(height: 32),
+              if (package.description != null &&
+                  package.description!.isNotEmpty) ...[
+                const SizedBox(height: 4),
+                Text(
+                  package.description!,
+                  style: GoogleFonts.montserrat(
+                    fontSize: 12,
+                    color: Colors.grey[600],
+                  ),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
 
-          // Credit Conversion Display
-          if (_topUpAmount > 0) ...[
+              const Spacer(),
+
+              // Price and Credits
             Container(
-              padding: const EdgeInsets.all(20),
+                padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    Colors.green[50]!,
-                    Colors.green[100]!,
-                  ],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(
-                  color: Colors.green[300]!,
-                  width: 1,
-                ),
+                  color: Colors.green[50],
+                  borderRadius: BorderRadius.circular(12),
               ),
               child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        'You will receive:',
+                          '\$${package.usdPrice.toStringAsFixed(2)}',
                         style: GoogleFonts.montserrat(
-                          fontSize: 14,
-                          color: Colors.grey[700],
-                        ),
-                      ),
-                      Text(
-                        '${credits.toStringAsFixed(0)} Credits',
-                        style: GoogleFonts.montserrat(
-                          fontSize: 24,
+                            fontSize: 20,
                           fontWeight: FontWeight.bold,
                           color: Colors.green[900],
                         ),
                       ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  Divider(color: Colors.green[300]),
-                  const SizedBox(height: 8),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.info_outline,
-                        size: 16,
-                        color: Colors.green[700],
-                      ),
-                      const SizedBox(width: 6),
                       Text(
-                        '1 USD = ${CreditConverter.creditsPerUsd.toStringAsFixed(0)} Credits',
+                          '${package.credits} Credits',
                         style: GoogleFonts.montserrat(
-                          fontSize: 12,
+                            fontSize: 14,
+                            fontWeight: FontWeight.w600,
                           color: Colors.green[700],
                         ),
                       ),
@@ -1500,67 +1830,66 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 ],
               ),
             ),
-            const SizedBox(height: 24),
-          ],
 
-          // Top Up Button
+              const SizedBox(height: 12),
+
+              // Purchase Button
           SizedBox(
             width: double.infinity,
             child: ElevatedButton(
-              onPressed: (_topUpAmount > 0 && !_isToppingUp && _isBillingAvailable)
-                  ? () {
-                      print('🔵 [UI] Top Up button pressed');
-                      print('   - Amount: \$$_topUpAmount');
-                      print('   - Is topping up: $_isToppingUp');
-                      print('   - Billing available: $_isBillingAvailable');
-                      _purchaseTopUp(_topUpAmount);
-                    }
-                  : null,
+                  onPressed: isToppingUp || !_isBillingAvailable
+                      ? null
+                      : () => _purchaseTopUp(package),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.green,
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                elevation: 4,
+                    elevation: 2,
               ),
-              child: _isToppingUp
+                  child: isToppingUp
                   ? const SizedBox(
-                      height: 20,
-                      width: 20,
+                          height: 16,
+                          width: 16,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            valueColor:
+                                AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     )
                   : Text(
-                'Top Up Balance',
+                          'Purchase',
                 style: GoogleFonts.montserrat(
-                  fontSize: 16,
+                            fontSize: 14,
                   fontWeight: FontWeight.w600,
                 ),
               ),
             ),
           ),
         ],
+          ),
+        ),
       ),
     );
   }
 
-  /// Purchase top-up via Google Play with custom amount
-  Future<void> _purchaseTopUp(double usdAmount) async {
-    print('🔵 [TopUp] _purchaseTopUp called with amount: \$$usdAmount');
+  /// Purchase top-up via Google Play with package
+  Future<void> _purchaseTopUp(CreditPackage package) async {
+    print('🔵 [TopUp] _purchaseTopUp called for package: ${package.name}');
+    print('🔵 [TopUp] Package ID: ${package.id}');
+    print('🔵 [TopUp] Product ID: ${package.productId}');
     print('🔵 [TopUp] Billing available: $_isBillingAvailable');
-    print('🔵 [TopUp] Current state - isToppingUp: $_isToppingUp');
-    
+
     // Check billing availability
     if (!_isBillingAvailable) {
       print('❌ [TopUp] Billing not available');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('In-app purchases are not available. Please check your device settings.'),
+            content: Text(
+                'In-app purchases are not available. Please check your device settings.'),
             backgroundColor: Colors.red,
             duration: Duration(seconds: 5),
           ),
@@ -1569,13 +1898,13 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       return;
     }
 
-    // Validate amount
-    if (usdAmount <= 0) {
-      print('❌ [TopUp] Invalid amount: $usdAmount');
+    // Validate package
+    if (package.productId.isEmpty) {
+      print('❌ [TopUp] Package has no product ID');
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Please enter a valid amount'),
+            content: Text('This package is not configured for purchase'),
             backgroundColor: Colors.red,
             duration: Duration(seconds: 3),
           ),
@@ -1587,20 +1916,17 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     print('✅ [TopUp] Validation passed, setting loading state');
     setState(() {
       _isToppingUp = true;
+      _toppingUpPackageId = package.id;
     });
 
     try {
-      // Use a single consumable product for all top-ups
-      // This product ID should be configured in Google Play Console
-      final bool useSandbox = Config.useGooglePlaySandbox;
-      final String productId = useSandbox
-          ? Config.googlePlayTopUpSandboxProductId
-          : Config.googlePlayTopUpProductId;
-      
+      final productId = package.productId;
+
       print('🔵 [TopUp] Configuration:');
-      print('   - Sandbox mode: $useSandbox');
       print('   - Product ID: $productId');
-      print('   - Package name: ${Config.googlePlayPackageName}');
+      print('   - Package: ${package.name}');
+      print('   - Price: \$${package.usdPrice}');
+      print('   - Credits: ${package.credits}');
 
       // Query product details
       print('🔵 [TopUp] Querying product details for: $productId');
@@ -1611,9 +1937,11 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           isSubscription: false,
         );
         print('✅ [TopUp] Product query successful');
-        print('   - Found ${productDetailsResponse.productDetails.length} product(s)');
+        print(
+            '   - Found ${productDetailsResponse.productDetails.length} product(s)');
         if (productDetailsResponse.error != null) {
-          print('⚠️ [TopUp] Product query error: ${productDetailsResponse.error}');
+          print(
+              '⚠️ [TopUp] Product query error: ${productDetailsResponse.error}');
         }
       } catch (e, stackTrace) {
         print('❌ [TopUp] Error querying product: $e');
@@ -1621,31 +1949,32 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         if (mounted) {
           setState(() {
             _isToppingUp = false;
+            _toppingUpPackageId = null;
           });
         }
-        throw Exception('Unable to connect to Google Play Store. Please check your internet connection and try again.');
+        throw Exception(
+            'Unable to connect to Google Play Store. Please check your internet connection and try again.');
       }
 
       if (productDetailsResponse.productDetails.isEmpty) {
         print('❌ [TopUp] No products found for ID: $productId');
-        // Reset loading state first
         if (mounted) {
           setState(() {
             _isToppingUp = false;
+            _toppingUpPackageId = null;
           });
         }
         
-        // Provide helpful error message
-        final errorMsg = 'Top-up product is not configured yet.\n\n'
+        final errorMsg = 'This package is not available for purchase.\n\n'
             'Product ID: $productId\n\n'
-            'This product needs to be created in Google Play Console before top-ups can be used.\n\n'
+            'The package may not be synced with Google Play Console yet.\n\n'
             'Please contact support or try again later.';
         
         if (mounted) {
           await showDialog(
             context: context,
             builder: (context) => AlertDialog(
-              title: const Text('Top-Up Unavailable'),
+              title: const Text('Package Unavailable'),
               content: SingleChildScrollView(
                 child: Text(errorMsg),
               ),
@@ -1662,38 +1991,60 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       }
 
       final productDetails = productDetailsResponse.productDetails.first;
-      final credits = CreditConverter.usdToCredits(usdAmount);
-      
+
       print('✅ [TopUp] Product details retrieved:');
       print('   - Product ID: ${productDetails.id}');
       print('   - Price: ${productDetails.price}');
       print('   - Title: ${productDetails.title}');
-      print('   - Description: ${productDetails.description}');
-      print('   - Credits to grant: $credits');
 
       // Show purchase confirmation
       print('🔵 [TopUp] Showing purchase confirmation dialog');
       final confirmPurchase = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Confirm Top-Up'),
+          title: const Text('Confirm Purchase'),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Amount: \$${usdAmount.toStringAsFixed(2)}'),
-              const SizedBox(height: 8),
-              Text('Credits: ${credits.toStringAsFixed(0)}'),
-              const SizedBox(height: 8),
-              Text('Product: ${productDetails.price}'),
-              const SizedBox(height: 12),
               Text(
-                'Note: The actual amount charged will be based on the Google Play product price. Credits will be granted based on your entered amount.',
-                style: TextStyle(
-                  fontSize: 12,
-                  color: Colors.grey[600],
-                  fontStyle: FontStyle.italic,
+                package.name,
+                style: GoogleFonts.montserrat(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
                 ),
+              ),
+              if (package.description != null &&
+                  package.description!.isNotEmpty) ...[
+              const SizedBox(height: 8),
+                Text(package.description!),
+              ],
+              const SizedBox(height: 16),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Price:'),
+                  Text(
+                    '\$${package.usdPrice.toStringAsFixed(2)}',
+                    style: GoogleFonts.montserrat(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Credits:'),
+              Text(
+                    '${package.credits}',
+                    style: GoogleFonts.montserrat(
+                      fontWeight: FontWeight.bold,
+                      color: Colors.green[700],
+                    ),
+                ),
+                ],
               ),
             ],
           ),
@@ -1714,6 +2065,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         print('⚠️ [TopUp] Purchase cancelled by user');
         setState(() {
           _isToppingUp = false;
+          _toppingUpPackageId = null;
         });
         return;
       }
@@ -1721,7 +2073,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       // Initiate purchase
       print('🔵 [TopUp] Initiating purchase...');
       try {
-        await _billingService.purchaseProduct(productDetails);
+      await _billingService.purchaseProduct(productDetails);
         print('✅ [TopUp] Purchase initiated successfully');
       } catch (e, stackTrace) {
         print('❌ [TopUp] Failed to initiate purchase: $e');
@@ -1734,17 +2086,16 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       PurchaseDetails? purchaseDetails;
       try {
         purchaseDetails = await _billingService.waitForPurchase(
-          productId,
-          timeout: const Duration(seconds: 120),
-        );
+        productId,
+        timeout: const Duration(seconds: 120),
+      );
         print('✅ [TopUp] Purchase details received');
       } catch (e, stackTrace) {
         print('❌ [TopUp] Error waiting for purchase: $e');
         print('❌ [TopUp] Stack trace: $stackTrace');
-        
-        // Provide more helpful error messages
+
         String errorMessage = e.toString();
-        if (errorMessage.contains('item_unavailable') || 
+        if (errorMessage.contains('item_unavailable') ||
             errorMessage.contains('not available') ||
             errorMessage.contains('could not be found')) {
           errorMessage = 'The product is not available for purchase.\n\n'
@@ -1753,10 +2104,9 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
               '• Product not active in Google Play Console\n'
               '• Test account not properly set up\n'
               '• Wait 1-2 hours after product creation\n\n'
-              'Product ID: $productId\n\n'
-              'See TROUBLESHOOTING_PURCHASE_ERROR.md for detailed steps.';
+              'Product ID: $productId';
         }
-        
+
         throw Exception(errorMessage);
       }
 
@@ -1767,20 +2117,24 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
       print('🔵 [TopUp] Purchase status: ${purchaseDetails.status}');
       if (purchaseDetails.status != PurchaseStatus.purchased) {
-        print('❌ [TopUp] Purchase not successful. Status: ${purchaseDetails.status}');
+        print(
+            '❌ [TopUp] Purchase not successful. Status: ${purchaseDetails.status}');
         if (purchaseDetails.error != null) {
           print('❌ [TopUp] Error details: ${purchaseDetails.error}');
         }
-        
+
         String errorMsg = purchaseDetails.error?.message ?? 'Unknown error';
-        if (errorMsg.contains('item_unavailable') || errorMsg.contains('not available') || errorMsg.contains('could not be found')) {
-          errorMsg = 'The product is not available for purchase. Please ensure:\n'
+        if (errorMsg.contains('item_unavailable') ||
+            errorMsg.contains('not available') ||
+            errorMsg.contains('could not be found')) {
+          errorMsg =
+              'The product is not available for purchase. Please ensure:\n'
               '1. App is installed from Google Play test track\n'
               '2. Product is active in Google Play Console\n'
               '3. Test account is properly configured\n'
               '4. Wait 1-2 hours after product creation';
         }
-        
+
         throw Exception('Purchase failed: $errorMsg');
       }
 
@@ -1790,18 +2144,18 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         throw Exception('Failed to get purchase token');
       }
 
-      // Verify purchase with backend (pass the custom amount)
+      // Verify purchase with backend
       print('🔵 [TopUp] Verifying purchase with backend...');
       print('   - Purchase token: ${purchaseToken.substring(0, 20)}...');
       print('   - Product ID: $productId');
-      print('   - USD Amount: \$$usdAmount');
-      
+      print('   - Package ID: ${package.id}');
+
       Map<String, dynamic> result;
       try {
         result = await _topUpService.verifyGooglePlayTopUp(
-          purchaseToken: purchaseToken,
-          productId: productId,
-          usdAmount: usdAmount,
+        purchaseToken: purchaseToken,
+        productId: productId,
+          packageId: package.id,
         );
         print('✅ [TopUp] Backend verification response received');
         print('   - Success: ${result['success']}');
@@ -1822,8 +2176,9 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
             ),
           );
 
-          // Refresh balance
+          // Refresh balance and packages
           await _fetchBalance();
+          await _fetchPackages();
           await Future.delayed(const Duration(seconds: 1));
 
           if (mounted) {
@@ -1837,12 +2192,12 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       print('❌ [TopUp] Top-up error caught: $e');
       print('❌ [TopUp] Error type: ${e.runtimeType}');
       print('❌ [TopUp] Stack trace: $stackTrace');
-      
+
       String errorMessage = e.toString().replaceAll('Exception: ', '');
       if (errorMessage.isEmpty) {
         errorMessage = 'An unexpected error occurred. Please try again.';
       }
-      
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1857,6 +2212,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       if (mounted) {
         setState(() {
           _isToppingUp = false;
+          _toppingUpPackageId = null;
         });
       }
     }
@@ -1891,6 +2247,3 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     return Icons.workspace_premium;
   }
 }
-
-
-

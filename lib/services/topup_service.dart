@@ -10,11 +10,44 @@ class TopUpService {
   TopUpService(this._authService);
 
 
+  /// Get all available credit packages
+  Future<List<Map<String, dynamic>>> getTopUpPackages() async {
+    try {
+      final token = await _authService.getToken();
+      if (token == null) {
+        throw Exception('No authentication token available');
+      }
+
+      final response = await http.get(
+        Uri.parse('${Config.baseApiUrl}/user/topup/packages'),
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',
+        },
+      );
+
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == 'success' && data['data'] != null) {
+          return List<Map<String, dynamic>>.from(data['data']);
+        } else {
+          throw Exception(data['message'] ?? 'Failed to fetch packages');
+        }
+      } else {
+        final error = jsonDecode(response.body);
+        throw Exception(error['message'] ?? 'Failed to fetch packages');
+      }
+    } catch (e) {
+      print('TopUpService: Error fetching packages: $e');
+      rethrow;
+    }
+  }
+
   /// Verify Google Play top-up purchase
   Future<Map<String, dynamic>> verifyGooglePlayTopUp({
     required String purchaseToken,
     required String productId,
-    required double usdAmount,
+    required String packageId,
   }) async {
     try {
       final token = await _authService.getToken();
@@ -31,7 +64,7 @@ class TopUpService {
         body: jsonEncode({
           'purchaseToken': purchaseToken,
           'productId': productId,
-          'usdAmount': usdAmount,
+          'packageId': packageId,
         }),
       );
 
