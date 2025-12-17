@@ -86,7 +86,7 @@ class TTSConfig {
 
   factory TTSConfig.fromJson(Map<String, dynamic> json) {
     return TTSConfig(
-      provider: json['provider'] ?? 'elevenlabs',
+      provider: json['provider'] ?? 'google',
       settings: json['settings'] ?? {},
     );
   }

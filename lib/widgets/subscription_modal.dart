@@ -13,6 +13,7 @@ import '../services/auth_service.dart';
 import '../services/subscription_service.dart';
 import '../services/topup_service.dart';
 import '../services/google_play_billing_service.dart';
+import '../providers/auth_provider.dart';
 import '../constants/config.dart';
 
 /// Subscription Modal Widget
@@ -60,7 +61,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   late SubscriptionService _subscriptionService;
   late TopUpService _topUpService;
   late GooglePlayBillingService _billingService;
-  
+
   // Profile and balance state
   double _totalBalance = 0.0;
   double _topUpBalance = 0.0;
@@ -80,16 +81,16 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   @override
   void initState() {
     super.initState();
-    
+
     // Initialize services
     final authService = Provider.of<AuthService>(context, listen: false);
     _subscriptionService = SubscriptionService(authService);
     _topUpService = TopUpService(authService);
     _billingService = GooglePlayBillingService();
-    
+
     // Initialize billing service
     _initializeBilling();
-    
+
     // Fetch plans, packages, and balance from API
     _fetchPlans();
     _fetchPackages();
@@ -239,8 +240,9 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
   /// Subscribe to a plan using Google Play Billing
   Future<void> _subscribeToPlan(SubscriptionPlan plan) async {
-    print('🔵 [Subscription] _subscribeToPlan called for plan: ${plan.name} (${plan.id})');
-    
+    print(
+        '🔵 [Subscription] _subscribeToPlan called for plan: ${plan.name} (${plan.id})');
+
     // Handle custom plans
     if (plan.isCustom) {
       print('🔵 [Subscription] Custom plan detected, opening contact form...');
@@ -288,48 +290,55 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     try {
       final intervalType = _isAnnual ? 'year' : 'month';
       print('🔵 [Subscription] Interval type: $intervalType');
-      
+
       // Get product ID based on environment and interval
       final bool useSandbox = Config.useGooglePlaySandbox;
       String? productId;
-      
+
       // Try to get the appropriate product ID
       if (useSandbox) {
-        productId = _isAnnual 
-          ? plan.googlePlaySandboxAnnualSubscriptionId 
-          : plan.googlePlaySandboxMonthlySubscriptionId;
+        productId = _isAnnual
+            ? plan.googlePlaySandboxAnnualSubscriptionId
+            : plan.googlePlaySandboxMonthlySubscriptionId;
         print('🔵 [Subscription] Using SANDBOX product ID: $productId');
-        
+
         // Fallback to production ID if sandbox is not available
         if (productId == null || productId.isEmpty) {
-          print('⚠️ [Subscription] Sandbox product ID not found, trying production...');
-          productId = _isAnnual 
-            ? plan.googlePlayAnnualSubscriptionId 
-            : plan.googlePlayMonthlySubscriptionId;
-          print('🔵 [Subscription] Fallback to PRODUCTION product ID: $productId');
+          print(
+              '⚠️ [Subscription] Sandbox product ID not found, trying production...');
+          productId = _isAnnual
+              ? plan.googlePlayAnnualSubscriptionId
+              : plan.googlePlayMonthlySubscriptionId;
+          print(
+              '🔵 [Subscription] Fallback to PRODUCTION product ID: $productId');
         }
       } else {
-        productId = _isAnnual 
-          ? plan.googlePlayAnnualSubscriptionId 
-          : plan.googlePlayMonthlySubscriptionId;
+        productId = _isAnnual
+            ? plan.googlePlayAnnualSubscriptionId
+            : plan.googlePlayMonthlySubscriptionId;
         print('🔵 [Subscription] Using PRODUCTION product ID: $productId');
-        
+
         // Fallback to sandbox ID if production is not available (for testing)
         if (productId == null || productId.isEmpty) {
-          print('⚠️ [Subscription] Production product ID not found, trying sandbox...');
-          productId = _isAnnual 
-            ? plan.googlePlaySandboxAnnualSubscriptionId 
-            : plan.googlePlaySandboxMonthlySubscriptionId;
+          print(
+              '⚠️ [Subscription] Production product ID not found, trying sandbox...');
+          productId = _isAnnual
+              ? plan.googlePlaySandboxAnnualSubscriptionId
+              : plan.googlePlaySandboxMonthlySubscriptionId;
           print('🔵 [Subscription] Fallback to SANDBOX product ID: $productId');
         }
       }
 
       // Log all available product IDs for debugging
       print('🔵 [Subscription] Available product IDs:');
-      print('   - Monthly Production: ${plan.googlePlayMonthlySubscriptionId ?? "null"}');
-      print('   - Monthly Sandbox: ${plan.googlePlaySandboxMonthlySubscriptionId ?? "null"}');
-      print('   - Annual Production: ${plan.googlePlayAnnualSubscriptionId ?? "null"}');
-      print('   - Annual Sandbox: ${plan.googlePlaySandboxAnnualSubscriptionId ?? "null"}');
+      print(
+          '   - Monthly Production: ${plan.googlePlayMonthlySubscriptionId ?? "null"}');
+      print(
+          '   - Monthly Sandbox: ${plan.googlePlaySandboxMonthlySubscriptionId ?? "null"}');
+      print(
+          '   - Annual Production: ${plan.googlePlayAnnualSubscriptionId ?? "null"}');
+      print(
+          '   - Annual Sandbox: ${plan.googlePlaySandboxAnnualSubscriptionId ?? "null"}');
 
       if (productId == null || productId.isEmpty) {
         print('❌ [Subscription] Product ID not configured for this plan');
@@ -357,12 +366,13 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       if (productDetailsResponse.productDetails.isEmpty) {
         print('❌ [Subscription] Product not found in Google Play Store');
         print('❌ [Subscription] Product ID queried: $productId');
-        print('❌ [Subscription] Not found IDs: ${productDetailsResponse.notFoundIDs}');
-        
+        print(
+            '❌ [Subscription] Not found IDs: ${productDetailsResponse.notFoundIDs}');
+
         // Run diagnostics to help identify the issue
         print('🔍 [Subscription] Running diagnostics...');
         await _billingService.runDiagnostics({productId});
-        
+
         throw Exception(
             'Subscription "$productId" not found in Google Play Store.\n\n'
             'This usually happens when:\n'
@@ -399,10 +409,9 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              _buildConfirmationRow(Icons.card_membership, 'Plan', plan.name),
               _buildConfirmationRow(
-                  Icons.card_membership, 'Plan', plan.name),
-              _buildConfirmationRow(Icons.schedule, 'Billing',
-                  _isAnnual ? 'Annual' : 'Monthly'),
+                  Icons.schedule, 'Billing', _isAnnual ? 'Annual' : 'Monthly'),
               _buildConfirmationRow(
                   Icons.attach_money, 'Price', productDetails.price),
               _buildConfirmationRow(Icons.stars, 'Credits',
@@ -416,8 +425,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.info_outline,
-                        size: 20, color: Colors.blue[700]),
+                    Icon(Icons.info_outline, size: 20, color: Colors.blue[700]),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -462,20 +470,20 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
       print('🔵 [Subscription] Initiating purchase with Google Play...');
       print('   - Test mode: ${_billingService.isTestMode}');
-      
+
       // Handle TEST MODE differently
       if (_billingService.isTestMode) {
         print('🧪 [Subscription] TEST MODE - Simulating purchase...');
-        
+
         // Simulate the purchase
         await _billingService.purchaseSubscription(productDetails);
         final mockToken = await _billingService.simulateTestPurchase(productId);
-        
+
         print('🧪 [Subscription] TEST MODE - Purchase simulated successfully');
         print('   - Mock token: $mockToken');
         print('   ⚠️ NOTE: This is a TEST purchase - no real charge was made');
         print('   ⚠️ NOTE: Skipping backend verification in test mode');
-        
+
         // In test mode, show success without backend verification
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -498,7 +506,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           );
           Navigator.of(context).pop();
         }
-        
+
         if (mounted) {
           setState(() {
             _isSubscribing = false;
@@ -506,26 +514,114 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         }
         return;
       }
-      
+
       // PRODUCTION MODE - Real purchase flow
       // Initiate purchase
       await _billingService.purchaseSubscription(productDetails);
 
-      print('⏳ [Subscription] Waiting for purchase completion (120s timeout)...');
-      // Wait for purchase completion
-      final purchaseDetails = await _billingService.waitForPurchase(
-        productId,
-        timeout: const Duration(seconds: 120),
-      );
+      print(
+          '⏳ [Subscription] Waiting for purchase completion (120s timeout)...');
 
-      if (purchaseDetails == null) {
-        print('❌ [Subscription] Purchase cancelled or timed out');
-        throw Exception('Purchase was cancelled or timed out. No charges were made.');
+      // Wait for purchase completion with proper error handling
+      PurchaseDetails? purchaseDetails;
+      try {
+        purchaseDetails = await _billingService.waitForPurchase(
+          productId,
+          timeout: const Duration(seconds: 120),
+        );
+      } catch (waitError) {
+        // Handle cancellation or errors from waitForPurchase
+        print('❌ [Subscription] Purchase wait error: $waitError');
+
+        // Reset loading state immediately
+        if (mounted) {
+          setState(() {
+            _isSubscribing = false;
+          });
+        }
+
+        // Check if it's a cancellation
+        final errorString = waitError.toString().toLowerCase();
+        if (errorString.contains('cancelled') ||
+            errorString.contains('canceled') ||
+            errorString.contains('user_canceled')) {
+          print('ℹ️ [Subscription] User cancelled the purchase');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Purchase was cancelled. No charges were made.',
+                      ),
+                    ),
+                  ],
+                ),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+          return; // Exit early, state already reset
+        }
+
+        // Re-throw other errors to be handled by outer catch block
+        throw Exception(waitError.toString().replaceAll('Exception: ', ''));
       }
 
+      // Check if purchase details is null (shouldn't happen after try-catch, but safety check)
+      if (purchaseDetails == null) {
+        print('❌ [Subscription] Purchase details is null');
+        if (mounted) {
+          setState(() {
+            _isSubscribing = false;
+          });
+        }
+        throw Exception(
+            'Purchase was cancelled or timed out. No charges were made.');
+      }
+
+      // Check purchase status
       if (purchaseDetails.status != PurchaseStatus.purchased) {
         final errorMsg = purchaseDetails.error?.message ?? 'Unknown error';
         print('❌ [Subscription] Purchase failed: $errorMsg');
+        print('❌ [Subscription] Purchase status: ${purchaseDetails.status}');
+
+        // Reset loading state immediately
+        if (mounted) {
+          setState(() {
+            _isSubscribing = false;
+          });
+        }
+
+        // Handle cancellation status
+        if (purchaseDetails.status == PurchaseStatus.canceled) {
+          print('ℹ️ [Subscription] Purchase was cancelled');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Purchase was cancelled. No charges were made.',
+                      ),
+                    ),
+                  ],
+                ),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+          return; // Exit early, state already reset
+        }
+
         throw Exception('Purchase failed: $errorMsg');
       }
 
@@ -572,49 +668,74 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
               duration: const Duration(seconds: 3),
             ),
           );
-          
+
           print('🔵 [Subscription] Refreshing plans and balance...');
           // Refresh plans and balance
           await _fetchPlans();
           await _fetchBalance();
+
+          // Refresh AuthProvider profile to update bottom bar balance
+          try {
+            final authProvider =
+                Provider.of<AuthProvider>(context, listen: false);
+            await authProvider.fetchProfile();
+            print('✅ [Subscription] AuthProvider profile refreshed');
+          } catch (e) {
+            print('⚠️ [Subscription] Failed to refresh AuthProvider: $e');
+          }
+
           await Future.delayed(const Duration(seconds: 1));
-          
+
           if (mounted) {
             print('✅ [Subscription] Closing modal...');
             Navigator.of(context).pop();
           }
         } else {
           print('❌ [Subscription] Backend verification failed');
-          throw Exception(
-              result['message'] ?? 'Subscription verification failed. Please contact support.');
+          throw Exception(result['message'] ??
+              'Subscription verification failed. Please contact support.');
         }
       }
     } catch (e) {
       print('❌ [Subscription] Error: $e');
+
+      // Ensure loading state is reset even if there was an error
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Row(
-              children: [
-                const Icon(Icons.error_outline, color: Colors.white),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(e.toString().replaceAll('Exception: ', '')),
-                ),
-              ],
+        setState(() {
+          _isSubscribing = false;
+        });
+
+        // Only show error snackbar if it's not a cancellation (already handled)
+        final errorString = e.toString().toLowerCase();
+        if (!errorString.contains('cancelled') &&
+            !errorString.contains('canceled')) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.error_outline, color: Colors.white),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(e.toString().replaceAll('Exception: ', '')),
+                  ),
+                ],
+              ),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
+              action: SnackBarAction(
+                label: 'Retry',
+                textColor: Colors.white,
+                onPressed: () => _subscribeToPlan(plan),
+              ),
             ),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-            action: SnackBarAction(
-              label: 'Retry',
-              textColor: Colors.white,
-              onPressed: () => _subscribeToPlan(plan),
-            ),
-          ),
-        );
+          );
+        }
       }
     } finally {
-      if (mounted) {
+      // Final safety check - ensure state is always reset
+      if (mounted && _isSubscribing) {
+        print(
+            '⚠️ [Subscription] Loading state still true in finally block, resetting...');
         setState(() {
           _isSubscribing = false;
         });
@@ -884,7 +1005,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     print('SubscriptionModal: _isLoadingPlans: $_isLoadingPlans');
     print('SubscriptionModal: _errorMessage: $_errorMessage');
     print('SubscriptionModal: _plans.length: ${_plans.length}');
-    
+
     if (_isLoadingPlans) {
       print('SubscriptionModal: Showing loading indicator');
       return const Center(
@@ -980,7 +1101,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         ),
       );
     }
-    
+
     print('SubscriptionModal: Building plans list with ${_plans.length} plans');
 
     // Build list of children widgets safely
@@ -1027,7 +1148,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         // Skip this plan if it fails to build
       }
     }
-    
+
     print('SubscriptionModal: Total children widgets: ${children.length}');
 
     // Ensure we have at least some children
@@ -1156,12 +1277,12 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     if (plan.id.isEmpty) {
       return const SizedBox.shrink(); // Skip rendering if plan has no ID
     }
-    
+
     // Ensure all required fields are valid
     if (plan.name.isEmpty) {
       print('Warning: Plan ${plan.id} has empty name, using default');
     }
-    
+
     final isCurrentPlan = plan.id == _currentPlanId ||
         plan.id == widget.currentSubscription.planId;
     final isFree = plan.monthlyPrice == 0 && !plan.isCustom;
@@ -1562,8 +1683,10 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                                 : plan.isCustom
                                     ? (plan.actionButtonText ?? 'Contact Us')
                                     : isFree
-                                        ? (plan.actionButtonText ?? 'Downgrade to Free')
-                                        : (plan.actionButtonText ?? 'Subscribe to ${plan.name}'),
+                                        ? (plan.actionButtonText ??
+                                            'Downgrade to Free')
+                                        : (plan.actionButtonText ??
+                                            'Subscribe to ${plan.name}'),
                             style: GoogleFonts.montserrat(
                               fontSize: 16,
                               fontWeight: FontWeight.w600,
@@ -1671,20 +1794,20 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                       color: Colors.grey[400],
                     ),
                     const SizedBox(height: 16),
-          Text(
+                    Text(
                       'No packages available',
-            style: GoogleFonts.montserrat(
-              fontSize: 16,
+                      style: GoogleFonts.montserrat(
+                        fontSize: 16,
                         color: Colors.grey[600],
-            ),
-          ),
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     Text(
                       'Please check back later or contact support',
                       style: GoogleFonts.montserrat(
                         fontSize: 14,
                         color: Colors.grey[500],
-              ),
+                      ),
                     ),
                   ],
                 ),
@@ -1722,8 +1845,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         side: BorderSide(
           color: package.isPopular ? Colors.orange[300]! : Colors.grey[300]!,
           width: package.isPopular ? 2 : 1,
-            ),
-          ),
+        ),
+      ),
       child: InkWell(
         onTap: isToppingUp || !_isBillingAvailable
             ? null
@@ -1750,13 +1873,13 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                         Icons.star,
                         size: 12,
                         color: Colors.orange[700],
-                  ),
+                      ),
                       const SizedBox(width: 4),
                       Text(
                         'Popular',
-                    style: GoogleFonts.montserrat(
+                        style: GoogleFonts.montserrat(
                           fontSize: 10,
-                      fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w600,
                           color: Colors.orange[700],
                         ),
                       ),
@@ -1774,11 +1897,11 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 style: GoogleFonts.montserrat(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                      color: Colors.black87,
-                    ),
+                  color: Colors.black87,
+                ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-          ),
+              ),
 
               if (package.description != null &&
                   package.description!.isNotEmpty) ...[
@@ -1797,78 +1920,78 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
               const Spacer(),
 
               // Price and Credits
-            Container(
+              Container(
                 padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
+                decoration: BoxDecoration(
                   color: Colors.green[50],
                   borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
+                ),
+                child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
                           '\$${package.usdPrice.toStringAsFixed(2)}',
-                        style: GoogleFonts.montserrat(
+                          style: GoogleFonts.montserrat(
                             fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.green[900],
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green[900],
+                          ),
                         ),
-                      ),
-                      Text(
+                        Text(
                           '${package.credits} Credits',
-                        style: GoogleFonts.montserrat(
+                          style: GoogleFonts.montserrat(
                             fontSize: 14,
                             fontWeight: FontWeight.w600,
-                          color: Colors.green[700],
+                            color: Colors.green[700],
+                          ),
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    ),
+                  ],
+                ),
               ),
-            ),
 
               const SizedBox(height: 12),
 
               // Purchase Button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton(
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
                   onPressed: isToppingUp || !_isBillingAvailable
                       ? null
                       : () => _purchaseTopUp(package),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green,
-                foregroundColor: Colors.white,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
                     elevation: 2,
-              ),
+                  ),
                   child: isToppingUp
-                  ? const SizedBox(
+                      ? const SizedBox(
                           height: 16,
                           width: 16,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
                             valueColor:
                                 AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : Text(
+                          ),
+                        )
+                      : Text(
                           'Purchase',
-                style: GoogleFonts.montserrat(
+                          style: GoogleFonts.montserrat(
                             fontSize: 14,
-                  fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
                 ),
               ),
-            ),
-          ),
-        ],
+            ],
           ),
         ),
       ),
@@ -1964,12 +2087,12 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
             _toppingUpPackageId = null;
           });
         }
-        
+
         final errorMsg = 'This package is not available for purchase.\n\n'
             'Product ID: $productId\n\n'
             'The package may not be synced with Google Play Console yet.\n\n'
             'Please contact support or try again later.';
-        
+
         if (mounted) {
           await showDialog(
             context: context,
@@ -2016,7 +2139,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
               ),
               if (package.description != null &&
                   package.description!.isNotEmpty) ...[
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
                 Text(package.description!),
               ],
               const SizedBox(height: 16),
@@ -2037,13 +2160,13 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Text('Credits:'),
-              Text(
+                  Text(
                     '${package.credits}',
                     style: GoogleFonts.montserrat(
                       fontWeight: FontWeight.bold,
                       color: Colors.green[700],
                     ),
-                ),
+                  ),
                 ],
               ),
             ],
@@ -2073,7 +2196,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       // Initiate purchase
       print('🔵 [TopUp] Initiating purchase...');
       try {
-      await _billingService.purchaseProduct(productDetails);
+        await _billingService.purchaseProduct(productDetails);
         print('✅ [TopUp] Purchase initiated successfully');
       } catch (e, stackTrace) {
         print('❌ [TopUp] Failed to initiate purchase: $e');
@@ -2086,13 +2209,49 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       PurchaseDetails? purchaseDetails;
       try {
         purchaseDetails = await _billingService.waitForPurchase(
-        productId,
-        timeout: const Duration(seconds: 120),
-      );
+          productId,
+          timeout: const Duration(seconds: 120),
+        );
         print('✅ [TopUp] Purchase details received');
       } catch (e, stackTrace) {
         print('❌ [TopUp] Error waiting for purchase: $e');
         print('❌ [TopUp] Stack trace: $stackTrace');
+
+        // Reset loading state immediately
+        if (mounted) {
+          setState(() {
+            _isToppingUp = false;
+            _toppingUpPackageId = null;
+          });
+        }
+
+        // Check if it's a cancellation
+        final errorString = e.toString().toLowerCase();
+        if (errorString.contains('cancelled') ||
+            errorString.contains('canceled') ||
+            errorString.contains('user_canceled')) {
+          print('ℹ️ [TopUp] User cancelled the purchase');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Purchase was cancelled. No charges were made.',
+                      ),
+                    ),
+                  ],
+                ),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+          return; // Exit early, state already reset
+        }
 
         String errorMessage = e.toString();
         if (errorMessage.contains('item_unavailable') ||
@@ -2110,8 +2269,15 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         throw Exception(errorMessage);
       }
 
+      // Check if purchase details is null (shouldn't happen after try-catch, but safety check)
       if (purchaseDetails == null) {
         print('❌ [TopUp] Purchase details is null - cancelled or timed out');
+        if (mounted) {
+          setState(() {
+            _isToppingUp = false;
+            _toppingUpPackageId = null;
+          });
+        }
         throw Exception('Purchase was cancelled or timed out');
       }
 
@@ -2121,6 +2287,39 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
             '❌ [TopUp] Purchase not successful. Status: ${purchaseDetails.status}');
         if (purchaseDetails.error != null) {
           print('❌ [TopUp] Error details: ${purchaseDetails.error}');
+        }
+
+        // Reset loading state immediately
+        if (mounted) {
+          setState(() {
+            _isToppingUp = false;
+            _toppingUpPackageId = null;
+          });
+        }
+
+        // Handle cancellation status
+        if (purchaseDetails.status == PurchaseStatus.canceled) {
+          print('ℹ️ [TopUp] Purchase was cancelled');
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Row(
+                  children: [
+                    const Icon(Icons.info_outline, color: Colors.white),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Purchase was cancelled. No charges were made.',
+                      ),
+                    ),
+                  ],
+                ),
+                backgroundColor: Colors.orange,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+          return; // Exit early, state already reset
         }
 
         String errorMsg = purchaseDetails.error?.message ?? 'Unknown error';
@@ -2153,8 +2352,8 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       Map<String, dynamic> result;
       try {
         result = await _topUpService.verifyGooglePlayTopUp(
-        purchaseToken: purchaseToken,
-        productId: productId,
+          purchaseToken: purchaseToken,
+          productId: productId,
           packageId: package.id,
         );
         print('✅ [TopUp] Backend verification response received');
@@ -2179,6 +2378,17 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           // Refresh balance and packages
           await _fetchBalance();
           await _fetchPackages();
+
+          // Refresh AuthProvider profile to update bottom bar balance
+          try {
+            final authProvider =
+                Provider.of<AuthProvider>(context, listen: false);
+            await authProvider.fetchProfile();
+            print('✅ [TopUp] AuthProvider profile refreshed');
+          } catch (e) {
+            print('⚠️ [TopUp] Failed to refresh AuthProvider: $e');
+          }
+
           await Future.delayed(const Duration(seconds: 1));
 
           if (mounted) {
@@ -2193,23 +2403,39 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       print('❌ [TopUp] Error type: ${e.runtimeType}');
       print('❌ [TopUp] Stack trace: $stackTrace');
 
-      String errorMessage = e.toString().replaceAll('Exception: ', '');
-      if (errorMessage.isEmpty) {
-        errorMessage = 'An unexpected error occurred. Please try again.';
-      }
-
+      // Ensure loading state is reset even if there was an error
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(errorMessage),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 5),
-          ),
-        );
+        setState(() {
+          _isToppingUp = false;
+          _toppingUpPackageId = null;
+        });
+
+        // Only show error snackbar if it's not a cancellation (already handled)
+        final errorString = e.toString().toLowerCase();
+        if (!errorString.contains('cancelled') &&
+            !errorString.contains('canceled')) {
+          String errorMessage = e.toString().replaceAll('Exception: ', '');
+          if (errorMessage.isEmpty) {
+            errorMessage = 'An unexpected error occurred. Please try again.';
+          }
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(errorMessage),
+              backgroundColor: Colors.red,
+              duration: const Duration(seconds: 5),
+            ),
+          );
+        }
       }
     } finally {
+      // Final safety check - ensure state is always reset
       print('🔵 [TopUp] Cleaning up - resetting loading state');
       if (mounted) {
+        if (_isToppingUp) {
+          print(
+              '⚠️ [TopUp] Loading state still true in finally block, resetting...');
+        }
         setState(() {
           _isToppingUp = false;
           _toppingUpPackageId = null;
@@ -2223,7 +2449,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     try {
       final plan = _plans.firstWhere((p) => p.id == planId);
       final planName = plan.name.toLowerCase();
-      
+
       if (planName.contains('free')) {
         return Icons.free_breakfast;
       } else if (planName.contains('standard') || planName.contains('basic')) {
@@ -2243,7 +2469,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
         return Icons.diamond;
       }
     }
-    
+
     return Icons.workspace_premium;
   }
 }

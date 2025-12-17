@@ -66,7 +66,7 @@ class _RealtimeTranslatorState extends State<RealtimeTranslator>
   // Services
   final ConfigService _configService = ConfigService.instance;
   final PermissionService _permissionService = PermissionService.instance;
-  // STT provider (Google by default). Can be injected for AssemblyAI.
+  // STT provider (Google by default)
   late final SttProvider _sttProvider;
 
   // Translation: Primary = Soniox real-time (saves ~2-3s), Fallback = Azure Translator API
