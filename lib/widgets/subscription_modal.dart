@@ -1726,54 +1726,6 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
           ),
           const SizedBox(height: 24),
 
-          // Current Balance
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: Colors.blue[50],
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: Colors.blue[200]!,
-                width: 1,
-              ),
-            ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Current Balance',
-                      style: GoogleFonts.montserrat(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      _isLoadingBalance
-                          ? 'Loading...'
-                          : '${_totalBalance.toStringAsFixed(0)} Credits',
-                      style: GoogleFonts.montserrat(
-                        fontSize: 24,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.blue[900],
-                      ),
-                    ),
-                  ],
-                ),
-                Icon(
-                  Icons.account_balance_wallet,
-                  size: 40,
-                  color: Colors.blue[700],
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 32),
-
           // Packages Grid
           if (_isLoadingPackages)
             const Center(
@@ -1821,7 +1773,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 crossAxisCount: 2,
                 crossAxisSpacing: 16,
                 mainAxisSpacing: 16,
-                childAspectRatio: 0.85,
+                childAspectRatio: 0.75, // Adjusted for better content fit
               ),
               itemCount: _packages.length,
               itemBuilder: (context, index) {
@@ -1838,160 +1790,254 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   }
 
   Widget _buildPackageCard(CreditPackage package, bool isToppingUp) {
-    return Card(
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-        side: BorderSide(
-          color: package.isPopular ? Colors.orange[300]! : Colors.grey[300]!,
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: package.isPopular
+            ? LinearGradient(
+                colors: [
+                  Colors.orange[50]!,
+                  Colors.orange[100]!,
+                ],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              )
+            : null,
+        color: package.isPopular ? null : Colors.white,
+        boxShadow: [
+          BoxShadow(
+            color: package.isPopular
+                ? Colors.orange.withOpacity(0.3)
+                : Colors.black.withOpacity(0.08),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+            spreadRadius: 0,
+          ),
+        ],
+        border: Border.all(
+          color: package.isPopular ? Colors.orange[300]! : Colors.grey[200]!,
           width: package.isPopular ? 2 : 1,
         ),
       ),
-      child: InkWell(
-        onTap: isToppingUp || !_isBillingAvailable
-            ? null
-            : () => _purchaseTopUp(package),
-        borderRadius: BorderRadius.circular(16),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Popular Badge
-              if (package.isPopular)
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: Colors.orange[100],
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.star,
-                        size: 12,
-                        color: Colors.orange[700],
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: isToppingUp || !_isBillingAvailable
+              ? null
+              : () => _purchaseTopUp(package),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Popular Badge
+                if (package.isPopular)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [
+                          Colors.orange[400]!,
+                          Colors.orange[600]!,
+                        ],
                       ),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Popular',
-                        style: GoogleFonts.montserrat(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.orange[700],
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.orange.withOpacity(0.3),
+                          blurRadius: 4,
+                          offset: const Offset(0, 2),
                         ),
-                      ),
-                    ],
-                  ),
-                )
-              else
-                const SizedBox(height: 20),
-
-              const Spacer(),
-
-              // Package Name
-              Text(
-                package.name,
-                style: GoogleFonts.montserrat(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-
-              if (package.description != null &&
-                  package.description!.isNotEmpty) ...[
-                const SizedBox(height: 4),
-                Text(
-                  package.description!,
-                  style: GoogleFonts.montserrat(
-                    fontSize: 12,
-                    color: Colors.grey[600],
-                  ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
-
-              const Spacer(),
-
-              // Price and Credits
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: Colors.green[50],
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      ],
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          '\$${package.usdPrice.toStringAsFixed(2)}',
-                          style: GoogleFonts.montserrat(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green[900],
-                          ),
+                        Icon(
+                          Icons.star_rounded,
+                          size: 14,
+                          color: Colors.white,
                         ),
+                        const SizedBox(width: 4),
                         Text(
-                          '${package.credits} Credits',
+                          'Popular',
                           style: GoogleFonts.montserrat(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: Colors.green[700],
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
                           ),
                         ),
                       ],
                     ),
-                  ],
-                ),
-              ),
+                  )
+                else
+                  const SizedBox(height: 4),
 
-              const SizedBox(height: 12),
+                const SizedBox(height: 12),
 
-              // Purchase Button
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: isToppingUp || !_isBillingAvailable
-                      ? null
-                      : () => _purchaseTopUp(package),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                // Package Name
+                Flexible(
+                  child: Text(
+                    package.name,
+                    style: GoogleFonts.montserrat(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black87,
+                      height: 1.2,
                     ),
-                    elevation: 2,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  child: isToppingUp
-                      ? const SizedBox(
-                          height: 16,
-                          width: 16,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor:
-                                AlwaysStoppedAnimation<Color>(Colors.white),
-                          ),
-                        )
-                      : Text(
-                          'Purchase',
-                          style: GoogleFonts.montserrat(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
                 ),
-              ),
-            ],
+
+                // Description
+                if (package.description != null &&
+                    package.description!.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Flexible(
+                    child: Text(
+                      package.description!,
+                      style: GoogleFonts.montserrat(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                        height: 1.3,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+
+                const Spacer(),
+
+                // Price and Credits Card
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      colors: [
+                        Colors.green[50]!,
+                        Colors.green[100]!,
+                      ],
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                    ),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Colors.green[200]!,
+                      width: 1,
+                    ),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Flexible(
+                            child: Text(
+                              '\$${package.usdPrice.toStringAsFixed(2)}',
+                              style: GoogleFonts.montserrat(
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green[900],
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Flexible(
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: Colors.green[700],
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                '${package.credits}',
+                                style: GoogleFonts.montserrat(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'Credits',
+                        style: GoogleFonts.montserrat(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.green[700],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 14),
+
+                // Purchase Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: isToppingUp || !_isBillingAvailable
+                        ? null
+                        : () => _purchaseTopUp(package),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: package.isPopular
+                          ? Colors.orange[600]
+                          : Colors.green[600],
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: package.isPopular ? 4 : 2,
+                      shadowColor: package.isPopular
+                          ? Colors.orange.withOpacity(0.4)
+                          : Colors.green.withOpacity(0.3),
+                    ),
+                    child: isToppingUp
+                        ? const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(
+                                Icons.shopping_cart_rounded,
+                                size: 18,
+                                color: Colors.white,
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Purchase',
+                                style: GoogleFonts.montserrat(
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),
