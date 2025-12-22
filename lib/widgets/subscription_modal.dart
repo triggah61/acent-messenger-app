@@ -88,13 +88,19 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     _topUpService = TopUpService(authService);
     _billingService = GooglePlayBillingService();
 
-    // Initialize billing service
-    _initializeBilling();
-
     // Fetch plans, packages, and balance from API
     _fetchPlans();
-    _fetchPackages();
+    _fetchPackages(); // Fetch initially without local pricing
     _fetchBalance();
+
+    // Initialize billing service and then re-fetch packages with local pricing
+    _initializeBilling().then((_) {
+      // Re-fetch packages after billing is initialized to enrich with local pricing
+      if (_isBillingAvailable) {
+        print('🔄 [Billing] Re-fetching packages with local pricing...');
+        _fetchPackages();
+      }
+    });
   }
 
   @override
@@ -156,7 +162,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     }
   }
 
-  /// Fetch credit packages from API
+  /// Fetch credit packages from API and enrich with local pricing
   Future<void> _fetchPackages() async {
     setState(() {
       _isLoadingPackages = true;
@@ -165,9 +171,103 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
     try {
       print('SubscriptionModal: Fetching credit packages...');
       final packagesData = await _topUpService.getTopUpPackages();
-      final packages =
+      List<CreditPackage> packages =
           packagesData.map((pkg) => CreditPackage.fromJson(pkg)).toList();
       print('SubscriptionModal: Received ${packages.length} packages');
+
+      // Enrich packages with local pricing from Google Play if billing is available
+      if (_isBillingAvailable && packages.isNotEmpty) {
+        try {
+          final productIds = packages
+              .where((pkg) => pkg.productId.isNotEmpty)
+              .map((pkg) => pkg.productId)
+              .toSet();
+
+          if (productIds.isNotEmpty) {
+            print(
+                'SubscriptionModal: Fetching local pricing for ${productIds.length} products...');
+            final productDetailsResponse =
+                await _billingService.getProductDetails(
+              productIds,
+              isSubscription: false,
+            );
+
+            // Create a map of productId -> ProductDetails for quick lookup
+            final productDetailsMap = {
+              for (var product in productDetailsResponse.productDetails)
+                product.id: product
+            };
+
+            // Update packages with local pricing
+            packages = packages.map((pkg) {
+              final productDetails = productDetailsMap[pkg.productId];
+              if (productDetails != null) {
+                // Extract currency code from price string (e.g., "£7.99" -> "GBP", "$4.99" -> "USD")
+                String? currencyCode;
+                String localPrice = productDetails.price;
+
+                print('🔵 [FetchPackages] Processing package: ${pkg.name}');
+                print('   - Product ID: ${pkg.productId}');
+                print('   - Google Play Price: $localPrice');
+
+                // Try to extract currency code from price string
+                if (localPrice.isNotEmpty) {
+                  // Google Play price format usually includes currency symbol
+                  // We can try to detect from the symbol
+                  if (localPrice.startsWith('£')) {
+                    currencyCode = 'GBP';
+                  } else if (localPrice.startsWith('€')) {
+                    currencyCode = 'EUR';
+                  } else if (localPrice.startsWith('¥')) {
+                    currencyCode = 'JPY';
+                  } else if (localPrice.startsWith('₹')) {
+                    currencyCode = 'INR';
+                  } else if (localPrice.startsWith('\$')) {
+                    // Could be USD, CAD, AUD, etc. - default to USD
+                    currencyCode = 'USD';
+                  }
+
+                  print('   - Detected Currency: $currencyCode');
+                  print('   - Local Price: $localPrice');
+                }
+
+                final enrichedPackage = CreditPackage(
+                  id: pkg.id,
+                  name: pkg.name,
+                  description: pkg.description,
+                  usdPrice: pkg.usdPrice,
+                  credits: pkg.credits,
+                  productId: pkg.productId,
+                  isPopular: pkg.isPopular,
+                  sortOrder: pkg.sortOrder,
+                  localPrice: localPrice.isNotEmpty ? localPrice : null,
+                  currencyCode: currencyCode,
+                );
+
+                print(
+                    '   - Enriched Package Display Price: ${enrichedPackage.getDisplayPrice()}');
+                print(
+                    '   - Final localPrice value: ${enrichedPackage.localPrice}');
+                print(
+                    '   - Final currencyCode value: ${enrichedPackage.currencyCode}');
+
+                return enrichedPackage;
+              }
+              print(
+                  '⚠️ [FetchPackages] No product details found for: ${pkg.productId}');
+              return pkg;
+            }).toList();
+
+            print(
+                'SubscriptionModal: Enriched ${packages.length} packages with local pricing');
+          }
+        } catch (e) {
+          print(
+              'SubscriptionModal: Error fetching local pricing (using USD fallback): $e');
+          // Continue with USD pricing if local pricing fails
+        }
+      }
+
       setState(() {
         _packages = packages;
         _isLoadingPackages = false;
@@ -1790,6 +1890,13 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
   }
 
   Widget _buildPackageCard(CreditPackage package, bool isToppingUp) {
+    // Debug: Log package pricing info
+    print('🔵 [PackageCard] Building card for: ${package.name}');
+    print('   - Local Price: ${package.localPrice}');
+    print('   - Currency Code: ${package.currencyCode}');
+    print('   - USD Price: ${package.usdPrice}');
+    print('   - Display Price: ${package.getDisplayPrice()}');
+
     return Container(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
@@ -1832,52 +1939,6 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                // Popular Badge
-                if (package.isPopular)
-                  Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: [
-                          Colors.orange[400]!,
-                          Colors.orange[600]!,
-                        ],
-                      ),
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.orange.withOpacity(0.3),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(
-                          Icons.star_rounded,
-                          size: 14,
-                          color: Colors.white,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          'Popular',
-                          style: GoogleFonts.montserrat(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                else
-                  const SizedBox(height: 4),
-
-                const SizedBox(height: 12),
-
                 // Package Name
                 Flexible(
                   child: Text(
@@ -1913,7 +1974,7 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
 
                 const Spacer(),
 
-                // Price and Credits Card
+                // Price and Credits Card - Separate Lines
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -1934,51 +1995,63 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      // Price on separate line with full decimal display
+                      Text(
+                        package.getDisplayPrice(),
+                        style: GoogleFonts.montserrat(
+                          fontSize: 20,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.green[900],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 8),
+                      // Credits on separate line
                       Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          Flexible(
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.green[700],
+                              borderRadius: BorderRadius.circular(8),
+                            ),
                             child: Text(
-                              '\$${package.usdPrice.toStringAsFixed(2)}',
+                              '${package.credits}',
                               style: GoogleFonts.montserrat(
-                                fontSize: 22,
+                                fontSize: 13,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.green[900],
+                                color: Colors.white,
                               ),
-                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          Flexible(
-                            child: Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: Colors.green[700],
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                '${package.credits}',
-                                style: GoogleFonts.montserrat(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Credits',
+                            style: GoogleFonts.montserrat(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w500,
+                              color: Colors.green[700],
                             ),
                           ),
                         ],
                       ),
-                      const SizedBox(height: 4),
-                      Text(
-                        'Credits',
-                        style: GoogleFonts.montserrat(
-                          fontSize: 11,
-                          fontWeight: FontWeight.w500,
-                          color: Colors.green[700],
+                      // Show USD fallback if local currency is different
+                      if (package.localPrice != null &&
+                          package.currencyCode != null &&
+                          package.currencyCode != 'USD') ...[
+                        const SizedBox(height: 4),
+                        Text(
+                          '≈ \$${package.usdPrice.toStringAsFixed(2)} USD',
+                          style: GoogleFonts.montserrat(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w400,
+                            color: Colors.grey[600],
+                            fontStyle: FontStyle.italic,
+                          ),
                         ),
-                      ),
+                      ],
                     ],
                   ),
                 ),
@@ -2166,6 +2239,13 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
       print('   - Price: ${productDetails.price}');
       print('   - Title: ${productDetails.title}');
 
+      // Get display price - prefer productDetails.price (local) over package price
+      final displayPrice = productDetails.price.isNotEmpty
+          ? productDetails.price
+          : package.getDisplayPrice();
+
+      print('🔵 [TopUp] Display price for confirmation: $displayPrice');
+
       // Show purchase confirmation
       print('🔵 [TopUp] Showing purchase confirmation dialog');
       final confirmPurchase = await showDialog<bool>(
@@ -2194,13 +2274,33 @@ class _SubscriptionModalState extends State<SubscriptionModal> {
                 children: [
                   Text('Price:'),
                   Text(
-                    '\$${package.usdPrice.toStringAsFixed(2)}',
+                    displayPrice,
                     style: GoogleFonts.montserrat(
                       fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
               ),
+              // Show USD reference if local currency is different
+              if (productDetails.price.isNotEmpty &&
+                  !productDetails.price.startsWith('\$')) ...[
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const SizedBox.shrink(),
+                    Text(
+                      '≈ \$${package.usdPrice.toStringAsFixed(2)} USD',
+                      style: GoogleFonts.montserrat(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w400,
+                        color: Colors.grey[600],
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
               const SizedBox(height: 8),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
